@@ -1,0 +1,3 @@
+<script lang="ts">let { label = '' }: { label?: string }=$props();</script>
+<header class="portal-header"><a href="/" class="brand"><span class="mark"><span></span><span></span><span></span></span><strong>StudioFlow</strong></a>{#if label}<span class="portal-label">{label}</span>{/if}</header>
+<style>.portal-header{height:68px;border-bottom:1px solid #232630;display:flex;align-items:center;justify-content:space-between;padding:0 max(22px,calc((100vw - 880px)/2));background:#111318}.brand{display:flex;gap:10px;align-items:center;font-size:14px}.mark{width:25px;height:25px}.portal-label{border:1px solid #30343e;border-radius:20px;color:#7d8797;padding:5px 9px;font-size:9px}</style>

@@ -1,0 +1,1 @@
+import{dt as e}from"../chunks/liYEefaB.js";import{n as t}from"../chunks/Bin8K3vy.js";var n=e({load:()=>r}),r=()=>t(307,`/dashboard`);export{n as universal};
