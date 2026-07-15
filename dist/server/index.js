@@ -13299,10 +13299,6 @@ function o(n2) {
     }));
   };
 }
-var s2 = caches.default;
-var c = t.bind(0, s2);
-var r22 = e.bind(0, s2);
-var e2 = o.bind(0, s2);
 var server = new Server(manifest);
 var app_path = `/${manifest.appPath}`;
 var immutable = `${app_path}/immutable/`;
@@ -13317,6 +13313,7 @@ var worker_default = {
    * @returns {Promise<Response>}
    */
   async fetch(req, env2, ctx) {
+    const defaultCache = globalThis.caches?.default;
     if (!origin) {
       origin = new URL(req.url).origin;
     }
@@ -13333,7 +13330,7 @@ var worker_default = {
     }
     await initialized;
     let pragma = req.headers.get("cache-control") || "";
-    let res = !pragma.includes("no-cache") && await r22(req);
+    let res = defaultCache && !pragma.includes("no-cache") ? await e(defaultCache, req) : void 0;
     if (res) return res;
     let { pathname, search } = new URL(req.url);
     try {
@@ -13365,7 +13362,7 @@ var worker_default = {
           context: ctx,
           // deprecated in favor of ctx
           // @ts-expect-error webworker types from worktop are not compatible with Cloudflare Workers types
-          caches,
+          caches: globalThis.caches,
           // @ts-expect-error the type is correct but ts is confused because platform.cf uses the type from index.ts while req.cf uses the type from index.d.ts
           cf: req.cf
         },
@@ -13378,7 +13375,7 @@ var worker_default = {
       });
     }
     pragma = res.headers.get("cache-control") || "";
-    return pragma && res.status < 400 ? c(req, res, ctx) : res;
+    return defaultCache && pragma && res.status < 400 ? t(defaultCache, req, res, ctx) : res;
   }
 };
 export {
