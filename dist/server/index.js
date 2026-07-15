@@ -5263,7 +5263,7 @@ var init_internal3 = __esm({
       service_worker_options: void 0,
       server_error_boundaries: false,
       templates: {
-        app: ({ head: head2, body, assets: assets2, nonce, env: env2 }) => '<!doctype html>\n<html lang="en">\n	<head>\n		<meta charset="utf-8" />\n		<meta name="viewport" content="width=device-width, initial-scale=1" />\n		<meta name="text-scale" content="scale" />\n		' + head2 + '\n	</head>\n	<body data-sveltekit-preload-data="hover">\n		<div style="display: contents">' + body + "</div>\n	</body>\n</html>\n",
+        app: ({ head: head2, body, assets: assets2, nonce, env }) => '<!doctype html>\n<html lang="en">\n	<head>\n		<meta charset="utf-8" />\n		<meta name="viewport" content="width=device-width, initial-scale=1" />\n		<meta name="text-scale" content="scale" />\n		' + head2 + '\n	</head>\n	<body data-sveltekit-preload-data="hover">\n		<div style="display: contents">' + body + "</div>\n	</body>\n</html>\n",
         error: error_template_default
       },
       version_hash: "g21vff"
@@ -12600,8 +12600,8 @@ var etag;
 var headers;
 function get_public_env(request) {
   const script = request.url.endsWith(".script.js");
-  const env2 = public_env;
-  payload ??= uneval(env2);
+  const env = public_env;
+  payload ??= uneval(env);
   etag ??= `W/${Date.now()}`;
   headers ??= new Headers({
     "content-type": "application/javascript; charset=utf-8",
@@ -13028,8 +13028,8 @@ function propagate_context(fn) {
     return fn(req, ...rest);
   };
 }
-function filter_env(env2, allowed, disallowed) {
-  return Object.fromEntries(Object.entries(env2).filter(([k]) => k.startsWith(allowed) && (disallowed === "" || !k.startsWith(disallowed))));
+function filter_env(env, allowed, disallowed) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith(allowed) && (disallowed === "" || !k.startsWith(disallowed))));
 }
 var init_promise;
 var current = null;
@@ -13057,10 +13057,10 @@ var Server = class {
   /**
   * @param {import('@sveltejs/kit').ServerInitOptions} opts
   */
-  async init({ env: env2, read }) {
+  async init({ env, read }) {
     const { env_public_prefix, env_private_prefix } = this.#options;
-    set_private_env(filter_env(env2, env_private_prefix, env_public_prefix));
-    set_public_env(filter_env(env2, env_public_prefix, env_private_prefix));
+    set_private_env(filter_env(env, env_private_prefix, env_public_prefix));
+    set_public_env(filter_env(env, env_public_prefix, env_private_prefix));
     if (read) {
       const wrapped_read = (file) => {
         const result = read(file);
@@ -13274,7 +13274,6 @@ var prerendered = /* @__PURE__ */ new Set([]);
 var base_path = "";
 
 // .svelte-kit/cloudflare/_worker.js
-import { env } from "cloudflare:workers";
 async function e(e3, t2) {
   let n2 = "string" != typeof t2 && "HEAD" === t2.method;
   n2 && (t2 = new Request(t2, { method: "GET" }));
@@ -13309,23 +13308,7 @@ var app_path = `/${manifest.appPath}`;
 var immutable = `${app_path}/immutable/`;
 var version_file = `${app_path}/version.json`;
 var origin;
-var initialized = server.init({
-  // @ts-expect-error env contains environment variables and bindings
-  env,
-  read: async (file) => {
-    const url = `${origin}/${file}`;
-    const response = await /** @type {{ ASSETS: { fetch: typeof fetch } }} */
-    env.ASSETS.fetch(
-      url
-    );
-    if (!response.ok) {
-      throw new Error(
-        `read(...) failed: could not fetch ${url} (${response.status} ${response.statusText})`
-      );
-    }
-    return response.body;
-  }
-});
+var initialized;
 var worker_default = {
   /**
    * @param {Request} req
@@ -13336,6 +13319,17 @@ var worker_default = {
   async fetch(req, env2, ctx) {
     if (!origin) {
       origin = new URL(req.url).origin;
+    }
+    if (!initialized) {
+      initialized = server.init({
+        env: env2,
+        read: async (file) => {
+          const url = `${origin}/${file}`;
+          const response = await env2.ASSETS.fetch(url);
+          if (!response.ok) throw new Error(`read(...) failed: could not fetch ${url}`);
+          return response.body;
+        }
+      });
     }
     await initialized;
     let pragma = req.headers.get("cache-control") || "";
