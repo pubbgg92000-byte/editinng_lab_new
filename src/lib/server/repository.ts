@@ -57,7 +57,7 @@ export async function updateSettings(database: AppDatabase, input: Partial<Studi
 	const timestamp = now();
 	await database.batch(Object.entries(input).map(([key, value]) => database.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at').bind(key, String(value ?? ''), timestamp)));
 	const settings = await getSettings(database);
-	await activity(database, 'admin', 'Settings updated', 'settings', 'studio', Object.keys(input).join(', '));
+	await activity(database, 'admin', 'Settings updated', 'settings', 'studio', 'Studio profile, messages and appearance updated');
 	await queueSheetSync(database, 'Settings', 'studio', settings);
 	return settings;
 }
@@ -168,6 +168,20 @@ export async function restoreEditor(database: AppDatabase, editorId: string) {
 	await activity(database, 'admin', 'Editor restored', 'editor', editorId, editor.name);
 	await queueSheetSync(database, 'Editors', editorId, editor);
 	return editor;
+}
+
+export async function permanentlyDeleteEditor(database: AppDatabase, editorId: string) {
+	const existing = await database.prepare('SELECT * FROM editors WHERE id = ? AND archived_at IS NOT NULL').bind(editorId).first<Row>();
+	if (!existing) return null;
+	const taskCount = Number((await database.prepare('SELECT COUNT(*) AS count FROM tasks WHERE editor_id = ?').bind(editorId).first<{ count: number }>())?.count || 0);
+	const timestamp = now();
+	await database.batch([
+		database.prepare('UPDATE tasks SET editor_id = NULL, updated_at = ? WHERE editor_id = ?').bind(timestamp, editorId),
+		database.prepare('DELETE FROM editors WHERE id = ? AND archived_at IS NOT NULL').bind(editorId)
+	]);
+	await activity(database, 'admin', 'Editor permanently deleted', 'editor', editorId, `${existing.name} · ${taskCount} task(s) changed to Unassigned`);
+	await queueSheetSync(database, 'Editors', editorId, { id: editorId }, 'delete');
+	return { id: editorId, name: String(existing.name), taskCount };
 }
 
 export async function regenerateEditorToken(database: AppDatabase, editorId: string) {

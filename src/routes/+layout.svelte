@@ -40,10 +40,12 @@
 		content="Manage customers, editing orders, editors, invoices and delivery in one focused workflow."
 	/>
 	<meta property="og:url" content="https://editing-lab-new.vercel.app" />
-	<meta property="og:image" content="https://editing-lab-new.vercel.app/anjana-creations-logo.png" />
-	<meta property="og:image:width" content="1536" />
-	<meta property="og:image:height" content="1024" />
-	<meta property="og:image:alt" content="Anjana Creations gold logo" />
+	<meta property="og:image" content="https://editing-lab-new.vercel.app/anjana-creations-logo-social-v3.png" />
+	<meta property="og:image:secure_url" content="https://editing-lab-new.vercel.app/anjana-creations-logo-social-v3.png" />
+	<meta property="og:image:type" content="image/png" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta property="og:image:alt" content="Anjana Creations gold logo on a deep navy background" />
 
 	<meta name="twitter:card" content="summary_large_image" />
 	<meta name="twitter:title" content="Anjana Creations — Editing studio workflow" />
@@ -51,7 +53,8 @@
 		name="twitter:description"
 		content="A lightweight workflow system for editing studios."
 	/>
-	<meta name="twitter:image" content="https://editing-lab-new.vercel.app/anjana-creations-logo.png" />
+	<meta name="twitter:image" content="https://editing-lab-new.vercel.app/anjana-creations-logo-social-v3.png" />
+	<meta name="twitter:image:alt" content="Anjana Creations gold logo on a deep navy background" />
 	<link rel="canonical" href="https://editing-lab-new.vercel.app" />
 </svelte:head>
 {@render children()}

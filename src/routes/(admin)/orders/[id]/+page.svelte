@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { ArrowLeft, Archive, Check, Edit3, ExternalLink, FileText, IndianRupee, Plus, RotateCcw, Star } from 'lucide-svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import PaymentModal from '$lib/components/PaymentModal.svelte';
@@ -123,6 +124,14 @@
 			busy = '';
 		}
 	}
+	onMount(() => {
+		const taskId = new URL(location.href).searchParams.get('task');
+		const task = order.tasks.find((item) => item.id === taskId);
+		if (task) {
+			showArchivedTasks = Boolean(task.archived);
+			openTask(task);
+		}
+	});
 </script>
 
 <svelte:head><title>{order.project} — Anjana Creations</title></svelte:head>
