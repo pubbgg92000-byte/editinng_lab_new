@@ -1,24 +1,20 @@
 import { json } from '@sveltejs/kit';
-import { appendSheetRow, logActivity } from '$lib/server/googleSheets';
 import { verifySession } from '$lib/server/auth';
-import type { Customer } from '$lib/types';
+import { readyDatabase } from '$lib/server/db';
+import { createCustomer, listCustomers } from '$lib/server/repository';
+import { flushSheetSync } from '$lib/server/googleSheets';
 
-export const POST = async ({ request, cookies }) => {
-	if (!await verifySession(cookies.get('studioflow_session'))) return json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+export const GET = async ({ cookies, platform }) => {
+	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
+	return json({ customers: await listCustomers(await readyDatabase(platform)) });
+};
+
+export const POST = async ({ request, cookies, platform }) => {
+	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const input = await request.json();
-	if (!String(input.name || '').trim() || !String(input.phone || '').trim()) return json({ ok: false, error: 'Customer name and phone number are required.' }, { status: 400 });
-	const suffix = `${Date.now()}`.slice(-5);
-	const customer: Customer = {
-		id: `CUST-${suffix}`,
-		name: String(input.name).trim(),
-		business: String(input.business || input.name).trim(),
-		phone: String(input.phone).trim(),
-		email: String(input.email || '').trim(),
-		projects: 0,
-		pending: 0,
-		token: `cust-${crypto.randomUUID().replaceAll('-', '').slice(0, 18)}`
-	};
-	const sync = await appendSheetRow('Customers', [customer.id, customer.name, customer.business, customer.phone, input.whatsapp || customer.phone, customer.email, input.address || '', input.gst || '', 0, 0, customer.token]);
-	await logActivity('Customer created', customer.id, customer.business);
+	if (!String(input.name || '').trim() || !String(input.phone || '').trim()) return json({ error: 'Customer name and phone number are required.' }, { status: 400 });
+	const database = await readyDatabase(platform);
+	const customer = await createCustomer(database, input);
+	const sync = await flushSheetSync(database);
 	return json({ ok: true, customer, sync }, { status: 201 });
 };

@@ -1,26 +1,231 @@
 <script lang="ts">
-	import { ArrowLeft, ExternalLink, MoreHorizontal, Check, Circle, Clock3, Plus, MessageCircle, FileText, IndianRupee, Paperclip } from 'lucide-svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte'; import { money } from '$lib/data';
-	let { data } = $props(); const order=data.order; let tab=$state('Overview'); let revision=$state(false);
-	const timeline=[['Received','12 Jul · 10:24','done'],['Assigned','12 Jul · 14:10','done'],['Editing','In progress','current'],['Review','Next',''],['Completed','—','']];
+	import { ArrowLeft, Archive, Check, Edit3, ExternalLink, FileText, IndianRupee, Plus, RotateCcw, Star } from 'lucide-svelte';
+	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
+	import PaymentModal from '$lib/components/PaymentModal.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import TaskModal from '$lib/components/TaskModal.svelte';
+	import { money } from '$lib/data';
+	import type { Editor, Order, Task } from '$lib/types';
+
+	let { data } = $props();
+	let order = $state<Order>(data.order);
+	let editors = $state<Editor[]>(data.editors);
+	let activities = $state(data.activity);
+	let taskModalOpen = $state(false);
+	let paymentModalOpen = $state(false);
+	let editingTask = $state<Task | null>(null);
+	let error = $state('');
+	let busy = $state('');
+	let showArchivedTasks = $state(false);
+
+	const activeTasks = $derived(order.tasks.filter((task) => !task.archived));
+	const archivedTasks = $derived(order.tasks.filter((task) => task.archived));
+	const visibleTasks = $derived(showArchivedTasks ? archivedTasks : activeTasks);
+	const assignedEditors = $derived(editors.filter((editor) => activeTasks.some((task) => task.editorId === editor.id)));
+	const paidPercent = $derived(order.price > 0 ? Math.min(100, Math.round(order.paid / order.price * 100)) : 0);
+	const reserveWhatsAppTab = () => {
+		const tab = window.open('about:blank', '_blank');
+		if (tab) tab.opener = null;
+		return tab;
+	};
+	const openWhatsAppTab = (tab: Window | null, url: string) => {
+		if (tab) tab.location.href = url;
+		else window.open(url, '_blank', 'noopener,noreferrer');
+	};
+
+	async function refresh() {
+		const response = await fetch(`/api/orders/${order.id}`);
+		if (!response.ok) return;
+		const result = await response.json();
+		order = result.order;
+		activities = result.activity ?? activities;
+	}
+
+	async function toggleImportant() {
+		busy = 'important';
+		error = '';
+		const response = await fetch(`/api/orders/${order.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ important: !order.important }) });
+		const result = await response.json();
+		busy = '';
+		if (!response.ok) { error = result.error || 'Unable to update priority.'; return; }
+		order = result.order;
+	}
+
+	function openTask(task: Task | null = null) {
+		editingTask = task;
+		taskModalOpen = true;
+	}
+
+	async function updateTask(task: Task, status: Task['status'], progress = task.progress) {
+		error = '';
+		busy = task.id;
+		const response = await fetch(`/api/tasks/${task.id}`, {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ status, progress })
+		});
+		const result = await response.json();
+		busy = '';
+		if (!response.ok) { error = result.error || 'Unable to update task.'; return; }
+		await refresh();
+	}
+
+	async function archiveTask(task: Task) {
+		if (!confirm(`Archive “${task.name}”? It will remain in Sheets and exports.`)) return;
+		busy = task.id;
+		const response = await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' });
+		busy = '';
+		if (!response.ok) { error = 'Unable to archive task.'; return; }
+		await refresh();
+	}
+
+	async function restoreTask(task: Task) {
+		busy = task.id;
+		const response = await fetch(`/api/tasks/${task.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'restore' }) });
+		busy = '';
+		if (!response.ok) { error = 'Unable to restore task.'; return; }
+		await refresh();
+	}
+
+	async function openEditorWhatsApp(editor: Editor) {
+		const whatsappTab = reserveWhatsAppTab();
+		error = '';
+		busy = editor.id;
+		try {
+			const response = await fetch(`/api/editors/${editor.id}/whatsapp`, {
+				method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: order.id })
+			});
+			const result = await response.json();
+			if (!response.ok) { whatsappTab?.close(); error = result.error || 'Unable to prepare WhatsApp message.'; return; }
+			openWhatsAppTab(whatsappTab, result.url);
+		} catch {
+			whatsappTab?.close();
+			error = 'Unable to prepare WhatsApp message.';
+		} finally {
+			busy = '';
+		}
+	}
+
+	async function openBill() {
+		const whatsappTab = reserveWhatsAppTab();
+		error = '';
+		busy = 'invoice';
+		try {
+			const response = await fetch(`/api/orders/${order.id}/invoice`, { method: 'POST' });
+			const result = await response.json();
+			if (!response.ok) { whatsappTab?.close(); error = result.error || 'Unable to prepare bill.'; return; }
+			openWhatsAppTab(whatsappTab, result.url);
+			await refresh();
+		} catch {
+			whatsappTab?.close();
+			error = 'Unable to prepare bill.';
+		} finally {
+			busy = '';
+		}
+	}
 </script>
-<div class="detail-top"><a href="/orders" class="back"><ArrowLeft size={16}/> Orders</a><div><button class="secondary"><MessageCircle size={14}/> WhatsApp</button><button class="primary">Mark ready</button><button class="icon-button"><MoreHorizontal size={17}/></button></div></div>
-<header class="order-heading"><div class="project-icon">PW</div><div><div class="title-line"><h1>{order.project}</h1><StatusBadge status={order.status}/></div><p>{order.id} · {order.customer}</p></div></header>
-<div class="tabs">{#each ['Overview','Files','Activity'] as item}<button class:active={tab===item} onclick={()=>tab=item}>{item}</button>{/each}</div>
-{#if tab==='Overview'}
-<div class="detail-grid"><div class="main-col">
-	<section class="card"><div class="section-head"><div><h2>Tasks</h2><p>{order.tasks.filter(t=>t.status==='Completed').length} of {order.tasks.length} completed</p></div><button class="secondary"><Plus size={13}/> Add task</button></div>
-		<div class="task-list">{#each order.tasks as task,index}<div class="task-row"><span class:complete={task.status==='Completed'} class:activeTask={task.status==='In progress'||task.status==='Ready for review'}>{#if task.status==='Completed'}<Check size={13}/>{:else}<span>{index+1}</span>{/if}</span><div class="task-name"><strong>{task.name}</strong><small>{task.assignee}</small></div><StatusBadge status={task.status}/><div class="task-progress"><div class="progress"><span style:width={task.progress+'%'}></span></div><small>{task.progress}%</small></div><span class="task-due">{task.due}</span><button class="dots"><MoreHorizontal size={15}/></button></div>{/each}</div>
-	</section>
-	<section class="card timeline-card"><div class="section-head"><div><h2>Timeline</h2><p>Customer-visible progress</p></div></div><div class="timeline">{#each timeline as step,i}<div class="timeline-step" class:done={step[2]==='done'} class:current={step[2]==='current'}><span>{#if step[2]==='done'}<Check size={12}/>{:else if step[2]==='current'}<Clock3 size={12}/>{:else}<Circle size={9}/>{/if}</span><div><strong>{step[0]}</strong><small>{step[1]}</small></div>{#if i<timeline.length-1}<i></i>{/if}</div>{/each}</div></section>
-	<section class="card activity-card"><div class="section-head"><div><h2>Recent activity</h2><p>Latest updates for this order</p></div></div><div class="activity"><div><span class="activity-icon purple"><Clock3 size={13}/></span><p><strong>Meera updated Colour correction to 70%</strong><small>Today, 11:42</small></p></div><div><span class="activity-icon"><Paperclip size={13}/></span><p><strong>Reference files were added</strong><small>Yesterday, 18:16</small></p></div><div><span class="activity-icon green"><Check size={13}/></span><p><strong>Culling was approved by admin</strong><small>14 Jul, 16:08</small></p></div></div></section>
-</div><aside class="side-col">
-	<section class="card info-card"><h2>Order details</h2><dl><div><dt>Customer</dt><dd>{order.customer}</dd></div><div><dt>Work type</dt><dd>{order.workType}</dd></div><div><dt>Files received</dt><dd>{order.files} files</dd></div><div><dt>Delivery date</dt><dd>{order.due}</dd></div><div><dt>Source files</dt><dd><a href={'https://'+order.fileLink}>Open folder <ExternalLink size={11}/></a></dd></div></dl></section>
-	<section class="card people-card"><h2>Assigned editors</h2>{#each [...new Set(order.tasks.filter(t=>t.assignee!=='Unassigned').map(t=>t.assignee))] as editor}<div class="person"><span>{editor.split(' ').map((n:string)=>n[0]).join('')}</span><div><strong>{editor}</strong><small>{order.tasks.find(t=>t.assignee===editor)?.name}</small></div></div>{/each}<button class="add-person"><Plus size={13}/> Assign editor</button></section>
-	<section class="card invoice-card"><div class="invoice-title"><span><FileText size={15}/></span><div><h2>Invoice</h2><small>INV-2026-0088</small></div><StatusBadge status={order.paid===order.price?'Paid':'Partially paid'}/></div><div class="amount"><small>Total</small><strong>{money(order.price)}</strong></div><div class="payment-bar"><span style:width={(order.paid/order.price*100)+'%'}></span></div><div class="paid-row"><span>Paid {money(order.paid)}</span><span>Balance {money(order.price-order.paid)}</span></div><button class="invoice-button"><IndianRupee size={13}/> Record payment</button></section>
-</aside></div>
-{:else if tab==='Files'}<div class="card tab-panel"><h2>Project files</h2><p>Source files, editor outputs and final delivery links live here.</p><a href={'https://'+order.fileLink} class="secondary">Open source folder <ExternalLink size={13}/></a></div>
-{:else}<div class="card tab-panel"><h2>Full activity log</h2><p>Every admin, editor, notification and payment update is recorded here and synchronized to Google Sheets.</p></div>{/if}
+
+<svelte:head><title>{order.project} — Anjana Creations</title></svelte:head>
+
+<div class="detail-top">
+	<a href="/orders" class="back"><ArrowLeft size={16}/> Orders</a>
+	<div class="actions">
+		<button class="secondary" onclick={() => paymentModalOpen = true}><IndianRupee size={14}/> Record payment</button>
+		<button class="primary" disabled={busy === 'invoice'} onclick={openBill}><WhatsAppIcon size={15}/> {busy === 'invoice' ? 'Preparing…' : 'WhatsApp bill'}</button>
+	</div>
+</div>
+
+<header class="order-heading">
+	<div class="project-icon">#{order.serial ?? '—'}</div>
+	<div>
+		<div class="title-line"><button aria-label={order.important ? 'Remove important mark' : 'Mark order important'} title={order.important ? 'Remove important mark' : 'Mark order important'} disabled={busy === 'important'} onclick={toggleImportant} style={`border:0;background:transparent;padding:2px;display:grid;place-items:center;color:${order.important ? '#ef4444' : 'var(--muted)'}`}><Star size={19} fill={order.important ? 'currentColor' : 'none'}/></button><h1>{order.project || 'Untitled project'}</h1><StatusBadge status={order.status}/></div>
+		<p>{order.customer} · {order.workType || 'Event not set'}</p>
+	</div>
+</header>
+
+{#if error}<div class="error">{error}</div>{/if}
+
+<div class="detail-grid">
+	<div class="main-col">
+		<section class="card">
+			<div class="section-head">
+				<div><h2>Assigned tasks</h2><p>{activeTasks.filter((task) => task.status === 'Completed').length} completed · {activeTasks.length} active</p></div>
+				<div class="section-actions">{#if archivedTasks.length}<button class:active={showArchivedTasks} class="secondary" onclick={() => (showArchivedTasks = !showArchivedTasks)}>{showArchivedTasks ? 'Active tasks' : `Archived (${archivedTasks.length})`}</button>{/if}{#if !showArchivedTasks}<button class="secondary" onclick={() => openTask()}><Plus size={13}/> Assign work</button>{/if}</div>
+			</div>
+			{#if visibleTasks.length}
+				<div class="task-list">
+					{#each visibleTasks as task}
+						<article class:archived-task={task.archived} class="task-row">
+							<div class="task-title"><strong>{task.name}</strong><small>{task.assignee} {task.due ? `· Due ${task.due}` : ''}</small></div>
+							<StatusBadge status={task.status}/>
+							<div class="task-progress"><div class="progress"><span style:width={`${task.progress}%`}></span></div><small>{task.progress}%</small></div>
+							<div class="task-actions">{#if task.archived}<button title="Restore task" disabled={busy === task.id} onclick={() => restoreTask(task)}><RotateCcw size={14}/></button>{:else}
+								<button title="Edit task" onclick={() => openTask(task)}><Edit3 size={14}/></button>
+								{#if task.status === 'Ready for review'}
+									<button class="approve" title="Approve" disabled={busy === task.id} onclick={() => updateTask(task, 'Completed', 100)}><Check size={14}/></button>
+									<button class="revision" title="Request revision" disabled={busy === task.id} onclick={() => updateTask(task, 'Revision required')}><RotateCcw size={14}/></button>
+								{/if}
+								<button title="Archive task" disabled={busy === task.id} onclick={() => archiveTask(task)}><Archive size={14}/></button>
+							{/if}</div>
+							{#if task.instructions}<p class="instructions">{task.instructions}</p>{/if}
+							{#if task.outputLink}<a class="output" href={task.outputLink} target="_blank" rel="noreferrer">Open editor output <ExternalLink size={12}/></a>{/if}
+						</article>
+					{/each}
+				</div>
+			{:else if !showArchivedTasks}
+				<div class="empty"><p>No work assigned yet.</p><button class="primary" onclick={() => openTask()}><Plus size={13}/> Create first task</button></div>
+			{:else}<div class="empty"><p>No archived tasks.</p></div>
+			{/if}
+		</section>
+
+		<section class="card activity-card">
+			<div class="section-head"><div><h2>Activity</h2><p>Order changes and billing history</p></div></div>
+			{#if activities.length}
+				<div class="activity-list">{#each activities as item}<div><strong>{item.action}</strong><span>{item.details}</span><small>{new Date(item.createdAt).toLocaleString()}</small></div>{/each}</div>
+			{:else}<div class="empty"><p>No activity recorded yet.</p></div>{/if}
+		</section>
+	</div>
+
+	<div class="side-col">
+		<section class="card info-card">
+			<h2>Order details</h2>
+			<dl>
+				<div><dt>Customer</dt><dd>{order.customer}</dd></div>
+				<div><dt>Mobile</dt><dd>{order.mobile || 'Not added'}</dd></div>
+				<div><dt>Received</dt><dd>{order.receiving || '—'}</dd></div>
+				<div><dt>Duration</dt><dd>{order.duration || '—'}</dd></div>
+				<div><dt>Source</dt><dd>{order.source || '—'}</dd></div>
+				<div><dt>Due</dt><dd>{order.due || 'Not set'}</dd></div>
+			</dl>
+			{#if order.remarks}<p class="remarks">{order.remarks}</p>{/if}
+		</section>
+
+		<section class="card people-card">
+			<h2>Assigned editors</h2>
+			{#if assignedEditors.length}
+				{#each assignedEditors as editor}
+					<div class="person"><span>{editor.initials}</span><div><strong>{editor.name}</strong><small>{activeTasks.filter((task) => task.editorId === editor.id).length} task(s)</small></div><button class="whatsapp-icon" disabled={busy === editor.id} onclick={() => openEditorWhatsApp(editor)} title="Open WhatsApp"><WhatsAppIcon size={15}/></button></div>
+				{/each}
+			{:else}<p class="muted">Assign a task to add an editor.</p>{/if}
+			<button class="add-person" onclick={() => openTask()}><Plus size={13}/> Assign editor or task</button>
+		</section>
+
+		<section class="card invoice-card">
+			<div class="invoice-title"><span><FileText size={15}/></span><div><h2>Billing</h2><small>Manual payments</small></div></div>
+			<div class="amount"><small>Total</small><strong>{order.priceSet === false ? 'Not set' : money(order.price)}</strong></div>
+			<div class="payment-bar"><span style:width={`${paidPercent}%`}></span></div>
+			<div class="paid-row"><span>Paid {order.advanceSet === false && !(order.payments || []).length ? 'Not recorded' : money(order.paid)}</span><span>Balance {order.priceSet === false ? 'Not set' : money(Math.max(0, order.price - order.paid))}</span></div>
+			<button class="invoice-button" onclick={() => paymentModalOpen = true}><IndianRupee size={13}/> Record payment</button>
+		</section>
+	</div>
+</div>
+
+<TaskModal bind:open={taskModalOpen} orderId={order.id} bind:editors task={editingTask} onsaved={refresh}/>
+<PaymentModal bind:open={paymentModalOpen} orderId={order.id} onsaved={refresh}/>
+
 <style>
-	.detail-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:30px}.detail-top>div{display:flex;gap:8px}.detail-top .secondary{display:flex;align-items:center;gap:7px}.back{display:flex;align-items:center;gap:8px;color:#8b95a6;font-size:12px}.icon-button,.dots{border:1px solid #30343e;background:#171a21;color:#838d9e;border-radius:8px;display:grid;place-items:center;padding:9px}.order-heading{display:flex;align-items:center;gap:14px;margin-bottom:25px}.project-icon{width:44px;height:44px;border:1px solid #473c73;background:#241f39;color:#a994ff;display:grid;place-items:center;border-radius:10px;font-size:12px;font-weight:700}.title-line{display:flex;align-items:center;gap:11px}.title-line h1{font-size:23px;margin:0;letter-spacing:-.03em}.order-heading p{font-size:11px;color:#707b8d;margin:5px 0 0}.tabs{border-bottom:1px solid #292c35;margin-bottom:20px;display:flex;gap:24px}.tabs button{border:0;background:transparent;color:#727d8f;font-size:11px;padding:0 2px 12px}.tabs button.active{color:#fff;border-bottom:2px solid var(--purple)}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.main-col,.side-col{display:flex;flex-direction:column;gap:16px}.section-head{display:flex;align-items:center;justify-content:space-between;padding:17px 18px;border-bottom:1px solid #292c35}.section-head h2,.info-card h2,.people-card h2{font-size:12px;margin:0;font-weight:650}.section-head p{font-size:10px;color:#697487;margin:4px 0 0}.section-head .secondary{display:flex;gap:6px;align-items:center;padding:7px 10px}.task-row{display:grid;grid-template-columns:27px minmax(130px,1fr) 120px 95px 50px 24px;gap:10px;align-items:center;padding:14px 17px;border-bottom:1px solid #252832}.task-row:last-child{border:0}.task-row>span:first-child{width:22px;height:22px;border:1px solid #343844;color:#6f798a;border-radius:50%;display:grid;place-items:center;font-size:9px}.task-row>span.complete{border-color:#22c55e45;background:#22c55e16;color:#4bd27d}.task-row>span.active-task{border-color:#7c5cfc70;background:#7c5cfc19;color:#a793ff}.task-name{display:flex;flex-direction:column;gap:4px}.task-name strong{font-size:11px;font-weight:580}.task-name small,.task-progress small,.task-due{font-size:9px;color:#707b8c}.task-progress{display:grid;grid-template-columns:1fr 22px;align-items:center;gap:6px}.task-due{text-align:right}.dots{border:0;background:transparent;padding:3px}.timeline-card{padding-bottom:20px}.timeline{display:grid;grid-template-columns:repeat(5,1fr);padding:23px 22px 8px}.timeline-step{position:relative;display:flex;gap:9px}.timeline-step>span{position:relative;z-index:1;width:22px;height:22px;border:1px solid #343844;background:#171a21;border-radius:50%;color:#576173;display:grid;place-items:center}.timeline-step.done>span{border-color:#22c55e55;background:#18271f;color:#58d185}.timeline-step.current>span{border-color:#7c5cfc75;background:#241f39;color:#a992ff}.timeline-step>div{display:flex;flex-direction:column;gap:4px}.timeline-step strong{font-size:10px;font-weight:580}.timeline-step small{font-size:8px;color:#626d7e}.timeline-step i{position:absolute;top:10px;left:22px;right:0;height:1px;background:#30333c}.activity{padding:5px 18px 12px}.activity>div{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid #242730}.activity>div:last-child{border:0}.activity-icon{width:28px;height:28px;border-radius:7px;background:#252932;color:#7d8797;display:grid;place-items:center}.activity-icon.purple{background:#261f3b;color:#a58dff}.activity-icon.green{background:#182920;color:#49cc7a}.activity p{margin:0;display:flex;flex-direction:column;gap:3px}.activity strong{font-size:10px;font-weight:560}.activity small{font-size:9px;color:#667183}.info-card,.people-card,.invoice-card{padding:17px}.info-card h2,.people-card h2{margin-bottom:15px}.info-card dl{margin:0}.info-card dl div{display:flex;justify-content:space-between;gap:15px;padding:9px 0;border-bottom:1px solid #272a33}.info-card dl div:last-child{border:0}.info-card dt{color:#727d8e;font-size:10px}.info-card dd{margin:0;text-align:right;font-size:10px;color:#cbd1da}.info-card dd a{color:#9d8bfa;display:flex;align-items:center;gap:4px}.person{display:flex;align-items:center;gap:9px;margin:11px 0}.person>span{width:29px;height:29px;border-radius:50%;background:#252137;color:#b2a2f2;display:grid;place-items:center;font-size:9px;font-weight:700}.person div{display:flex;flex-direction:column;gap:3px}.person strong{font-size:10px;font-weight:580}.person small{font-size:9px;color:#6e798a}.add-person{border:0;background:transparent;color:#9987f4;font-size:10px;display:flex;gap:6px;padding:8px 0 0}.invoice-title{display:flex;align-items:center;gap:9px}.invoice-title>span{width:31px;height:31px;border-radius:7px;background:#252138;color:#a995ff;display:grid;place-items:center}.invoice-title>div{display:flex;flex-direction:column;gap:2px}.invoice-title h2{font-size:11px;margin:0}.invoice-title small{font-size:8px;color:#697486}.invoice-title .badge{margin-left:auto}.amount{display:flex;justify-content:space-between;align-items:end;margin:21px 0 12px}.amount small{color:#717c8d;font-size:10px}.amount strong{font-size:18px}.payment-bar{height:5px;background:#2c3038;border-radius:5px;overflow:hidden}.payment-bar span{height:100%;display:block;background:#22c55e}.paid-row{display:flex;justify-content:space-between;color:#697486;font-size:8px;margin-top:7px}.invoice-button{width:100%;margin-top:16px;border:1px solid #37314f;background:#211d30;color:#b7a7fa;border-radius:7px;padding:8px;display:flex;justify-content:center;align-items:center;gap:6px;font-size:10px}.tab-panel{padding:30px}.tab-panel h2{font-size:14px}.tab-panel p{color:#7d8798;font-size:11px;margin-bottom:20px}.tab-panel .secondary{display:inline-flex;align-items:center;gap:7px}@media(max-width:1050px){.detail-grid{grid-template-columns:1fr}.side-col{display:grid;grid-template-columns:repeat(3,1fr);align-items:start}}@media(max-width:760px){.detail-top .secondary{display:none}.task-row{grid-template-columns:27px 1fr auto}.task-progress,.task-due,.task-row>.badge{display:none}.timeline{grid-template-columns:1fr;gap:12px}.timeline-step i{top:22px;left:10px;bottom:-12px;width:1px;height:auto}.side-col{grid-template-columns:1fr}.detail-top{margin-bottom:24px}}
+	:global(html){--border:var(--line);--surface-2:var(--theme-soft);--accent:var(--purple)}
+	.detail-top,.actions,.title-line,.section-head,.section-actions,.person,.invoice-title,.amount,.paid-row{display:flex;align-items:center}.detail-top,.section-head,.amount,.paid-row{justify-content:space-between}.detail-top{margin-bottom:28px}.actions,.section-actions{gap:8px}.actions button,.section-head button,.invoice-button{display:flex;align-items:center;gap:7px}.section-actions .active{border-color:var(--purple);color:var(--purple)}.back{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}.order-heading{display:flex;align-items:center;gap:14px;margin-bottom:22px}.project-icon{min-width:48px;height:44px;padding:0 10px;border:1px solid var(--border);background:var(--surface-2);color:var(--accent);display:grid;place-items:center;border-radius:12px;font-size:11px;font-weight:700}.title-line{gap:10px}.title-line h1{font-size:24px;margin:0}.order-heading p{font-size:11px;color:var(--muted);margin:5px 0 0}.error{border:1px solid #ef444455;background:#ef444414;color:#ef7777;border-radius:10px;padding:11px 14px;font-size:11px;margin-bottom:16px}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px}.main-col,.side-col{display:flex;flex-direction:column;gap:16px}.section-head{padding:17px 18px;border-bottom:1px solid var(--border)}h2{font-size:12px;margin:0}.section-head p{font-size:10px;color:var(--muted);margin:4px 0 0}.task-row{display:grid;grid-template-columns:minmax(180px,1fr) auto 120px auto;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border)}.task-row:last-child{border-bottom:0}.archived-task{color:var(--muted);text-decoration:line-through;background:color-mix(in srgb,var(--card) 80%,var(--muted) 4%)}.archived-task .task-actions{text-decoration:none}.task-title{display:flex;flex-direction:column;gap:4px}.task-title strong{font-size:11px}.task-title small,.task-progress small{font-size:9px;color:var(--muted)}.task-progress{display:grid;grid-template-columns:1fr 26px;gap:7px;align-items:center}.task-actions{display:flex;gap:4px}.task-actions button,.person button{border:1px solid var(--border);background:var(--surface-2);color:var(--muted);border-radius:7px;padding:6px;display:grid;place-items:center}.task-actions .approve{color:#36c778}.task-actions .revision{color:#f0a14a}.instructions,.output{grid-column:1/-1;margin:0;font-size:10px}.instructions{color:var(--muted);line-height:1.6}.output{color:var(--accent);display:flex;align-items:center;gap:5px}.empty{padding:28px;text-align:center;color:var(--muted);font-size:11px}.activity-list{padding:4px 18px 12px}.activity-list>div{display:grid;grid-template-columns:1fr auto;gap:3px 12px;padding:11px 0;border-bottom:1px solid var(--border)}.activity-list>div:last-child{border:0}.activity-list strong{font-size:10px}.activity-list span,.activity-list small{font-size:9px;color:var(--muted)}.activity-list small{grid-row:1;grid-column:2}.info-card,.people-card,.invoice-card{padding:18px}.info-card h2,.people-card h2{margin-bottom:14px}.info-card dl{margin:0}.info-card dl div{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:10px}.info-card dt{color:var(--muted)}.info-card dd{margin:0;text-align:right}.remarks,.muted{font-size:10px;color:var(--muted);line-height:1.6}.remarks{padding-top:12px}.person{gap:9px;margin:11px 0}.person>span,.invoice-title>span{width:31px;height:31px;border-radius:9px;background:var(--surface-2);color:var(--accent);display:grid;place-items:center;font-size:9px;font-weight:700}.person>div{display:flex;flex-direction:column;gap:3px;flex:1}.person strong{font-size:10px}.person small,.invoice-title small{font-size:9px;color:var(--muted)}.add-person{border:0;background:transparent;color:var(--accent);font-size:10px;display:flex;gap:6px;padding:8px 0 0}.invoice-title{gap:9px}.invoice-title>div{display:flex;flex-direction:column;gap:2px}.amount{margin:20px 0 10px}.amount small{color:var(--muted);font-size:10px}.amount strong{font-size:18px}.payment-bar{height:5px;background:var(--surface-2);border-radius:5px;overflow:hidden}.payment-bar span{height:100%;display:block;background:#22c55e}.paid-row{color:var(--muted);font-size:8px;margin-top:7px}.invoice-button{width:100%;justify-content:center;margin-top:16px;border:1px solid var(--border);background:var(--surface-2);color:var(--accent);border-radius:8px;padding:9px;font-size:10px}
+	@media(max-width:1050px){.detail-grid{grid-template-columns:1fr}.side-col{display:grid;grid-template-columns:repeat(3,1fr);align-items:start}}
+	@media(max-width:760px){.detail-top{align-items:flex-start;gap:14px}.actions{flex-direction:column;align-items:stretch}.task-row{grid-template-columns:1fr auto}.task-progress{grid-column:1}.task-actions{grid-column:2;grid-row:1/3}.side-col{grid-template-columns:1fr}}
 </style>

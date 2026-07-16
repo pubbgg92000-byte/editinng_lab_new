@@ -1,29 +1,122 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import { Sheet, MessageCircle, HardDrive, Check, ExternalLink, TableProperties } from 'lucide-svelte';
+	import Modal from '$lib/components/Modal.svelte';
+	import { themePalettes, applyTheme } from '$lib/theme';
+	import { Sheet, Check, ChevronDown, Download, RefreshCw, UploadCloud, Pencil, MessageSquareText } from 'lucide-svelte';
+	import type { StudioSettings, ThemePalette } from '$lib/types';
+
+	let { data } = $props();
+	let settings = $state<StudioSettings>({ ...data.settings });
+	let saving = $state(false);
+	let message = $state('');
+	let syncPending = $state(data.sync.pending);
+	let syncError = $state(data.sync.lastError || '');
+	let themesOpen = $state(false);
+	let templateModalOpen = $state(false);
+	let editingTemplate = $state<'assignmentTemplate' | 'invoiceTemplate'>('assignmentTemplate');
+	let templateDraft = $state('');
+	let templateSaving = $state(false);
+	let runningAction = $state<'sync' | 'import' | null>(null);
+
+	function editTemplate(type: 'assignmentTemplate' | 'invoiceTemplate') {
+		editingTemplate = type;
+		templateDraft = settings[type];
+		templateModalOpen = true;
+	}
+
+	async function saveTemplate() {
+		templateSaving = true;
+		const response = await fetch('/api/settings', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [editingTemplate]: templateDraft }) });
+		const result = await response.json();
+		templateSaving = false;
+		if (!response.ok) { message = result.error || 'Unable to save template.'; return; }
+		settings[editingTemplate] = templateDraft;
+		message = 'WhatsApp template saved.';
+		templateModalOpen = false;
+	}
+
+	function previewTheme(palette: ThemePalette) {
+		const mode = themePalettes.find((theme) => theme.id === palette)?.mode ?? 'light';
+		settings.themePalette = palette;
+		settings.themeDefaultMode = mode;
+		applyTheme({ palette, mode });
+	}
+
+	async function save() {
+		saving = true;
+		message = '';
+		const response = await fetch('/api/settings', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) });
+		const result = await response.json();
+		message = response.ok ? 'Settings and studio theme saved.' : result.error || 'Unable to save settings.';
+		saving = false;
+	}
+
+	async function run(action: 'sync' | 'import') {
+		if (runningAction) return;
+		runningAction = action;
+		message = action === 'sync' ? 'Retrying Google Sheets sync...' : 'Importing historical orders...';
+		try {
+			const response = await fetch(`/api/sheets/${action}`, { method: 'POST' });
+			const result = await response.json();
+			if (!response.ok) message = result.error || 'Action failed.';
+			else if (action === 'import') message = `Imported ${result.imported} rows; skipped ${result.skipped}.`;
+			else if (result.error) message = `Google Sheets sync failed: ${result.error}`;
+			else message = result.configured ? `Synced ${result.processed}; ${result.failed} failed. Orders summary: ${result.orders ?? 0} rows.` : 'Add Google service-account credentials to enable sync.';
+			const status = await fetch('/api/sheets/sync').then((statusResponse) => statusResponse.json());
+			syncPending = status.pending || 0;
+			syncError = status.lastError || result.error || '';
+		} catch {
+			message = action === 'sync' ? 'Unable to retry Google Sheets sync.' : 'Unable to import historical orders.';
+		} finally {
+			runningAction = null;
+		}
+	}
 </script>
 
-<PageHeader eyebrow="Studio and integrations" title="Settings" />
+<PageHeader eyebrow="Studio, theme and integrations" title="Settings" />
 
 <div class="settings-grid">
 	<section class="card settings-card">
-		<h2>Studio profile</h2><p>Used on invoices, portals and outgoing messages.</p>
+		<h2>Studio profile</h2><p>Used in WhatsApp bills, portals and assignment messages.</p>
 		<div class="form-grid">
-			<div class="field"><label for="studio-name">Studio name</label><input id="studio-name" value="Arvind Studio"/></div>
-			<div class="field"><label for="studio-whatsapp">WhatsApp number</label><input id="studio-whatsapp" value="+91 98765 00000"/></div>
-			<div class="field"><label for="studio-email">Email</label><input id="studio-email" value="hello@arvindstudio.in"/></div>
-			<div class="field"><label for="studio-gst">GSTIN</label><input id="studio-gst" placeholder="Add GST number"/></div>
+			<div class="field"><label for="studio-name">Studio name</label><input id="studio-name" bind:value={settings.studioName}/></div>
+			<div class="field"><label for="studio-whatsapp">WhatsApp number</label><input id="studio-whatsapp" bind:value={settings.phone}/></div>
+			<div class="field"><label for="studio-email">Email</label><input id="studio-email" bind:value={settings.email}/></div>
+			<div class="field"><label for="studio-gst">GSTIN</label><input id="studio-gst" bind:value={settings.gstin}/></div>
 		</div>
-		<button class="primary">Save changes</button>
+		<div class="field full"><label for="studio-address">Address</label><textarea id="studio-address" bind:value={settings.address}></textarea></div>
+		<div class="field full"><label for="payment-note">Payment note</label><textarea id="payment-note" bind:value={settings.paymentNote}></textarea></div>
+		<div class="field full"><label for="invoice-footer">Invoice footer</label><input id="invoice-footer" bind:value={settings.invoiceFooter}/></div>
 	</section>
-	<section class="card integrations">
-		<h2>Integrations</h2><p>Connect the services StudioFlow uses.</p>
-		<div><span class="integration-icon green"><Sheet size={17}/></span><p><strong>Google Sheets</strong><small>StudioFlow Master Sheet</small></p><a class="view-data" href="/settings/sheets"><TableProperties size={11}/> View data</a></div>
-		<div><span class="integration-icon"><MessageCircle size={17}/></span><p><strong>WhatsApp Cloud API</strong><small>7 automatic message types</small></p><span class="connected"><Check size={11}/> Connected</span></div>
-		<div><span class="integration-icon gray"><HardDrive size={17}/></span><p><strong>Cloudflare R2</strong><small>Optional file storage</small></p><button>Connect <ExternalLink size={10}/></button></div>
+
+	<section class="card sync-card">
+		<h2>Google Sheets</h2><p>Neon is the source of truth. Changes are mirrored to your workbook.</p>
+		<div class="sync-status"><Sheet size={17}/><div><strong>{syncPending ? `${syncPending} pending changes` : 'Sync queue clear'}</strong><small>Orders plus supporting tabs</small></div></div>
+		{#if syncError}<div class="sync-error"><strong>Last Google Sheets error</strong><span>{syncError}</span></div>{/if}
+		<button class="secondary sheet-action retry-action" disabled={runningAction !== null} aria-busy={runningAction === 'sync'} onclick={() => run('sync')}><RefreshCw class={runningAction === 'sync' ? 'loading' : ''} size={13}/>{runningAction === 'sync' ? 'Retrying sync...' : 'Retry sync'}</button>
+		<button class="secondary sheet-action import-action" disabled={runningAction !== null} aria-busy={runningAction === 'import'} onclick={() => run('import')}><UploadCloud class={runningAction === 'import' ? 'loading-upload' : ''} size={13}/>{runningAction === 'import' ? 'Importing orders...' : 'Import historical Orders'}</button>
+		<a class="secondary export" href="/api/export"><Download size={13}/> Download workbook</a>
+	</section>
+
+	<section class="card template-card">
+		<h2>WhatsApp templates</h2><p>Preview your saved messages here. Use the pencil button to edit each template in a focused popup.</p>
+		<div class="template-grid">
+			<article class="template-preview"><div class="template-title"><span><MessageSquareText size={16}/></span><div><strong>Editor assignment</strong><small>Work details and private editor portal</small></div><button onclick={() => editTemplate('assignmentTemplate')} aria-label="Edit editor assignment template"><Pencil size={14}/></button></div><pre>{settings.assignmentTemplate}</pre></article>
+			<article class="template-preview"><div class="template-title"><span><MessageSquareText size={16}/></span><div><strong>Customer bill</strong><small>Invoice and payment summary</small></div><button onclick={() => editTemplate('invoiceTemplate')} aria-label="Edit customer bill template"><Pencil size={14}/></button></div><pre>{settings.invoiceTemplate}</pre></article>
+		</div>
+	</section>
+
+	<section class="card theme-card">
+		<button class="theme-heading" aria-expanded={themesOpen} onclick={() => (themesOpen = !themesOpen)}><div><h2>Studio theme</h2><p>Choose one fixed theme. The first five are light themes and the final two are dark themes.</p></div><ChevronDown class={themesOpen ? 'open' : ''} size={18}/></button>
+		{#if themesOpen}<div class="palette-grid">{#each themePalettes as palette}<button class:selected={settings.themePalette === palette.id} class="palette" onclick={() => previewTheme(palette.id)}><span>{#each palette.colors as color}<i style:background={color}></i>{/each}</span><div class="palette-title"><strong>{palette.name}</strong><small>{palette.mode}</small></div>{#if settings.themePalette === palette.id}<Check size={13}/>{/if}</button>{/each}</div>{/if}
 	</section>
 </div>
 
-<style>
-	.settings-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}.settings-card,.integrations{padding:21px}.settings-card h2,.integrations h2{font-size:13px;margin:0}.settings-card>p,.integrations>p{color:#707b8d;font-size:10px;margin:5px 0 22px}.settings-card .primary{margin-top:22px}.integrations>div{display:flex;align-items:center;gap:10px;border-top:1px solid #292c35;padding:15px 0}.integration-icon{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;background:#29213d;color:#a68eff}.integration-icon.green{background:#192b22;color:#47d07b}.integration-icon.gray{background:#252932;color:#8993a2}.integrations p{margin:0;display:flex;flex-direction:column;gap:3px}.integrations strong{font-size:10px}.integrations small{font-size:9px;color:#687385}.connected,.integrations button,.view-data{margin-left:auto;border:0;background:transparent;color:#5ed289;font-size:8px;display:flex;gap:4px;align-items:center}.integrations button{color:#9786ed}.view-data{color:#ad9afa;border:1px solid #40365e;border-radius:6px;padding:6px 8px;background:#211d30}@media(max-width:850px){.settings-grid{grid-template-columns:1fr}}
-</style>
+<Modal title={editingTemplate === 'assignmentTemplate' ? 'Edit editor assignment template' : 'Edit customer bill template'} bind:open={templateModalOpen} wide>
+	<div class="template-editor"><p>Keep placeholder names inside double braces. Messages open in WhatsApp for review before sending.</p><textarea bind:value={templateDraft}></textarea><small>{editingTemplate === 'assignmentTemplate' ? 'Available: editor_name, studio_name, project, customer, task_list, portal_link' : 'Available: studio_name, studio_address, studio_phone_line, gstin_line, invoice_number, customer, project, event, delivery_date, total, paid, balance, payment_note, invoice_footer_line'}</small></div>
+	{#snippet footer()}<button class="secondary" onclick={() => templateModalOpen = false}>Cancel</button><button class="primary" disabled={templateSaving} onclick={saveTemplate}>{templateSaving ? 'Saving...' : 'Save template'}</button>{/snippet}
+</Modal>
+
+<div class="save-bar"><span>{message}</span><button class="primary" disabled={saving} onclick={save}>{saving ? 'Saving...' : 'Save settings'}</button></div>
+
+<style>.settings-grid{display:grid;grid-template-columns:1.45fr 1fr;gap:18px}.settings-card,.sync-card,.theme-card,.template-card{padding:24px}.settings-card h2,.sync-card h2,.theme-card h2,.template-card h2{font-size:14px;margin:0}.settings-card>p,.sync-card>p,.theme-heading p,.template-card>p{color:var(--muted);font-size:10px;margin:6px 0 22px}.full{margin-top:18px}.sync-card{display:flex;flex-direction:column;gap:10px}.sync-card>p{margin-bottom:7px}.sync-status{display:flex;align-items:center;gap:11px;border:1px solid var(--line);border-radius:12px;padding:13px;color:var(--purple);transition:border-color .2s ease,transform .2s ease,background .2s ease}.sync-status:hover{border-color:color-mix(in srgb,var(--purple) 55%,var(--line));background:var(--theme-soft);transform:translateY(-1px)}.sync-status :global(svg){transition:transform .22s ease}.sync-status:hover :global(svg){transform:scale(1.12) rotate(-4deg)}.sync-status div{display:flex;flex-direction:column;gap:3px}.sync-status strong{font-size:11px}.sync-status small{font-size:9px;color:var(--muted)}.sync-error{display:flex;flex-direction:column;gap:5px;border:1px solid #ef44444d;border-radius:12px;background:#ef444410;color:#ef7777;padding:11px 12px}.sync-error strong{font-size:10px}.sync-error span{font:9px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;white-space:pre-wrap}.sync-card .secondary,.export{display:flex;align-items:center;justify-content:center;gap:7px;transition:border-color .2s ease,background .2s ease,color .2s ease,transform .15s ease,box-shadow .2s ease}.sync-card .secondary:not(:disabled):hover,.export:hover{border-color:var(--purple);color:var(--purple);background:var(--theme-soft);box-shadow:0 8px 22px color-mix(in srgb,var(--purple) 12%,transparent);transform:translateY(-1px)}.sync-card .secondary:not(:disabled):active,.export:active{transform:translateY(0) scale(.985)}.sync-card .secondary :global(svg),.export :global(svg){transition:transform .2s ease,color .2s ease}.sync-card .secondary:not(:disabled):hover :global(svg),.export:hover :global(svg){transform:scale(1.14)}.sync-card .secondary:disabled{cursor:wait;opacity:.7}.sync-card :global(svg.loading){animation:sync-spin .75s linear infinite}.sync-card :global(svg.loading-upload){animation:upload-pulse .75s ease-in-out infinite alternate}@keyframes sync-spin{to{transform:rotate(360deg)}}@keyframes upload-pulse{to{transform:translateY(-3px) scale(1.08)}}.template-card,.theme-card{grid-column:1/-1}.template-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.template-input{min-height:280px;font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.template-grid small{display:block;margin-top:7px;color:var(--muted);font-size:8px;line-height:1.5}.theme-heading{width:100%;display:flex;justify-content:space-between;align-items:start;border:0;background:transparent;color:inherit;text-align:left;padding:0}.theme-heading p{margin-bottom:0}.theme-heading :global(svg){color:var(--muted);transition:transform .2s}.theme-heading :global(svg.open){transform:rotate(180deg)}.palette-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:22px}.palette{position:relative;border:1px solid var(--line);border-radius:13px;background:var(--card);color:inherit;text-align:left;padding:10px}.palette.selected{border-color:var(--purple);box-shadow:0 0 0 3px color-mix(in srgb,var(--purple) 14%,transparent)}.palette>span{display:grid;grid-template-columns:repeat(4,1fr);overflow:hidden;height:44px;border-radius:8px}.palette i{display:block}.palette-title{display:flex;align-items:center;justify-content:space-between;margin-top:9px}.palette strong{font-size:10px}.palette small{color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.08em}.save-bar{position:sticky;bottom:18px;margin-top:18px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(16px);padding:11px 13px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 18px 50px #0002}.save-bar span{font-size:10px;color:var(--muted)}@media(max-width:900px){.settings-grid{grid-template-columns:1fr}.template-card,.theme-card{grid-column:auto}.palette-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){.template-grid{grid-template-columns:1fr}}@media(max-width:560px){.palette-grid{grid-template-columns:1fr}}</style>

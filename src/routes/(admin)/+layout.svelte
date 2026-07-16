@@ -1,2 +1,2 @@
-<script lang="ts">import AppShell from '$lib/components/AppShell.svelte'; let { children } = $props();</script>
-<AppShell>{@render children()}</AppShell>
+<script lang="ts">import AppShell from '$lib/components/AppShell.svelte'; import { customerStore, editorStore } from '$lib/stores/app'; let { children, data } = $props(); $effect(() => { customerStore.set(data.customers); editorStore.set(data.editors); });</script>
+<AppShell settings={data.settings} customers={data.customers} editors={data.editors} orders={data.orders} notifications={data.notifications}>{@render children()}</AppShell>

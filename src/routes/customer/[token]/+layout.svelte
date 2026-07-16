@@ -32,6 +32,10 @@
 		font-size: 10px;
 	}
 	.customer-back:hover { border-color: #554785; color: #fff; }
+	
+		:global(html[data-theme="light"]) .customer-back{ border-color: #c7d2fe; border-radius: 12px; background: #fffffff0; color: #4f46e5; box-shadow: 0 10px 26px #6366f116; transition: .22s ease; }
+		:global(html[data-theme="light"]) .customer-back:hover{ border-color: #818cf8; background: #eef2ff; color: #3730a3; transform: translateY(-1px); }
+	
 	@media (max-width: 650px) {
 		.customer-back { position: static; margin: 16px 22px -14px; }
 	}
