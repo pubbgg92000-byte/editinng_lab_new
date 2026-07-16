@@ -22,7 +22,10 @@ Total: {{total}}
 Paid / Advance: {{paid}}
 Balance: {{balance}}
 
-{{payment_note}}{{invoice_footer_line}}`;
+{{payment_note}}{{invoice_footer_line}}
+
+Track your work status:
+{{portal_link}}`;
 
 export function fillTemplate(template: string, values: Record<string, string>) {
 	return Object.entries(values).reduce((message, [key, value]) => message.replaceAll(`{{${key}}}`, value), template);

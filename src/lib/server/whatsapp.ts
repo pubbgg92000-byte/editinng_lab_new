@@ -19,11 +19,13 @@ export function editorAssignmentMessage(settings: StudioSettings, editor: Editor
 	});
 }
 
-export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, order: Order) {
+export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, order: Order, customerToken: string, origin?: string) {
+	const applicationUrl = origin || env.PUBLIC_APP_URL || 'http://localhost:5173';
+	const portalLink = `${applicationUrl}/customer/${customerToken}`;
 	const total = order.priceSet === false ? 'Not set' : money(order.price);
 	const paid = order.advanceSet === false && !(order.payments || []).length ? 'Not recorded' : money(order.paid);
 	const balance = order.priceSet === false ? 'Not set' : money(Math.max(0, order.price - order.paid));
-	return fillTemplate(settings.invoiceTemplate, {
+	const message = fillTemplate(settings.invoiceTemplate, {
 		studio_name: settings.studioName,
 		studio_address: settings.address,
 		studio_phone_line: settings.phone ? `\nPhone: ${settings.phone}` : '',
@@ -37,6 +39,8 @@ export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, 
 		paid: paid,
 		balance: balance,
 		payment_note: settings.paymentNote,
-		invoice_footer_line: settings.invoiceFooter ? `\n\n${settings.invoiceFooter}` : ''
+		invoice_footer_line: settings.invoiceFooter ? `\n\n${settings.invoiceFooter}` : '',
+		portal_link: portalLink
 	});
+	return message.includes(portalLink) ? message : `${message.trimEnd()}\n\nTrack your work status:\n${portalLink}`;
 }
