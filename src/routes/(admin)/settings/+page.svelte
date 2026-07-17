@@ -120,8 +120,8 @@
 	</section>
 
 	<section class="card theme-card">
-		<button class="theme-heading" aria-expanded={themesOpen} onclick={() => (themesOpen = !themesOpen)}><div><h2>Studio theme</h2><p>Choose one fixed theme. The first five are light themes and the final two are dark themes.</p></div><ChevronDown class={themesOpen ? 'open' : ''} size={18}/></button>
-		{#if themesOpen}<div class="palette-grid">{#each themePalettes as palette}<button class:selected={settings.themePalette === palette.id} class="palette" onclick={() => previewTheme(palette.id)}><span>{#each palette.colors as color}<i style:background={color}></i>{/each}</span><div class="palette-title"><strong>{palette.name}</strong><small>{palette.mode}</small></div>{#if settings.themePalette === palette.id}<Check size={13}/>{/if}</button>{/each}</div>{/if}
+		<button class="theme-heading" aria-expanded={themesOpen} onclick={() => (themesOpen = !themesOpen)}><div><h2>Studio theme</h2><p>Choose a polished light or dark palette. Every option is tuned for readable text and controls.</p></div><ChevronDown class={themesOpen ? 'open' : ''} size={18}/></button>
+		{#if themesOpen}<div class="palette-grid">{#each themePalettes as palette}<button class:selected={settings.themePalette === palette.id} class="palette" onclick={() => previewTheme(palette.id)}><span>{#each palette.colors as color}<i style:background={color}></i>{/each}</span><div class="palette-title"><strong>{palette.name}</strong><small>{palette.recommended ? `Recommended · ${palette.mode}` : palette.mode}</small></div>{#if settings.themePalette === palette.id}<Check size={13}/>{/if}</button>{/each}</div>{/if}
 	</section>
 </div>
 

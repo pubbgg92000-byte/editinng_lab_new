@@ -11,7 +11,7 @@
 	<script>
 		try {
 			const palette = localStorage.getItem('studioflow_palette') || 'graphite-aqua';
-			const theme = ['midnight-violet', 'obsidian-blue'].includes(palette) ? 'dark' : 'light';
+			const theme = ['midnight-violet', 'obsidian-blue', 'heritage-sage', 'merlot-copper', 'citrus-evergreen', 'graphite-coral'].includes(palette) ? 'dark' : 'light';
 			document.documentElement.dataset.theme = theme;
 			document.documentElement.dataset.palette = palette;
 			document.documentElement.style.colorScheme = theme;
