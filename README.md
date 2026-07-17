@@ -1,6 +1,6 @@
 # StudioFlow
 
-StudioFlow is a multi-tenant workflow system for editing studios. One deployment serves many clients while every client is fixed to its own Neon database and Google Sheet.
+StudioFlow is a multi-tenant workflow system for editing studios. One Vercel deployment serves the owner panel, Anjana, the resettable demo workspace, and any future clients. Each client login is fixed to its own Neon database and Google Sheet.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ StudioFlow is a multi-tenant workflow system for editing studios. One deployment
 - The request hook resolves the signed-in account once and fixes the tenant context for the request. Routes never accept a tenant or database selector from client input.
 - Customer and editor portals use `/portal/{tenant-slug}/...`. Existing unscoped portal links resolve only against the registered legacy tenant.
 
-## First deployment
+## Production deployment
 
 1. Create a separate Neon database for the control plane.
 2. Copy `.env.example` into the hosting environment and provide `CONTROL_DATABASE_URL`, independent encryption/session secrets, the owner bootstrap credentials, Google service-account credentials, and `PUBLIC_APP_URL`.
@@ -19,9 +19,31 @@ StudioFlow is a multi-tenant workflow system for editing studios. One deployment
 
 The application also performs idempotent control and tenant schema initialization at runtime, so cold starts and new empty tenant databases are safe.
 
-## Preserve the existing Anjana tenant
+The same Vercel URL is used for every workspace:
 
-For the one-time bootstrap, provide the legacy `DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `GOOGLE_SHEETS_ID`, and optional Orders tab. `npm run control:bootstrap` registers that database as the `anjana` tenant and does not truncate or reseed it. Verify dashboard counts, Sheet sync, and existing `/customer/{token}` and `/editor/{token}` links before removing the legacy environment variables.
+- Owner panel: `/owner`
+- Client/admin app: `/login`
+- Tenant portal links: `/portal/{tenant-slug}/customer/{token}` and `/portal/{tenant-slug}/editor/{token}`
+- Legacy Anjana portal links: `/customer/{token}` and `/editor/{token}`
+
+## Owner panel process
+
+Use `/owner` to manage clients without another deployment.
+
+- **Add client** creates a new isolated workspace after validating the Neon database and Google Sheet.
+- **Edit client login** changes the client-admin email/password and revokes existing sessions.
+- **Edit connections and branding** changes studio name, logo URL, Neon URL, Sheet ID, and Orders tab. Leave the Neon URL blank to keep the encrypted existing connection.
+- **Test connections** validates the client Neon database and Google Sheet.
+- **Status** controls access with `draft`, `active`, and `suspended`.
+- **Reset demo data** is shown only for demo tenants and requires typing `RESET`.
+
+## Anjana tenant
+
+Anjana is registered as the legacy tenant with slug `anjana`. The app preserves old unscoped customer/editor portal links by resolving them only against Anjana.
+
+For a first migration, provide the legacy `DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `GOOGLE_SHEETS_ID`, and optional Orders tab. `npm run control:bootstrap` registers that database as the `anjana` tenant and does not truncate or reseed it.
+
+If Anjana data was temporary/demo data, clear the tenant database first, then use `/owner` > Anjana > **Edit connections and branding** to attach the real Sheet ID and rewrite a clean Sheet snapshot.
 
 ## Add a client
 
@@ -33,11 +55,15 @@ For the one-time bootstrap, provide the legacy `DATABASE_URL`, `ADMIN_EMAIL`, `A
 
 Connection URLs are encrypted and masked. Changing a connection, login, password, or tenant status revokes existing client sessions.
 
+For a client handoff, give the client only the normal app URL and their client-admin login. Do not share owner credentials, service-account credentials, Neon URLs, or connection strings.
+
 ## Demo workspace
 
 Create a client with **resettable demo tenant** enabled. StudioFlow seeds fictional customers, editors, workflow states, archived records, payments, partial/final invoices, delivery records, portal tokens, and activity. Demo credentials remain owner-controlled and are not displayed publicly.
 
 Only the owner can reset a demo. The reset requires typing `RESET`, replaces transactional demo data, rotates portal tokens, preserves the client login, and rewrites the demo Sheet snapshot.
+
+The demo workspace should use its own Neon database and its own Google Sheet. Do not point demo to a real client database or Sheet.
 
 ## Development and verification
 
@@ -50,6 +76,21 @@ npm run build
 ```
 
 `npm run check` must finish with zero errors and zero warnings. Use separate test databases and Sheets when testing isolation or demo resets.
+
+Before pushing a release, run:
+
+```sh
+npm run check
+npm run test:tenancy
+npm run build
+git diff --check
+```
+
+Deploy production with:
+
+```sh
+npx vercel --prod
+```
 
 ## Recovery
 

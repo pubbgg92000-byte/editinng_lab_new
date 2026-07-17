@@ -4,6 +4,7 @@
 	import { applyTheme, getStoredTheme } from '$lib/theme';
 
 	let { children, data } = $props();
+	let socialImage = $derived(`${data.appUrl || ''}/studioflow-social.png`);
 	onMount(() => applyTheme(getStoredTheme(data.settings.themePalette, data.settings.themeDefaultMode)));
 </script>
 
@@ -36,11 +37,19 @@
 		property="og:description"
 		content="Manage customers, editing orders, editors, invoices and delivery in one focused workflow."
 	/>
-	<meta name="twitter:card" content="summary" />
+	<meta property="og:image" content={socialImage} />
+	<meta property="og:image:secure_url" content={socialImage} />
+	<meta property="og:image:type" content="image/png" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta property="og:image:alt" content="StudioFlow secure creative workflow workspace" />
+	<meta name="twitter:card" content="summary_large_image" />
 	<meta name="twitter:title" content="StudioFlow — Editing studio workflow" />
 	<meta
 		name="twitter:description"
 		content="A lightweight workflow system for editing studios."
 	/>
+	<meta name="twitter:image" content={socialImage} />
+	<meta name="twitter:image:alt" content="StudioFlow secure creative workflow workspace" />
 </svelte:head>
 {@render children()}
