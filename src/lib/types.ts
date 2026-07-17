@@ -34,6 +34,7 @@ export interface Customer {
 
 export interface Editor {
 	id: string;
+	code?: string;
 	name: string;
 	initials: string;
 	specialty: string;
@@ -51,6 +52,7 @@ export interface Task {
 	name: string;
 	assignee: string;
 	editorId?: string;
+	editorCode?: string;
 	status: TaskStatus;
 	progress: number;
 	due: string;

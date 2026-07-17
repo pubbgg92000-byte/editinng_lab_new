@@ -120,7 +120,7 @@ const definitions = [
 	{ name: 'Customers', columns: ['Customer ID', 'Name', 'Business', 'Phone', 'Email', 'Projects', 'Pending'], demo: customers.map((c) => [c.id, c.name, c.business, c.phone, c.email, c.projects, c.pending]) },
 	{ name: 'Orders', columns: ['S', 'Studio Name', 'Mobile No.', 'Event', 'Names', 'Receiving', 'Duration', 'Amount', 'Advance', 'Balance', 'Source', 'Assigned Name', 'Remark'], demo: orders.map((o) => [o.id, o.customer, o.mobile ?? '', o.workType, o.project, o.receiving ?? '', o.duration ?? '', o.price, o.paid, o.price - o.paid, o.source ?? '', o.assignedTo ?? '', o.remarks ?? '']) },
 	{ name: 'Tasks', columns: ['Task ID', 'Order ID', 'Task', 'Editor', 'Due date', 'Progress', 'Status'], demo: orders.flatMap((o) => o.tasks.map((t) => [t.id, o.id, t.name, t.assignee, t.due, `${t.progress}%`, t.status])) },
-	{ name: 'Editors', columns: ['Editor ID', 'Name', 'Speciality', 'Phone', 'Active tasks', 'Availability'], demo: editors.map((e) => [e.id, e.name, e.specialty, e.phone, e.activeTasks, e.available ? 'Available' : 'At capacity']) },
+	{ name: 'Editors', columns: ['Editor ID', 'Name', 'Speciality', 'Phone', 'Active tasks', 'Availability'], demo: editors.map((e) => [e.code || e.id, e.name, e.specialty, e.phone, e.activeTasks, e.available ? 'Available' : 'At capacity']) },
 	{ name: 'Invoices', columns: ['Invoice ID', 'Order ID', 'Customer', 'Project', 'Total', 'Paid', 'Balance', 'Status'], demo: orders.map((o) => [`INV-${o.id.slice(-4)}`, o.id, o.customer, o.project, o.price, o.paid, o.price - o.paid, o.paid === o.price ? 'Paid' : o.paid ? 'Partially paid' : 'Unpaid']) },
 	{ name: 'Payments', columns: ['Payment ID', 'Invoice ID', 'Customer', 'Amount', 'Date', 'Method'], demo: orders.filter((o) => o.paid > 0).map((o, i) => [`PAY-00${i + 1}`, `INV-${o.id.slice(-4)}`, o.customer, o.paid, '15 Jul 2026', i % 2 ? 'UPI' : 'Bank transfer']) },
 	{ name: 'Activity Logs', columns: ['Time', 'Action', 'Entity', 'Details'], demo: [['15 Jul, 11:42', 'Task updated', 'TSK-102', 'Colour correction · 70%'], ['14 Jul, 16:08', 'Task approved', 'TSK-101', 'Culling approved by admin'], ['12 Jul, 14:10', 'Order assigned', 'ORD-2026-0041', 'Editors notified on WhatsApp']] },
@@ -150,10 +150,13 @@ export const load = async () => {
 		}
 	}
 	const editorIds = new Map<string, string>();
+	const editorRecordIds = new Map<string, string>();
 	for (const record of sourceRecords.Editors || []) {
-		const id = valueFrom(record, 'Editor ID', 'Record ID');
+		const id = valueFrom(record, 'Record ID', 'Editor ID');
+		const publicId = valueFrom(record, 'Editor ID');
 		const name = valueFrom(record, 'Name');
 		if (id && name) editorIds.set(name.toLowerCase(), id);
+		if (id && publicId) editorRecordIds.set(publicId, id);
 	}
 	const taskOrders = new Map((sourceRecords.Tasks || []).map((record) => [valueFrom(record, 'Task ID', 'Record ID'), valueFrom(record, 'Order ID')]));
 	const paymentOrders = new Map((sourceRecords.Payments || []).map((record) => [valueFrom(record, 'Payment ID', 'Record ID'), valueFrom(record, 'Order ID')]));
@@ -184,13 +187,14 @@ export const load = async () => {
 					if (['Customer ID', 'Name', 'Studio Name', 'Business'].includes(column) && customerId) return `/customers?customer=${encodeURIComponent(customerId)}`;
 				}
 				if (sheet.name === 'Editors') {
-					const editorId = valueFrom(record, 'Editor ID', 'Record ID') || row[0];
+					const editorId = valueFrom(record, 'Record ID', 'Editor ID') || row[0];
 					if (['Editor ID', 'Name'].includes(column) && editorId) return `/editors?editor=${encodeURIComponent(editorId)}`;
 				}
 				if (sheet.name === 'Tasks') {
 					const taskId = valueFrom(record, 'Task ID', 'Record ID') || row[0];
 					const orderId = valueFrom(record, 'Order ID') || row[1];
-					const editorId = valueFrom(record, 'Editor ID') || editorIds.get(valueFrom(record, 'Editor Name', 'Editor').toLowerCase());
+					const publicEditorId = valueFrom(record, 'Editor ID');
+					const editorId = editorRecordIds.get(publicEditorId) || editorIds.get(valueFrom(record, 'Editor Name', 'Editor').toLowerCase());
 					if (['Task ID', 'Task'].includes(column) && orderId) return `/orders/${encodeURIComponent(orderId)}?task=${encodeURIComponent(taskId)}`;
 					if (column === 'Order ID' && orderId) return `/orders/${encodeURIComponent(orderId)}`;
 					if (['Editor ID', 'Editor Name', 'Editor'].includes(column) && editorId) return `/editors?editor=${encodeURIComponent(editorId)}`;

@@ -111,7 +111,7 @@ function styleSheet(worksheet: Worksheet, columns: ColumnDefinition[], rowCount:
 			if (rowNumber === 1) return;
 			if (definition.format === 'currency') { cell.numFmt = '₹#,##0.00'; cell.alignment = { vertical: 'middle', horizontal: 'right' }; }
 			else if (definition.format === 'integer') { cell.numFmt = '#,##0'; cell.alignment = { vertical: 'middle', horizontal: 'right' }; }
-			else if (definition.format === 'percent') { cell.numFmt = '0%'; cell.alignment = { vertical: 'middle', horizontal: 'center' }; }
+			else if (definition.format === 'percent') { cell.numFmt = '0.00%'; cell.alignment = { vertical: 'middle', horizontal: 'center' }; }
 			else if (definition.format === 'date') { cell.numFmt = 'dd-mmm-yyyy'; cell.alignment = { vertical: 'middle', horizontal: 'center' }; }
 			else if (definition.format === 'datetime') { cell.numFmt = 'dd-mmm-yyyy hh:mm'; cell.alignment = { vertical: 'middle', horizontal: 'center' }; }
 			else if (definition.format === 'center') cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
@@ -196,17 +196,17 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 	addSheet(workbook, 'Editors', [
 		{ header: 'Editor ID', key: 'id', width: 22 }, { header: 'Name', key: 'name', width: 22 }, { header: 'Phone', key: 'phone', width: 16, format: 'center' },
 		{ header: 'Specialty', key: 'specialty', width: 24 }, { header: 'Availability', key: 'availability', width: 16, format: 'center' },
-		{ header: 'Active Tasks', key: 'activeTasks', width: 14, format: 'integer' }, { header: 'Archived', key: 'archived', width: 11, format: 'center' }
-	], [...data.editors].sort((a, b) => byText(a.name, b.name)).map((editor) => ({ id: editor.id, name: editor.name, phone: editor.phone || null, specialty: editor.specialty || null, availability: editor.availability || (editor.available ? 'available' : 'busy'), activeTasks: editor.activeTasks, archived: editor.archived ? 'Yes' : null })), { statusKey: 'availability', archivedKey: 'archived', tabColor: 'FF7C3AED' });
+		{ header: 'Active Tasks', key: 'activeTasks', width: 14, format: 'integer' }, { header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: 'Record ID', key: 'recordId', width: 24 }
+	], [...data.editors].sort((a, b) => byText(a.name, b.name)).map((editor) => ({ id: editor.code || editor.id, name: editor.name, phone: editor.phone || null, specialty: editor.specialty || null, availability: editor.availability || (editor.available ? 'available' : 'busy'), activeTasks: editor.activeTasks, archived: editor.archived ? 'Yes' : null, recordId: editor.id })), { statusKey: 'availability', archivedKey: 'archived', tabColor: 'FF7C3AED' });
 
 	addSheet(workbook, 'Tasks', [
 		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' }, { header: 'Project', key: 'project', width: 26 }, { header: 'Task', key: 'task', width: 24 },
-		{ header: 'Editor', key: 'editor', width: 20 }, { header: 'Status', key: 'status', width: 22, format: 'center' }, { header: 'Progress', key: 'progress', width: 12, format: 'percent' },
-		{ header: 'Due Date', key: 'dueDate', width: 15, format: 'date' }, { header: 'Billable Amount', key: 'billableAmount', width: 17, format: 'currency' }, { header: 'Invoiced Amount', key: 'invoicedAmount', width: 17, format: 'currency' }, { header: 'Instructions', key: 'instructions', width: 38 },
+		{ header: 'Editor ID', key: 'editorId', width: 14 }, { header: 'Editor', key: 'editor', width: 20 }, { header: 'Status', key: 'status', width: 22, format: 'center' }, { header: 'Progress', key: 'progress', width: 12, format: 'percent' },
+		{ header: 'Due Date', key: 'dueDate', width: 15, format: 'date' }, { header: 'Task Value (Billable)', key: 'billableAmount', width: 19, format: 'currency' }, { header: 'Already Invoiced', key: 'invoicedAmount', width: 17, format: 'currency' }, { header: 'Instructions', key: 'instructions', width: 38 },
 		{ header: 'Reference Link', key: 'textLink', width: 34, format: 'link' }, { header: 'Image URL', key: 'imageUrl', width: 34, format: 'link' },
 		{ header: 'Output Link', key: 'outputLink', width: 34, format: 'link' }, { header: 'Notes', key: 'notes', width: 34 },
 		{ header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: 'Task ID', key: 'taskId', width: 24 }, { header: 'Order ID', key: 'orderId', width: 24 }
-	], orders.flatMap((order) => order.tasks.map((task) => ({ project: order.project, task: task.name, editor: task.assignee, status: task.status, progress: Number(task.progress || 0) / 100, dueDate: asDate(task.due), billableAmount: task.billableAmount || null, invoicedAmount: task.invoicedAmount || null, instructions: task.instructions || null, textLink: externalLink(task.textLink), imageUrl: externalLink(task.imageUrl), outputLink: externalLink(task.outputLink), notes: task.notes || null, archived: task.archived ? 'Yes' : null, taskId: task.id, orderId: order.id }))).map((record, index) => ({ serial: index + 1, ...record })), { statusKey: 'status', archivedKey: 'archived', tabColor: 'FF0EA5E9' });
+	], orders.flatMap((order) => order.tasks.map((task) => ({ project: order.project, task: task.name, editorId: task.editorCode || null, editor: task.assignee, status: task.status, progress: Number(task.progress || 0) / 100, dueDate: asDate(task.due), billableAmount: task.billableAmount || null, invoicedAmount: task.invoicedAmount || null, instructions: task.instructions || null, textLink: externalLink(task.textLink), imageUrl: externalLink(task.imageUrl), outputLink: externalLink(task.outputLink), notes: task.notes || null, archived: task.archived ? 'Yes' : null, taskId: task.id, orderId: order.id }))).map((record, index) => ({ serial: index + 1, ...record })), { statusKey: 'status', archivedKey: 'archived', tabColor: 'FF0EA5E9' });
 
 	addSheet(workbook, 'Payments', [
 		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' }, { header: 'Studio Name', key: 'customer', width: 24 }, { header: 'Project', key: 'project', width: 26 },

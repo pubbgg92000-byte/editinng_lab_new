@@ -1,7 +1,8 @@
 export const schemaStatements = [
 	`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, business TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', gst TEXT NOT NULL DEFAULT '', portal_token_hash TEXT, portal_token_cipher TEXT, projects INTEGER NOT NULL DEFAULT 0, pending REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,
-	`CREATE TABLE IF NOT EXISTS editors (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', specialty TEXT NOT NULL DEFAULT '', availability TEXT NOT NULL DEFAULT 'available', portal_token_hash TEXT, portal_token_cipher TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,
+	`CREATE TABLE IF NOT EXISTS editors (id TEXT PRIMARY KEY, code TEXT, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', specialty TEXT NOT NULL DEFAULT '', availability TEXT NOT NULL DEFAULT 'available', portal_token_hash TEXT, portal_token_cipher TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,
+	`ALTER TABLE editors ADD COLUMN IF NOT EXISTS code TEXT`,
 	`CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL UNIQUE, customer_id TEXT, customer_name TEXT NOT NULL, mobile TEXT NOT NULL DEFAULT '', event TEXT NOT NULL, project TEXT NOT NULL, receiving TEXT NOT NULL DEFAULT '', duration TEXT NOT NULL DEFAULT '', amount REAL NOT NULL DEFAULT 0, advance REAL NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT '', remarks TEXT NOT NULL DEFAULT '', due_date TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Received', progress INTEGER NOT NULL DEFAULT 0, historical INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS amount_set INTEGER NOT NULL DEFAULT 1`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS advance_set INTEGER NOT NULL DEFAULT 1`,
@@ -52,6 +53,23 @@ export const schemaStatements = [
 	`CREATE TABLE IF NOT EXISTS activity_logs (id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS sheet_sync_outbox (id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation TEXT NOT NULL, payload TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, synced_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL)`,
+	`WITH current_max AS (
+		SELECT COALESCE(MAX(CASE WHEN code ~ '^ED-[0-9]+$' THEN SUBSTRING(code FROM 4)::INTEGER END), 0) AS value
+		FROM editors
+	), missing AS (
+		SELECT id, ROW_NUMBER() OVER (ORDER BY created_at, id) AS position
+		FROM editors
+		WHERE code IS NULL OR code = ''
+	)
+	UPDATE editors
+	SET code = 'ED-' || LPAD((current_max.value + missing.position)::TEXT, 4, '0')
+	FROM current_max, missing
+	WHERE editors.id = missing.id`,
+	`INSERT INTO counters (name, value)
+	 SELECT 'editor_serial', COALESCE(MAX(CASE WHEN code ~ '^ED-[0-9]+$' THEN SUBSTRING(code FROM 4)::INTEGER END), 0)
+	 FROM editors
+	 ON CONFLICT(name) DO UPDATE SET value = GREATEST(counters.value, excluded.value)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS editors_code_unique_idx ON editors(code) WHERE code IS NOT NULL`,
 	`CREATE TABLE IF NOT EXISTS maintenance_runs (name TEXT PRIMARY KEY, last_run_at TEXT NOT NULL, details TEXT NOT NULL DEFAULT '')`,
 	`CREATE INDEX IF NOT EXISTS tasks_order_idx ON tasks(order_id)`,
 	`CREATE INDEX IF NOT EXISTS tasks_editor_idx ON tasks(editor_id)`,

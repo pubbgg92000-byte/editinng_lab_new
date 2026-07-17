@@ -32,11 +32,11 @@ function customerFrom(row: Row): Customer {
 
 function editorFrom(row: Row): Editor {
 	const availability = row.availability as EditorAvailability;
-	return { id: row.id, name: row.name, initials: initials(row.name), specialty: row.specialty, phone: row.phone, activeTasks: Number(row.active_tasks ?? 0), available: availability === 'available', availability, archived: Boolean(row.archived_at) };
+	return { id: row.id, code: row.code || row.id, name: row.name, initials: initials(row.name), specialty: row.specialty, phone: row.phone, activeTasks: Number(row.active_tasks ?? 0), available: availability === 'available', availability, archived: Boolean(row.archived_at) };
 }
 
 function taskFrom(row: Row): Task {
-	return { id: row.id, orderId: row.order_id, name: row.title, assignee: row.editor_name || 'Unassigned', editorId: row.editor_id || undefined, status: row.status, progress: Number(row.progress), due: row.due_date, instructions: row.instructions, textLink: row.text_link, imageUrl: row.image_url, outputLink: row.output_link, notes: row.notes, billableAmount: Number(row.billable_amount || 0), invoicedAmount: Number(row.invoiced_amount || 0), archived: Boolean(row.archived_at) };
+	return { id: row.id, orderId: row.order_id, name: row.title, assignee: row.editor_name || 'Unassigned', editorId: row.editor_id || undefined, editorCode: row.editor_code || undefined, status: row.status, progress: Number(row.progress), due: row.due_date, instructions: row.instructions, textLink: row.text_link, imageUrl: row.image_url, outputLink: row.output_link, notes: row.notes, billableAmount: Number(row.billable_amount || 0), invoicedAmount: Number(row.invoiced_amount || 0), archived: Boolean(row.archived_at) };
 }
 
 function paymentFrom(row: Row): Payment {
@@ -145,8 +145,9 @@ export async function listEditors(database: AppDatabase, includeInactive = false
 export async function createEditor(database: AppDatabase, input: Partial<Editor>) {
 	const timestamp = now();
 	const token = createPortalToken();
-	const editor: Editor = { id: id('ED'), name: String(input.name || '').trim(), initials: initials(String(input.name || '')), phone: String(input.phone || '').trim(), specialty: String(input.specialty || '').trim(), availability: input.availability || 'available', available: (input.availability || 'available') === 'available', activeTasks: 0, token };
-	await database.prepare('INSERT INTO editors (id, name, phone, specialty, availability, portal_token_hash, portal_token_cipher, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(editor.id, editor.name, editor.phone, editor.specialty, editor.availability, await hashPortalToken(token), await sealPortalToken(token), timestamp, timestamp).run();
+	const serial = await database.prepare("INSERT INTO counters (name, value) VALUES ('editor_serial', 1) ON CONFLICT(name) DO UPDATE SET value = counters.value + 1 RETURNING value").first<{ value: number }>();
+	const editor: Editor = { id: id('ED'), code: `ED-${String(Number(serial?.value || 1)).padStart(4, '0')}`, name: String(input.name || '').trim(), initials: initials(String(input.name || '')), phone: String(input.phone || '').trim(), specialty: String(input.specialty || '').trim(), availability: input.availability || 'available', available: (input.availability || 'available') === 'available', activeTasks: 0, token };
+	await database.prepare('INSERT INTO editors (id, code, name, phone, specialty, availability, portal_token_hash, portal_token_cipher, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(editor.id, editor.code, editor.name, editor.phone, editor.specialty, editor.availability, await hashPortalToken(token), await sealPortalToken(token), timestamp, timestamp).run();
 	await activity(database, 'admin', 'Editor created', 'editor', editor.id, editor.name);
 	await queueSheetSync(database, 'Editors', editor.id, editor);
 	return editor;
@@ -212,7 +213,7 @@ async function hydrateOrders(database: AppDatabase, orderRows: Row[]) {
 	const orderIds = orderRows.map((row) => row.id);
 	const placeholders = orderIds.map(() => '?').join(', ');
 	const [taskRows, paymentRows] = await Promise.all([
-		rows(database, `SELECT t.*, e.name AS editor_name, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t LEFT JOIN editors e ON e.id = t.editor_id WHERE t.order_id IN (${placeholders}) ORDER BY t.created_at`, orderIds),
+		rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t LEFT JOIN editors e ON e.id = t.editor_id WHERE t.order_id IN (${placeholders}) ORDER BY t.created_at`, orderIds),
 		rows(database, `SELECT * FROM payments WHERE order_id IN (${placeholders}) ORDER BY paid_at DESC`, orderIds)
 	]);
 	return orderRows.map((row) => orderFrom(row, taskRows.filter((task) => task.order_id === row.id).map(taskFrom), paymentRows.filter((payment) => payment.order_id === row.id).map(paymentFrom)));
@@ -444,7 +445,7 @@ export async function restoreTask(database: AppDatabase, taskId: string) {
 }
 
 export async function tasksForEditor(database: AppDatabase, editorId: string) {
-	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, o.project, o.customer_name, o.event, o.serial, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 ORDER BY t.due_date, t.created_at`, [editorId]);
+	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, o.project, o.customer_name, o.event, o.serial, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 ORDER BY t.due_date, t.created_at`, [editorId]);
 	return taskRows.map((row) => ({ ...taskFrom(row), project: row.project, customer: row.customer_name, workType: row.event, serial: row.serial }));
 }
 
