@@ -91,7 +91,7 @@
 {#if archived}<div class="archive-context"><span><Archive size={15}/><strong>Archived orders</strong><small>Restore an order or delete it permanently.</small></span><a href="/orders"><ArrowLeft size={14}/> Back to active orders</a></div>{/if}
 <form class="order-filters" method="GET">
 	<div class="list-tools">
-		<div class="filter"><Search size={15}/><input name="q" bind:value={query} placeholder="Search orders" aria-label="Search orders"/><button aria-label="Search"><ArrowUpRight size={14}/></button></div>
+		<div class="filter"><Search size={15}/><input name="q" bind:value={query} placeholder="Search orders" aria-label="Search orders"/></div>
 		<div class="tool-actions">{#if archived}<a class="back-active" href="/orders"><ArrowLeft size={13}/><span>Back to active orders</span></a>{:else}<a class="archive-toggle" href="/orders?archived=true"><Archive size={13}/><span>Archived</span><strong>{archivedCount}</strong></a>{/if}<button type="button" class:active={filtersOpen||statusFilter||eventFilter} class="secondary" onclick={()=>filtersOpen=!filtersOpen}><SlidersHorizontal size={13}/> Filter</button></div>
 	</div>
 	{#if archived}<input type="hidden" name="archived" value="true"/>{/if}
