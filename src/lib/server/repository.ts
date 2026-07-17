@@ -400,7 +400,7 @@ export async function createTask(database: AppDatabase, orderId: string, input: 
 	await database.prepare('INSERT INTO tasks (id, order_id, editor_id, title, instructions, due_date, text_link, image_url, status, progress, billable_amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)').bind(task.id, orderId, task.editorId || null, task.name, task.instructions, task.due, task.textLink, task.imageUrl, task.status, task.billableAmount, timestamp, timestamp).run();
 	await updateOrderSummary(database, orderId);
 	const saved = (await getOrder(database, orderId))!.tasks.find((item) => item.id === task.id)!;
-	await activity(database, 'admin', 'Task assigned', 'task', task.id, `${saved.name} · ${saved.assignee}`);
+	await activity(database, 'admin', saved.editorId ? 'Task assigned' : 'Task created', 'task', task.id, saved.editorId ? `${saved.name} · ${saved.assignee}` : saved.name);
 	await queueSheetSync(database, 'Tasks', task.id, saved);
 	return saved;
 }
@@ -456,7 +456,7 @@ export async function updateOrderSummary(database: AppDatabase, orderId: string)
 		return;
 	}
 	if (['Delivered', 'Stopped'].includes(order.status)) return;
-	const active = await rows(database, 'SELECT status, progress FROM tasks WHERE order_id = ? AND archived_at IS NULL', [orderId]);
+	const active = await rows(database, 'SELECT editor_id, status, progress FROM tasks WHERE order_id = ? AND archived_at IS NULL', [orderId]);
 	let status: Order['status'] = 'Received';
 	let progress = 0;
 	if (active.length) {
@@ -465,7 +465,8 @@ export async function updateOrderSummary(database: AppDatabase, orderId: string)
 		else if (active.some((task) => task.status === 'Revision required')) status = 'Revision';
 		else if (active.some((task) => task.status === 'Ready for review')) status = 'Waiting Review';
 		else if (active.some((task) => Number(task.progress) > 0 || task.status === 'In progress')) status = 'Editing';
-		else status = 'Assigned';
+		else if (active.some((task) => Boolean(task.editor_id))) status = 'Assigned';
+		else status = 'Received';
 	}
 	await database.prepare('UPDATE orders SET status = ?, progress = ?, updated_at = ? WHERE id = ?').bind(status, progress, now(), orderId).run();
 	const updated = await getOrder(database, orderId);

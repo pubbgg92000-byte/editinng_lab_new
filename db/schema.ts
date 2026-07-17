@@ -13,6 +13,17 @@ export const schemaStatements = [
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_notified_at TEXT`,
 	`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, editor_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', due_date TEXT NOT NULL DEFAULT '', text_link TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Not started', progress INTEGER NOT NULL DEFAULT 0, output_link TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT, FOREIGN KEY(order_id) REFERENCES orders(id), FOREIGN KEY(editor_id) REFERENCES editors(id))`,
 	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS billable_amount REAL NOT NULL DEFAULT 0`,
+	`UPDATE orders
+	 SET status = 'Received'
+	 WHERE status = 'Assigned'
+	   AND historical = 0
+	   AND NOT EXISTS (
+		 SELECT 1
+		 FROM tasks
+		 WHERE tasks.order_id = orders.id
+		   AND tasks.archived_at IS NULL
+		   AND tasks.editor_id IS NOT NULL
+	   )`,
 	`CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, amount REAL NOT NULL, paid_at TEXT NOT NULL, method TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY(order_id) REFERENCES orders(id))`,
 	`ALTER TABLE payments ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'payment'`,
 	`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, number TEXT NOT NULL UNIQUE, order_id TEXT NOT NULL, message_snapshot TEXT NOT NULL, opened_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(order_id) REFERENCES orders(id))`,
