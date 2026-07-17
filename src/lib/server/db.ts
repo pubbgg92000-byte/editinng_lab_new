@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import { neon, type FullQueryResults, type NeonQueryFunction } from '@neondatabase/serverless';
 import { schemaStatements } from '../../../db/schema';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate } from '$lib/messageTemplates';
+import { runScheduledMaintenance } from './maintenance';
 
 let initialized = false;
 let initializing: Promise<void> | null = null;
@@ -104,7 +105,6 @@ export async function ensureDatabase(database: AppDatabase) {
 			database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'studioName' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'brandVersion' AND value = ?)").bind('Anjana Creations', now, brandVersion),
 			database.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING').bind('brandVersion', brandVersion, now)
 		]);
-		await database.batch(['Mani', 'Swapna', 'Devi', 'Sirisha'].map((name, index) => database.prepare('INSERT INTO editors (id, name, phone, specialty, availability, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING').bind(`ED-SEED-${index + 1}`, name, '', '', 'available', now, now)));
 		initialized = true;
 	})();
 	try {
@@ -117,5 +117,10 @@ export async function ensureDatabase(database: AppDatabase) {
 export async function readyDatabase(_platform?: unknown) {
 	const database = databaseFrom();
 	await ensureDatabase(database);
+	try {
+		await runScheduledMaintenance(database);
+	} catch (cause) {
+		console.error('Scheduled data retention failed.', cause);
+	}
 	return database;
 }

@@ -1,4 +1,4 @@
-import type { ActivityLog, Customer, Editor, EditorAvailability, Order, Payment, StudioSettings, Task, TaskStatus } from '$lib/types';
+import type { ActivityLog, Customer, Editor, EditorAvailability, Invoice, Order, Payment, StudioSettings, Task, TaskStatus } from '$lib/types';
 import { createPortalToken, hashPortalToken, openPortalToken, sealPortalToken } from './tokens';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate } from '$lib/messageTemplates';
 
@@ -36,21 +36,24 @@ function editorFrom(row: Row): Editor {
 }
 
 function taskFrom(row: Row): Task {
-	return { id: row.id, orderId: row.order_id, name: row.title, assignee: row.editor_name || 'Unassigned', editorId: row.editor_id || undefined, status: row.status, progress: Number(row.progress), due: row.due_date, instructions: row.instructions, textLink: row.text_link, imageUrl: row.image_url, outputLink: row.output_link, notes: row.notes, archived: Boolean(row.archived_at) };
+	return { id: row.id, orderId: row.order_id, name: row.title, assignee: row.editor_name || 'Unassigned', editorId: row.editor_id || undefined, status: row.status, progress: Number(row.progress), due: row.due_date, instructions: row.instructions, textLink: row.text_link, imageUrl: row.image_url, outputLink: row.output_link, notes: row.notes, billableAmount: Number(row.billable_amount || 0), invoicedAmount: Number(row.invoiced_amount || 0), archived: Boolean(row.archived_at) };
 }
 
 function paymentFrom(row: Row): Payment {
-	return { id: row.id, orderId: row.order_id, amount: Number(row.amount), paidAt: row.paid_at, method: row.method, note: row.note };
+	return { id: row.id, orderId: row.order_id, amount: Number(row.amount), paidAt: row.paid_at, method: row.method, note: row.note, kind: row.kind === 'advance' ? 'advance' : 'payment' };
 }
 
 function orderFrom(row: Row, orderTasks: Task[] = [], orderPayments: Payment[] = []): Order {
-	const paid = Number(row.advance) + orderPayments.reduce((sum, payment) => sum + payment.amount, 0);
-	return { id: row.id, serial: Number(row.serial), customerId: row.customer_id || undefined, customer: row.customer_name, mobile: row.mobile, workType: row.event, project: row.project, receiving: row.receiving, duration: row.duration, price: Number(row.amount), paid, priceSet: Boolean(row.amount_set), advanceSet: Boolean(row.advance_set), source: row.source, remarks: row.remarks, due: row.due_date, status: row.status, progress: Number(row.progress), files: 0, fileLink: '', color: '#00ADB5', tasks: orderTasks, payments: orderPayments, important: Boolean(row.important), historical: Boolean(row.historical) };
+	const initialAdvance = Number(row.advance);
+	const paid = initialAdvance + orderPayments.reduce((sum, payment) => sum + payment.amount, 0);
+	return { id: row.id, serial: Number(row.serial), customerId: row.customer_id || undefined, customer: row.customer_name, mobile: row.mobile, workType: row.event, project: row.project, receiving: row.receiving, duration: row.duration, price: Number(row.amount), discount: Number(row.discount || 0), paid, initialAdvance, priceSet: Boolean(row.amount_set), advanceSet: Boolean(row.advance_set), source: row.source, remarks: row.remarks, due: row.due_date, status: row.status, progress: Number(row.progress), files: 0, fileLink: '', color: '#00ADB5', tasks: orderTasks, payments: orderPayments, important: Boolean(row.important), historical: Boolean(row.historical), archived: Boolean(row.archived_at), deliveryMethod: row.delivery_method || '', deliveredAt: row.delivered_at || '', customerNotifiedAt: row.customer_notified_at || '' };
 }
 
 export async function getSettings(database: AppDatabase): Promise<StudioSettings> {
 	const values = Object.fromEntries((await rows(database, 'SELECT key, value FROM settings')).map((row) => [row.key, row.value]));
-	return { studioName: values.studioName || 'Anjana Creations', address: values.address || '', phone: values.phone || '', email: values.email || '', gstin: values.gstin || '', paymentNote: values.paymentNote || '', invoiceFooter: values.invoiceFooter || '', assignmentTemplate: values.assignmentTemplate || defaultAssignmentTemplate, invoiceTemplate: values.invoiceTemplate || defaultInvoiceTemplate, themePalette: values.themePalette || 'graphite-aqua', themeDefaultMode: values.themeDefaultMode === 'dark' ? 'dark' : 'light' } as StudioSettings;
+	const savedInvoiceTemplate = String(values.invoiceTemplate || defaultInvoiceTemplate);
+	const invoiceTemplate = savedInvoiceTemplate.includes('{{portal_link}}') ? savedInvoiceTemplate : `${savedInvoiceTemplate.trimEnd()}\n\nView your work status and bill:\n{{portal_link}}`;
+	return { studioName: values.studioName || 'Anjana Creations', address: values.address || '', phone: values.phone || '', email: values.email || '', gstin: values.gstin || '', paymentNote: values.paymentNote || '', invoiceFooter: values.invoiceFooter || '', assignmentTemplate: values.assignmentTemplate || defaultAssignmentTemplate, invoiceTemplate, themePalette: values.themePalette || 'graphite-aqua', themeDefaultMode: values.themeDefaultMode === 'dark' ? 'dark' : 'light' } as StudioSettings;
 }
 
 export async function updateSettings(database: AppDatabase, input: Partial<StudioSettings>) {
@@ -65,7 +68,7 @@ export async function updateSettings(database: AppDatabase, input: Partial<Studi
 export async function listCustomers(database: AppDatabase, includeArchived = false) {
 	const customerRows = await rows(database, `SELECT c.*,
 		(SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS projects,
-		COALESCE((SELECT SUM(CASE WHEN o.amount - o.advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) > 0 THEN o.amount - o.advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) ELSE 0 END) FROM orders o WHERE o.customer_id = c.id), 0) AS pending
+		COALESCE((SELECT SUM(CASE WHEN o.amount - o.discount - o.advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) > 0 THEN o.amount - o.discount - o.advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) ELSE 0 END) FROM orders o WHERE o.customer_id = c.id AND o.archived_at IS NULL), 0) AS pending
 		FROM customers c ${includeArchived ? '' : 'WHERE c.archived_at IS NULL'} ORDER BY c.business`);
 	const customers = customerRows.map(customerFrom);
 	for (const customer of customers) {
@@ -73,6 +76,14 @@ export async function listCustomers(database: AppDatabase, includeArchived = fal
 		customer.token = await openPortalToken(source?.portal_token_cipher);
 	}
 	return customers;
+}
+
+export async function getCustomer(database: AppDatabase, customerId: string) {
+	const row = await database.prepare('SELECT * FROM customers WHERE id = ?').bind(customerId).first<Row>();
+	if (!row) return null;
+	const customer = customerFrom(row);
+	customer.token = await openPortalToken(row.portal_token_cipher);
+	return customer;
 }
 
 export async function createCustomer(database: AppDatabase, input: Partial<Customer>) {
@@ -196,22 +207,133 @@ export async function findEditorByToken(database: AppDatabase, token: string) {
 	return row ? editorFrom(row) : null;
 }
 
-export async function listOrders(database: AppDatabase, includeHistorical = true) {
-	const orderRows = await rows(database, `SELECT * FROM orders ${includeHistorical ? '' : 'WHERE historical = 0'} ORDER BY serial DESC`);
-	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name FROM tasks t LEFT JOIN editors e ON e.id = t.editor_id ORDER BY t.created_at`);
-	const paymentRows = await rows(database, 'SELECT * FROM payments ORDER BY paid_at DESC');
+async function hydrateOrders(database: AppDatabase, orderRows: Row[]) {
+	if (!orderRows.length) return [];
+	const orderIds = orderRows.map((row) => row.id);
+	const placeholders = orderIds.map(() => '?').join(', ');
+	const [taskRows, paymentRows] = await Promise.all([
+		rows(database, `SELECT t.*, e.name AS editor_name, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t LEFT JOIN editors e ON e.id = t.editor_id WHERE t.order_id IN (${placeholders}) ORDER BY t.created_at`, orderIds),
+		rows(database, `SELECT * FROM payments WHERE order_id IN (${placeholders}) ORDER BY paid_at DESC`, orderIds)
+	]);
 	return orderRows.map((row) => orderFrom(row, taskRows.filter((task) => task.order_id === row.id).map(taskFrom), paymentRows.filter((payment) => payment.order_id === row.id).map(paymentFrom)));
 }
 
+export async function listOrders(database: AppDatabase, includeHistorical = true, includeArchived = false) {
+	const conditions = [includeHistorical ? '' : 'historical = 0', includeArchived ? '' : 'archived_at IS NULL'].filter(Boolean);
+	const orderRows = await rows(database, `SELECT * FROM orders ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''} ORDER BY serial DESC`);
+	return hydrateOrders(database, orderRows);
+}
+
+export async function listOrdersForCustomer(database: AppDatabase, customerId: string) {
+	const orderRows = await rows(database, 'SELECT * FROM orders WHERE customer_id = ? AND archived_at IS NULL ORDER BY serial DESC', [customerId]);
+	return hydrateOrders(database, orderRows);
+}
+
 export async function getOrder(database: AppDatabase, orderId: string) {
-	return (await listOrders(database)).find((order) => order.id === orderId) || null;
+	const order = await database.prepare('SELECT * FROM orders WHERE id = ?').bind(orderId).first<Row>();
+	return order ? (await hydrateOrders(database, [order]))[0] : null;
+}
+
+export interface OrderPageOptions {
+	page?: number;
+	pageSize?: number;
+	query?: string;
+	status?: string;
+	event?: string;
+	includeHistorical?: boolean;
+	archived?: boolean;
+}
+
+export async function listOrdersPage(database: AppDatabase, options: OrderPageOptions = {}) {
+	const pageSize = Math.max(10, Math.min(100, Math.floor(Number(options.pageSize) || 25)));
+	const requestedPage = Math.max(1, Math.floor(Number(options.page) || 1));
+	const conditions: string[] = [];
+	const values: unknown[] = [];
+	conditions.push(options.archived ? 'archived_at IS NOT NULL' : 'archived_at IS NULL');
+	if (options.includeHistorical === false) conditions.push('historical = 0');
+	if (options.query?.trim()) {
+		conditions.push("LOWER(project || ' ' || customer_name || ' ' || event || ' ' || status || ' ' || serial::text) LIKE ?");
+		values.push(`%${options.query.trim().toLowerCase()}%`);
+	}
+	if (options.status?.trim()) { conditions.push('status = ?'); values.push(options.status.trim()); }
+	if (options.event?.trim()) { conditions.push('event = ?'); values.push(options.event.trim()); }
+	const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+	const count = await database.prepare(`SELECT COUNT(*) AS count FROM orders ${where}`).bind(...values).first<{ count: number | string }>();
+	const total = Number(count?.count || 0);
+	const totalPages = Math.max(1, Math.ceil(total / pageSize));
+	const page = Math.min(requestedPage, totalPages);
+	const offset = (page - 1) * pageSize;
+	const orderRows = await rows(database, `SELECT * FROM orders ${where} ORDER BY important DESC, serial DESC LIMIT ? OFFSET ?`, [...values, pageSize, offset]);
+	return {
+		orders: await hydrateOrders(database, orderRows),
+		pagination: { page, pageSize, total, totalPages, from: total ? offset + 1 : 0, to: Math.min(offset + pageSize, total) }
+	};
+}
+
+export async function countArchivedOrders(database: AppDatabase) {
+	const result = await database.prepare('SELECT COUNT(*) AS count FROM orders WHERE archived_at IS NOT NULL').first<{ count: number | string }>();
+	return Number(result?.count || 0);
+}
+
+export async function getOrderQueueCounts(database: AppDatabase) {
+	const result = await database.prepare(`SELECT
+		COUNT(*) FILTER (WHERE archived_at IS NULL) AS all_orders,
+		COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'Waiting Review') AS review,
+		COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'Ready Delivery') AS ready,
+		COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'Delivered') AS delivered
+		FROM orders`).first<{ all_orders: number | string; review: number | string; ready: number | string; delivered: number | string }>();
+	return { all: Number(result?.all_orders || 0), review: Number(result?.review || 0), ready: Number(result?.ready || 0), delivered: Number(result?.delivered || 0) };
+}
+
+export async function listOrderEvents(database: AppDatabase) {
+	return (await rows(database, "SELECT DISTINCT event FROM orders WHERE event != '' ORDER BY event")).map((row) => String(row.event));
+}
+
+export const defaultEventOptions = ['Wedding', 'Birthday', 'Half Saree', 'House Opening', 'Engagement', 'Reception'];
+
+export async function listEventOptions(database: AppDatabase) {
+	const custom = (await rows(database, 'SELECT name FROM custom_event_options ORDER BY LOWER(name)')).map((row) => String(row.name));
+	return [...defaultEventOptions.map((name) => ({ name, custom: false })), ...custom.filter((name) => !defaultEventOptions.some((item) => item.toLowerCase() === name.toLowerCase())).map((name) => ({ name, custom: true }))];
+}
+
+export async function addEventOption(database: AppDatabase, nameInput: string) {
+	const name = nameInput.trim().replace(/\s+/g, ' ');
+	if (!name) throw new Error('Enter an event name.');
+	if (defaultEventOptions.some((item) => item.toLowerCase() === name.toLowerCase())) return listEventOptions(database);
+	await database.prepare('INSERT INTO custom_event_options (name, created_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING').bind(name, now()).run();
+	return listEventOptions(database);
+}
+
+export async function deleteEventOption(database: AppDatabase, name: string) {
+	await database.prepare('DELETE FROM custom_event_options WHERE name = ?').bind(name.trim()).run();
+	return listEventOptions(database);
+}
+
+export async function listOrderSearchIndex(database: AppDatabase, limit = 100) {
+	const orderRows = await rows(database, 'SELECT * FROM orders ORDER BY updated_at DESC LIMIT ?', [Math.max(1, Math.min(250, limit))]);
+	return orderRows.map((row) => orderFrom(row));
+}
+
+export async function getDashboardData(database: AppDatabase) {
+	const stats = await database.prepare(`SELECT
+		COUNT(*) FILTER (WHERE archived_at IS NULL AND historical = 0 AND status NOT IN ('Historical', 'Completed', 'Delivered', 'Stopped')) AS active,
+		COUNT(*) FILTER (WHERE archived_at IS NULL AND historical = 0 AND status = 'Waiting Review') AS waiting_review,
+		COUNT(*) FILTER (WHERE archived_at IS NULL AND historical = 0 AND status = 'Ready Delivery') AS ready_delivery,
+		COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'Delivered') AS delivered
+		FROM orders`).first<{ active: number | string; waiting_review: number | string; ready_delivery: number | string; delivered: number | string }>();
+	const orderRows = await rows(database, "SELECT * FROM orders WHERE archived_at IS NULL AND historical = 0 AND status NOT IN ('Historical', 'Completed', 'Delivered', 'Stopped') ORDER BY important DESC, updated_at DESC LIMIT 20");
+	return {
+		orders: await hydrateOrders(database, orderRows),
+		stats: { active: Number(stats?.active || 0), waitingReview: Number(stats?.waiting_review || 0), readyDelivery: Number(stats?.ready_delivery || 0), delivered: Number(stats?.delivered || 0) }
+	};
 }
 
 export async function createOrder(database: AppDatabase, input: Partial<Order>) {
 	const timestamp = now();
 	const serialRow = await database.prepare("INSERT INTO counters (name, value) SELECT 'order_serial', COALESCE(MAX(serial), 0) + 1 FROM orders ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 RETURNING value AS serial").first<{ serial: number }>();
 	const orderId = id('ORD');
-	await database.prepare('INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, advance, amount_set, advance_set, source, remarks, due_date, status, progress, historical, important, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)').bind(orderId, Number(serialRow?.serial || 1), input.customerId || null, input.customer || '', input.mobile || '', input.workType || '', input.project || '', input.receiving || '', input.duration || '', Number(input.price || 0), Number(input.paid || 0), Number(input.priceSet !== false), Number(input.advanceSet !== false), input.source || '', input.remarks || '', input.due || '', 'Received', Number(Boolean(input.important)), timestamp, timestamp).run();
+	await database.prepare('INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, amount_set, advance_set, source, remarks, due_date, status, progress, historical, important, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)').bind(orderId, Number(serialRow?.serial || 1), input.customerId || null, input.customer || '', input.mobile || '', input.workType || '', input.project || '', input.receiving || '', input.duration || '', Number(input.price || 0), Number(input.priceSet !== false), Number(input.advanceSet !== false), input.source || '', input.remarks || '', input.due || '', 'Received', Number(Boolean(input.important)), timestamp, timestamp).run();
+	if (Number(input.paid || 0) > 0) await recordPayment(database, orderId, { amount: Number(input.paid), paidAt: timestamp.slice(0, 10), method: 'Advance at booking', note: 'Advance collected when order was created', kind: 'advance' });
 	const order = await getOrder(database, orderId);
 	await activity(database, 'admin', 'Order created', 'order', orderId, `${input.customer} · ${input.project}`);
 	await queueSheetSync(database, 'Orders', orderId, order);
@@ -221,17 +343,61 @@ export async function createOrder(database: AppDatabase, input: Partial<Order>) 
 export async function updateOrder(database: AppDatabase, orderId: string, input: Partial<Order>) {
 	const existing = await getOrder(database, orderId);
 	if (!existing) return null;
-	await database.prepare('UPDATE orders SET customer_id = ?, customer_name = ?, mobile = ?, event = ?, project = ?, receiving = ?, duration = ?, amount = ?, advance = ?, source = ?, remarks = ?, due_date = ?, historical = ?, important = ?, updated_at = ? WHERE id = ?').bind(input.customerId ?? existing.customerId ?? null, input.customer ?? existing.customer, input.mobile ?? existing.mobile ?? '', input.workType ?? existing.workType, input.project ?? existing.project, input.receiving ?? existing.receiving ?? '', input.duration ?? existing.duration ?? '', input.price ?? existing.price, input.paid ?? Math.min(existing.paid, existing.price), input.source ?? existing.source ?? '', input.remarks ?? existing.remarks ?? '', input.due ?? existing.due, input.historical === undefined ? Number(existing.historical) : Number(input.historical), input.important === undefined ? Number(existing.important) : Number(input.important), now(), orderId).run();
+	const price = Math.max(0, Number(input.price ?? existing.price));
+	const discount = Math.max(0, Number(input.discount ?? existing.discount));
+	if (discount > price) throw new Error('Discount cannot be greater than the total amount.');
+	if ((input.price !== undefined || input.discount !== undefined) && input.priceSet !== false && price - discount < existing.paid) throw new Error('The discounted total cannot be below the amount already collected.');
+	const nextStatus = input.status ?? existing.status;
+	const deliveredAt = nextStatus === 'Delivered' ? input.deliveredAt || existing.deliveredAt || now() : nextStatus === 'Ready Delivery' ? '' : existing.deliveredAt || '';
+	await database.prepare('UPDATE orders SET customer_id = ?, customer_name = ?, mobile = ?, event = ?, project = ?, receiving = ?, duration = ?, amount = ?, discount = ?, amount_set = ?, advance_set = ?, source = ?, remarks = ?, due_date = ?, status = ?, progress = ?, historical = ?, important = ?, delivery_method = ?, delivered_at = ?, customer_notified_at = ?, updated_at = ? WHERE id = ?').bind(input.customerId ?? existing.customerId ?? null, input.customer ?? existing.customer, input.mobile ?? existing.mobile ?? '', input.workType ?? existing.workType, input.project ?? existing.project, input.receiving ?? existing.receiving ?? '', input.duration ?? existing.duration ?? '', price, discount, input.priceSet === undefined ? Number(existing.priceSet !== false) : Number(input.priceSet), input.advanceSet === undefined ? Number(existing.advanceSet !== false) : Number(input.advanceSet), input.source ?? existing.source ?? '', input.remarks ?? existing.remarks ?? '', input.due ?? existing.due, nextStatus, Math.max(0, Math.min(100, Number(input.progress ?? existing.progress))), input.historical === undefined ? Number(existing.historical) : Number(input.historical), input.important === undefined ? Number(existing.important) : Number(input.important), input.deliveryMethod ?? existing.deliveryMethod ?? '', deliveredAt || null, input.customerNotifiedAt ?? existing.customerNotifiedAt ?? null, now(), orderId).run();
 	const order = await getOrder(database, orderId);
 	await activity(database, 'admin', 'Order updated', 'order', orderId, order?.project);
 	await queueSheetSync(database, 'Orders', orderId, order);
 	return order;
 }
 
+export async function markCustomerNotified(database: AppDatabase, orderId: string) {
+	const notifiedAt = now();
+	const result = await database.prepare('UPDATE orders SET customer_notified_at = ?, updated_at = ? WHERE id = ?').bind(notifiedAt, notifiedAt, orderId).run();
+	return result.meta?.changes ? notifiedAt : null;
+}
+
+export async function archiveOrder(database: AppDatabase, orderId: string) {
+	const result = await database.prepare('UPDATE orders SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL').bind(now(), now(), orderId).run();
+	if (!result.meta?.changes) return null;
+	const order = await getOrder(database, orderId);
+	await activity(database, 'admin', 'Order archived', 'order', orderId, order?.project || '');
+	await queueSheetSync(database, 'Orders', orderId, order);
+	return order;
+}
+
+export async function restoreOrder(database: AppDatabase, orderId: string) {
+	const result = await database.prepare('UPDATE orders SET archived_at = NULL, updated_at = ? WHERE id = ? AND archived_at IS NOT NULL').bind(now(), orderId).run();
+	if (!result.meta?.changes) return null;
+	const order = await getOrder(database, orderId);
+	await activity(database, 'admin', 'Order restored', 'order', orderId, order?.project || '');
+	await queueSheetSync(database, 'Orders', orderId, order);
+	return order;
+}
+
+export async function permanentlyDeleteOrder(database: AppDatabase, orderId: string) {
+	const existing = await database.prepare('SELECT id, project FROM orders WHERE id = ? AND archived_at IS NOT NULL').bind(orderId).first<Row>();
+	if (!existing) return null;
+	await database.batch([
+		database.prepare('DELETE FROM invoices WHERE order_id = ?').bind(orderId),
+		database.prepare('DELETE FROM payments WHERE order_id = ?').bind(orderId),
+		database.prepare('DELETE FROM tasks WHERE order_id = ?').bind(orderId),
+		database.prepare('DELETE FROM orders WHERE id = ? AND archived_at IS NOT NULL').bind(orderId)
+	]);
+	await activity(database, 'admin', 'Order permanently deleted', 'order', orderId, String(existing.project || ''));
+	await queueSheetSync(database, 'Orders', orderId, { id: orderId }, 'delete');
+	return { id: orderId, project: String(existing.project || '') };
+}
+
 export async function createTask(database: AppDatabase, orderId: string, input: Partial<Task>) {
 	const timestamp = now();
-	const task: Task = { id: id('TSK'), orderId, name: String(input.name || '').trim(), assignee: '', editorId: input.editorId, status: 'Not started', progress: 0, due: input.due || '', instructions: input.instructions || '', textLink: input.textLink || '', imageUrl: input.imageUrl || '', outputLink: '', notes: '' };
-	await database.prepare('INSERT INTO tasks (id, order_id, editor_id, title, instructions, due_date, text_link, image_url, status, progress, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)').bind(task.id, orderId, task.editorId || null, task.name, task.instructions, task.due, task.textLink, task.imageUrl, task.status, timestamp, timestamp).run();
+	const task: Task = { id: id('TSK'), orderId, name: String(input.name || '').trim(), assignee: '', editorId: input.editorId, status: 'Not started', progress: 0, due: input.due || '', instructions: input.instructions || '', textLink: input.textLink || '', imageUrl: input.imageUrl || '', outputLink: '', notes: '', billableAmount: Math.max(0, Number(input.billableAmount || 0)), invoicedAmount: 0 };
+	await database.prepare('INSERT INTO tasks (id, order_id, editor_id, title, instructions, due_date, text_link, image_url, status, progress, billable_amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)').bind(task.id, orderId, task.editorId || null, task.name, task.instructions, task.due, task.textLink, task.imageUrl, task.status, task.billableAmount, timestamp, timestamp).run();
 	await updateOrderSummary(database, orderId);
 	const saved = (await getOrder(database, orderId))!.tasks.find((item) => item.id === task.id)!;
 	await activity(database, 'admin', 'Task assigned', 'task', task.id, `${saved.name} · ${saved.assignee}`);
@@ -245,7 +411,10 @@ export async function updateTask(database: AppDatabase, taskId: string, input: P
 	const allowedEditorStatuses: TaskStatus[] = ['Not started', 'Files downloaded', 'In progress', 'Waiting for clarification', 'Ready for review'];
 	const status = editorId && input.status && !allowedEditorStatuses.includes(input.status) ? existing.status : input.status ?? existing.status;
 	const progress = Math.max(0, Math.min(100, Number(input.progress ?? existing.progress)));
-	await database.prepare('UPDATE tasks SET editor_id = ?, title = ?, instructions = ?, due_date = ?, text_link = ?, image_url = ?, status = ?, progress = ?, output_link = ?, notes = ?, updated_at = ? WHERE id = ?').bind(editorId ? existing.editor_id : input.editorId ?? existing.editor_id, input.name ?? existing.title, input.instructions ?? existing.instructions, input.due ?? existing.due_date, input.textLink ?? existing.text_link, input.imageUrl ?? existing.image_url, status, progress, input.outputLink ?? existing.output_link, input.notes ?? existing.notes, now(), taskId).run();
+	const billableAmount = Math.max(0, Number(input.billableAmount ?? existing.billable_amount ?? 0));
+	const invoicedAmount = Number((await database.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM invoice_task_items WHERE task_id = ?').bind(taskId).first<{ total: number | string }>())?.total || 0);
+	if (billableAmount + 0.009 < invoicedAmount) throw new Error('Task value cannot be lower than the amount already invoiced.');
+	await database.prepare('UPDATE tasks SET editor_id = ?, title = ?, instructions = ?, due_date = ?, text_link = ?, image_url = ?, status = ?, progress = ?, output_link = ?, notes = ?, billable_amount = ?, updated_at = ? WHERE id = ?').bind(editorId ? existing.editor_id : input.editorId ?? existing.editor_id, input.name ?? existing.title, input.instructions ?? existing.instructions, input.due ?? existing.due_date, input.textLink ?? existing.text_link, input.imageUrl ?? existing.image_url, status, progress, input.outputLink ?? existing.output_link, input.notes ?? existing.notes, billableAmount, now(), taskId).run();
 	await updateOrderSummary(database, existing.order_id);
 	const task = (await getOrder(database, existing.order_id))!.tasks.find((item) => item.id === taskId)!;
 	await activity(database, actor, 'Task updated', 'task', taskId, `${task.status} · ${task.progress}%`);
@@ -275,17 +444,18 @@ export async function restoreTask(database: AppDatabase, taskId: string) {
 }
 
 export async function tasksForEditor(database: AppDatabase, editorId: string) {
-	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, o.project, o.customer_name, o.event, o.serial FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 ORDER BY t.due_date, t.created_at`, [editorId]);
+	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, o.project, o.customer_name, o.event, o.serial, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 ORDER BY t.due_date, t.created_at`, [editorId]);
 	return taskRows.map((row) => ({ ...taskFrom(row), project: row.project, customer: row.customer_name, workType: row.event, serial: row.serial }));
 }
 
 export async function updateOrderSummary(database: AppDatabase, orderId: string) {
-	const order = await database.prepare('SELECT historical FROM orders WHERE id = ?').bind(orderId).first<{ historical: number }>();
+	const order = await database.prepare('SELECT historical, status FROM orders WHERE id = ?').bind(orderId).first<{ historical: number; status: Order['status'] }>();
 	if (!order) return;
 	if (order.historical) {
 		await database.prepare("UPDATE orders SET status = 'Historical', progress = 100, updated_at = ? WHERE id = ?").bind(now(), orderId).run();
 		return;
 	}
+	if (['Delivered', 'Stopped'].includes(order.status)) return;
 	const active = await rows(database, 'SELECT status, progress FROM tasks WHERE order_id = ? AND archived_at IS NULL', [orderId]);
 	let status: Order['status'] = 'Received';
 	let progress = 0;
@@ -303,28 +473,50 @@ export async function updateOrderSummary(database: AppDatabase, orderId: string)
 }
 
 export async function recordPayment(database: AppDatabase, orderId: string, input: Partial<Payment>) {
-	const payment: Payment = { id: id('PAY'), orderId, amount: Number(input.amount || 0), paidAt: input.paidAt || new Date().toISOString().slice(0, 10), method: input.method || 'Manual', note: input.note || '' };
-	await database.prepare('INSERT INTO payments (id, order_id, amount, paid_at, method, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(payment.id, orderId, payment.amount, payment.paidAt, payment.method, payment.note, now()).run();
-	await activity(database, 'admin', 'Payment recorded', 'payment', payment.id, `${payment.amount}`);
+	const order = await getOrder(database, orderId);
+	if (!order) throw new Error('Order not found.');
+	const amount = Number(input.amount || 0);
+	if (!(amount > 0)) throw new Error('Payment amount must be greater than zero.');
+	const total = Math.max(0, order.price - order.discount);
+	if (order.priceSet !== false && order.paid + amount > total) throw new Error('Payment cannot be greater than the remaining balance.');
+	const payment: Payment = { id: id('PAY'), orderId, amount, paidAt: input.paidAt || new Date().toISOString().slice(0, 10), method: input.method || 'Manual', note: input.note || '', kind: input.kind === 'advance' ? 'advance' : 'payment' };
+	await database.prepare('INSERT INTO payments (id, order_id, amount, paid_at, method, note, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(payment.id, orderId, payment.amount, payment.paidAt, payment.method, payment.note, payment.kind, now()).run();
+	await activity(database, 'admin', payment.kind === 'advance' ? 'Advance collected' : 'Payment recorded', 'payment', payment.id, `${payment.amount}`);
 	await queueSheetSync(database, 'Payments', payment.id, payment);
 	await queueSheetSync(database, 'Orders', orderId, await getOrder(database, orderId));
 	return payment;
 }
 
-export async function recordInvoice(database: AppDatabase, orderId: string, messageInput: string | ((number: string) => string)) {
+export async function recordInvoice(database: AppDatabase, orderId: string, messageInput: string | ((number: string) => string), snapshot: Partial<Invoice> = {}) {
+	if (snapshot.paymentId) {
+		const existing = await database.prepare('SELECT id FROM invoices WHERE payment_id = ? LIMIT 1').bind(snapshot.paymentId).first<{ id: string }>();
+		if (existing?.id) return (await getInvoice(database, existing.id))!;
+	}
 	const year = new Date().getFullYear();
 	const counter = await database.prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 RETURNING value').bind(`invoice_${year}`).first<{ value: number }>();
 	const number = `INV-${year}-${String(Number(counter?.value || 1)).padStart(4, '0')}`;
 	const message = typeof messageInput === 'function' ? messageInput(number) : messageInput;
-	const invoice = { id: id('INV'), number, orderId, message, openedAt: now() };
-	await database.prepare('INSERT INTO invoices (id, number, order_id, message_snapshot, opened_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(invoice.id, invoice.number, orderId, invoice.message, invoice.openedAt, invoice.openedAt).run();
-	await activity(database, 'admin', 'Invoice opened in WhatsApp', 'invoice', invoice.id, number);
+	const invoice: Invoice = { id: id('INV'), number, orderId, message, openedAt: now(), kind: snapshot.kind || 'final', paymentId: snapshot.paymentId, amountReceived: Number(snapshot.amountReceived || 0), subtotal: Number(snapshot.subtotal || 0), discount: Number(snapshot.discount || 0), total: Number(snapshot.total || 0), paid: Number(snapshot.paid || 0), balance: Number(snapshot.balance || 0), taskItems: snapshot.taskItems || [], status: snapshot.status || 'draft', sentAt: snapshot.sentAt };
+	await database.prepare('INSERT INTO invoices (id, number, order_id, message_snapshot, opened_at, kind, payment_id, amount_received, subtotal, discount, total, paid, balance, status, sent_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(invoice.id, invoice.number, orderId, invoice.message, invoice.openedAt, invoice.kind, invoice.paymentId || null, invoice.amountReceived, invoice.subtotal, invoice.discount, invoice.total, invoice.paid, invoice.balance, invoice.status, invoice.sentAt || null, invoice.openedAt).run();
+	if (invoice.taskItems?.length) await database.batch(invoice.taskItems.map((item) => database.prepare('INSERT INTO invoice_task_items (invoice_id, task_id, task_name, amount) VALUES (?, ?, ?, ?)').bind(invoice.id, item.taskId, item.name, item.amount)));
+	await activity(database, 'admin', invoice.kind === 'advance' ? 'Advance invoice generated' : invoice.kind === 'payment' ? 'Payment invoice generated' : invoice.kind === 'partial' ? 'Partial work invoice generated' : 'Invoice generated', 'invoice', invoice.id, `${number}${invoice.kind === 'partial' ? ` · ${invoice.taskItems?.length || 0} task(s)` : ''}`);
 	await queueSheetSync(database, 'Invoices', invoice.id, invoice);
 	return invoice;
 }
 
 export async function listInvoices(database: AppDatabase) {
-	return (await rows(database, 'SELECT * FROM invoices ORDER BY created_at DESC')).map((row) => ({ id: row.id, number: row.number, orderId: row.order_id, message: row.message_snapshot, openedAt: row.opened_at }));
+	const invoiceRows = await rows(database, 'SELECT * FROM invoices ORDER BY created_at DESC');
+	const itemRows = await rows(database, 'SELECT * FROM invoice_task_items ORDER BY invoice_id, task_name');
+	return invoiceRows.map((row): Invoice => ({ id: row.id, number: row.number, orderId: row.order_id, message: row.message_snapshot, openedAt: row.opened_at, kind: row.kind === 'advance' ? 'advance' : row.kind === 'payment' ? 'payment' : row.kind === 'partial' ? 'partial' : 'final', paymentId: row.payment_id || undefined, amountReceived: Number(row.amount_received || 0), subtotal: Number(row.subtotal || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), paid: Number(row.paid || 0), balance: Number(row.balance || 0), status: ['sent','paid','cancelled'].includes(row.status) ? row.status : 'draft', sentAt: row.sent_at || undefined, taskItems: itemRows.filter((item) => item.invoice_id === row.id).map((item) => ({ taskId: String(item.task_id), name: String(item.task_name), amount: Number(item.amount || 0) })) }));
+}
+
+export async function updateInvoiceStatus(database: AppDatabase, invoiceId: string, status: NonNullable<Invoice['status']>) {
+	const invoice = await getInvoice(database, invoiceId);
+	if (!invoice) return null;
+	const sentAt = status === 'sent' ? invoice.sentAt || now() : invoice.sentAt || null;
+	await database.prepare('UPDATE invoices SET status = ?, sent_at = ? WHERE id = ?').bind(status, sentAt, invoiceId).run();
+	await activity(database, 'admin', `Invoice ${status}`, 'invoice', invoiceId, invoice.number);
+	return getInvoice(database, invoiceId);
 }
 
 export async function getInvoice(database: AppDatabase, invoiceId: string) {
@@ -334,6 +526,27 @@ export async function getInvoice(database: AppDatabase, invoiceId: string) {
 export async function listActivity(database: AppDatabase, entityType?: string, entityId?: string) {
 	const activityRows = entityType && entityId ? await rows(database, 'SELECT * FROM activity_logs WHERE entity_type = ? AND entity_id = ? ORDER BY created_at DESC', [entityType, entityId]) : await rows(database, 'SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 100');
 	return activityRows.map((row): ActivityLog => ({ id: row.id, actor: row.actor, action: row.action, entityType: row.entity_type, entityId: row.entity_id, details: row.details, createdAt: row.created_at }));
+}
+
+export async function listNotifications(database: AppDatabase, limit = 12) {
+	const activityRows = await rows(database, `SELECT a.*,
+		CASE
+			WHEN a.entity_type = 'order' THEN a.entity_id
+			WHEN a.entity_type = 'task' THEN (SELECT order_id FROM tasks WHERE id = a.entity_id)
+			WHEN a.entity_type = 'payment' THEN (SELECT order_id FROM payments WHERE id = a.entity_id)
+			WHEN a.entity_type = 'invoice' THEN (SELECT order_id FROM invoices WHERE id = a.entity_id)
+			ELSE NULL
+		END AS order_id
+		FROM activity_logs a ORDER BY a.created_at DESC LIMIT ?`, [Math.max(1, Math.min(50, limit))]);
+	return activityRows.map((row) => {
+		let path = '/dashboard';
+		if (row.entity_type === 'customer') path = '/customers';
+		else if (row.entity_type === 'editor') path = '/editors';
+		else if (row.entity_type === 'settings') path = '/settings';
+		else if (row.entity_type === 'invoice') path = `/invoices/${row.entity_id}`;
+		else if (row.order_id) path = `/orders/${row.order_id}`;
+		return { id: row.id, actor: row.actor, action: row.action, entityType: row.entity_type, entityId: row.entity_id, details: row.details, createdAt: row.created_at, path };
+	});
 }
 
 export async function listOrderActivity(database: AppDatabase, orderId: string) {

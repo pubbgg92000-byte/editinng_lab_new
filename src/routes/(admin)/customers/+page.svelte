@@ -25,7 +25,7 @@
 		const customer = selectedCustomer;
 		return customer ? orders.filter((order) => order.customerId === customer.id || (!order.customerId && order.customer === customer.business)) : [];
 	});
-	const totalBilled = $derived(selectedOrders.reduce((sum, order) => sum + (order.priceSet === false ? 0 : order.price), 0));
+	const totalBilled = $derived(selectedOrders.reduce((sum, order) => sum + (order.priceSet === false ? 0 : Math.max(0, order.price - order.discount)), 0));
 	const totalPaid = $derived(selectedOrders.reduce((sum, order) => sum + order.paid, 0));
 
 	function customerSaved(customer: Customer, synced: boolean) {
@@ -38,7 +38,12 @@
 	function openCustomer(customer: Customer) { selectedCustomer = customer; detailsOpen = true; }
 	function edit(customer: Customer) { detailsOpen = false; editingCustomer = customer; showNewCustomer = true; }
 	function editSelectedCustomer() { if (selectedCustomer) edit(selectedCustomer); }
-	async function copyLink(customer: Customer) { if (!customer.token) return; await navigator.clipboard.writeText(`${location.origin}/customer/${customer.token}`); toast = 'Private customer link copied'; setTimeout(() => toast = '', 2500); }
+	function customerPortalUrl(token: string) {
+		const url = new URL(`/customer/${token}`, location.origin);
+		if (['localhost', '127.0.0.1', '::1'].includes(url.hostname)) url.protocol = 'http:';
+		return url.toString();
+	}
+	async function copyLink(customer: Customer) { if (!customer.token) return; await navigator.clipboard.writeText(customerPortalUrl(customer.token)); toast = 'Private customer link copied'; setTimeout(() => toast = '', 2500); }
 	async function regenerate(customer: Customer) { if (!confirm('Regenerate this customer link? The previous link will stop working.')) return; const response = await fetch(`/api/customers/${customer.id}`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({action:'regenerate-token'}) }); const result=await response.json(); if(response.ok){ customerStore.update((items)=>items.map((item)=>item.id===customer.id?{...item,token:result.token}:item)); toast='Customer link regenerated'; } else toast=result.error||'Unable to regenerate link'; setTimeout(()=>toast='',2500); }
 	async function archiveCustomer(customer: Customer) { if (!confirm(`Archive ${customer.business}? Existing orders will be kept.`)) return; const response=await fetch(`/api/customers/${customer.id}`,{method:'DELETE'}); const result=await response.json(); if(!response.ok){toast=result.error||'Unable to archive customer';return} customers=customers.map((item)=>item.id===customer.id?result.customer:item); customerStore.update((items)=>items.filter((item)=>item.id!==customer.id)); toast='Customer archived'; }
 	async function restoreCustomer(customer: Customer) { const response=await fetch(`/api/customers/${customer.id}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'restore'})}); const result=await response.json(); if(!response.ok){toast=result.error||'Unable to restore customer';return} customers=customers.map((item)=>item.id===customer.id?result.customer:item); customerStore.update((items)=>[result.customer,...items.filter((item)=>item.id!==customer.id)]); toast='Customer restored'; }

@@ -1,24 +1,36 @@
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
-import { createCustomer, createOrder, listCustomers, listOrders } from '$lib/server/repository';
+import { addEventOption, createCustomer, createOrder, createTask, defaultEventOptions, getOrder, listCustomers, listOrdersPage } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
 
 export const GET = async ({ cookies, platform, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	return json({ orders: await listOrders(await readyDatabase(platform), url.searchParams.get('historical') !== 'false') });
+	return json(await listOrdersPage(await readyDatabase(platform), {
+		page: Number(url.searchParams.get('page') || 1),
+		pageSize: Number(url.searchParams.get('pageSize') || 25),
+		query: url.searchParams.get('q') || '',
+		status: url.searchParams.get('status') || '',
+		event: url.searchParams.get('event') || '',
+		includeHistorical: url.searchParams.get('historical') !== 'false',
+		archived: url.searchParams.get('archived') === 'true'
+	}));
 };
 
 export const POST = async ({ request, cookies, platform }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const input = await request.json();
-	if (!String(input.customer || '').trim() || !String(input.event || '').trim() || !String(input.project || '').trim()) return json({ error: 'Studio name, event and project name are required.' }, { status: 400 });
-	const priceSet = input.amount !== null && input.amount !== undefined && input.amount !== '';
-	const advanceSet = input.advance !== null && input.advance !== undefined && input.advance !== '';
-	const price = priceSet ? Math.max(0, Number(input.amount)) : 0;
-	const paid = advanceSet ? Math.max(0, Number(input.advance)) : 0;
-	if (!Number.isFinite(price) || !Number.isFinite(paid)) return json({ error: 'Amount and advance must be valid numbers.' }, { status: 400 });
-	if (priceSet && advanceSet && paid > price) return json({ error: 'Advance cannot be greater than the total amount.' }, { status: 400 });
+	const orderInputs: Record<string, any>[] = Array.isArray(input.orders) ? input.orders : [input];
+	if (!orderInputs.length || orderInputs.length > 20) return json({ error: 'Create between 1 and 20 orders at a time.' }, { status: 400 });
+	if (!String(input.customer || '').trim() || orderInputs.some((item) => !String(item.event || '').trim() || !String(item.project || '').trim())) return json({ error: 'Studio name, event and project name are required for every order.' }, { status: 400 });
+	for (const item of orderInputs) {
+		const priceSet = item.amount !== null && item.amount !== undefined && item.amount !== '';
+		const advanceSet = item.advance !== null && item.advance !== undefined && item.advance !== '';
+		const price = priceSet ? Math.max(0, Number(item.amount)) : 0;
+		const paid = advanceSet ? Math.max(0, Number(item.advance)) : 0;
+		if (!Number.isFinite(price) || !Number.isFinite(paid)) return json({ error: `Amount and advance for “${item.project}” must be valid numbers.` }, { status: 400 });
+		if (priceSet && advanceSet && paid > price) return json({ error: `Advance cannot be greater than the total for “${item.project}”.` }, { status: 400 });
+	}
 	const database = await readyDatabase(platform);
 	let customerId = String(input.customerId || '').trim();
 	let createdCustomer = null;
@@ -30,7 +42,20 @@ export const POST = async ({ request, cookies, platform }) => {
 		createdCustomer = existing || await createCustomer(database, { name: String(input.customerName || business).trim(), business, phone, email: String(input.customerEmail || '').trim() });
 		customerId = createdCustomer.id;
 	}
-	const order = await createOrder(database, { customerId, customer: String(input.customer).trim(), mobile: String(input.mobile || '').trim(), workType: String(input.event).trim(), project: String(input.project).trim(), receiving: String(input.receiving || '').trim(), duration: String(input.duration || '').trim(), price, paid, priceSet, advanceSet, source: String(input.source || '').trim(), remarks: String(input.remarks || '').trim(), due: String(input.due || '').trim(), important: Boolean(input.important) });
+	const createdOrders = [];
+	for (const item of orderInputs) {
+		const priceSet = item.amount !== null && item.amount !== undefined && item.amount !== '';
+		const advanceSet = item.advance !== null && item.advance !== undefined && item.advance !== '';
+		const event = String(item.event).trim();
+		if (!defaultEventOptions.some((option) => option.toLowerCase() === event.toLowerCase())) await addEventOption(database, event);
+		const order = await createOrder(database, { customerId, customer: String(input.customer).trim(), mobile: String(input.mobile || '').trim(), workType: event, project: String(item.project).trim(), receiving: String(item.receiving ?? input.receiving ?? '').trim(), duration: String(item.duration ?? input.duration ?? '').trim(), price: priceSet ? Math.max(0, Number(item.amount)) : 0, paid: advanceSet ? Math.max(0, Number(item.advance)) : 0, priceSet, advanceSet, source: String(item.source ?? input.source ?? '').trim(), remarks: String(item.remarks ?? input.remarks ?? '').trim(), due: String(item.due || '').trim(), important: Boolean(item.important ?? input.important) });
+		const initialTasks = Array.isArray(item.tasks) ? item.tasks : [];
+		for (const task of initialTasks) {
+			if (!String(task.name || '').trim()) continue;
+			await createTask(database, order.id, { name: String(task.name).trim(), due: String(task.due || item.due || ''), billableAmount: Math.max(0, Number(task.billableAmount || 0)) });
+		}
+		createdOrders.push(await getOrder(database, order.id) || order);
+	}
 	const sync = await flushSheetSync(database);
-	return json({ ok: true, order, customer: createdCustomer, sync }, { status: 201 });
+	return json({ ok: true, order: createdOrders[0], orders: createdOrders, customer: createdCustomer, sync }, { status: 201 });
 };

@@ -1,8 +1,22 @@
-export type OrderStatus = 'Historical' | 'Received' | 'Assigned' | 'Editing' | 'Waiting Review' | 'Revision' | 'Ready Delivery' | 'Completed';
+export type OrderStatus = 'Historical' | 'Received' | 'Assigned' | 'Editing' | 'Waiting Review' | 'Revision' | 'Ready Delivery' | 'Delivered' | 'Stopped' | 'Completed';
 export type TaskStatus = 'Not started' | 'Files downloaded' | 'In progress' | 'Waiting for clarification' | 'Ready for review' | 'Revision required' | 'Completed';
 export type EditorAvailability = 'available' | 'busy' | 'inactive';
 export type ThemeMode = 'light' | 'dark';
 export type ThemePalette = 'graphite-aqua' | 'ice-cyan' | 'forest-gold' | 'lime-cream' | 'meadow-amber' | 'midnight-violet' | 'obsidian-blue';
+export type StorageWarningLevel = 'healthy' | 'notice' | 'warning' | 'critical';
+
+export interface DatabaseStorageUsage {
+	bytes: number;
+	limitBytes: number;
+	limitMb: number;
+	percent: number;
+	level: StorageWarningLevel;
+	cleanup: {
+		lastRunAt: string;
+		syncedRecordsDeleted: number;
+		activityRecordsDeleted: number;
+	};
+}
 
 export interface Customer {
 	id: string;
@@ -46,7 +60,15 @@ export interface Task {
 	imageUrl?: string;
 	outputLink?: string;
 	notes?: string;
+	billableAmount?: number;
+	invoicedAmount?: number;
 	archived?: boolean;
+}
+
+export interface InvoiceTaskItem {
+	taskId: string;
+	name: string;
+	amount: number;
 }
 
 export interface Payment {
@@ -56,6 +78,7 @@ export interface Payment {
 	paidAt: string;
 	method: string;
 	note: string;
+	kind: 'advance' | 'payment';
 }
 
 export interface Invoice {
@@ -64,6 +87,17 @@ export interface Invoice {
 	orderId: string;
 	message: string;
 	openedAt: string;
+	kind: 'advance' | 'payment' | 'partial' | 'final';
+	paymentId?: string;
+	amountReceived: number;
+	subtotal: number;
+	discount: number;
+	total: number;
+	paid: number;
+	balance: number;
+	taskItems?: InvoiceTaskItem[];
+	status?: 'draft' | 'sent' | 'paid' | 'cancelled';
+	sentAt?: string;
 }
 
 export interface ActivityLog {
@@ -89,7 +123,9 @@ export interface Order {
 	files: number;
 	fileLink: string;
 	price: number;
+	discount: number;
 	paid: number;
+	initialAdvance?: number;
 	priceSet?: boolean;
 	advanceSet?: boolean;
 	color: string;
@@ -103,6 +139,10 @@ export interface Order {
 	remarks?: string;
 	important?: boolean;
 	historical?: boolean;
+	archived?: boolean;
+	deliveryMethod?: 'digital' | 'offline' | '';
+	deliveredAt?: string;
+	customerNotifiedAt?: string;
 }
 
 export interface StudioSettings {

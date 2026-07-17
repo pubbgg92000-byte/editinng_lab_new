@@ -24,7 +24,7 @@ Balance: {{balance}}
 
 {{payment_note}}{{invoice_footer_line}}
 
-Track your work status:
+View your work status and bill:
 {{portal_link}}`;
 
 export function fillTemplate(template: string, values: Record<string, string>) {

@@ -9,7 +9,9 @@ export const POST = async ({ params, request, cookies, platform }) => {
 	const input = await request.json();
 	if (!(Number(input.amount) > 0)) return json({ error: 'Payment amount must be greater than zero.' }, { status: 400 });
 	const database = await readyDatabase(platform);
-	const payment = await recordPayment(database, params.id, input);
+	let payment;
+	try { payment = await recordPayment(database, params.id, input); }
+	catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to record payment.' }, { status: 400 }); }
 	await flushSheetSync(database);
 	return json({ ok: true, payment }, { status: 201 });
 };

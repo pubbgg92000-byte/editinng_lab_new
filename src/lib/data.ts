@@ -15,25 +15,43 @@ export const editors: Editor[] = [
 ];
 
 export const orders: Order[] = [
-	{ id: 'ORD-2026-0041', project: 'Priya Wedding', customer: 'Rahul Photography', workType: 'Wedding photo edit', status: 'Editing', progress: 70, due: '25 Jul', files: 850, fileLink: 'drive.google.com/priya-wedding', price: 12000, paid: 5000, color: '#7C5CFC', tasks: [
+	{ id: 'ORD-2026-0041', project: 'Priya Wedding', customer: 'Rahul Photography', workType: 'Wedding photo edit', status: 'Editing', progress: 70, due: '25 Jul', files: 850, fileLink: 'drive.google.com/priya-wedding', price: 12000, discount: 0, paid: 5000, color: '#7C5CFC', tasks: [
 		{ id: 'TSK-101', name: 'Culling', assignee: 'Anil Kumar', status: 'Completed', progress: 100, due: '20 Jul', fileCount: 850, instructions: 'Remove blinks, duplicates and test shots.' },
 		{ id: 'TSK-102', name: 'Colour correction', assignee: 'Meera Das', status: 'In progress', progress: 70, due: '22 Jul', fileCount: 420, instructions: 'Warm natural tones. Keep skin texture. Use reference folder.' },
 		{ id: 'TSK-103', name: 'Quality check', assignee: 'Megha Rao', status: 'Not started', progress: 0, due: '24 Jul', fileCount: 420 },
 		{ id: 'TSK-104', name: 'Final delivery', assignee: 'Unassigned', status: 'Not started', progress: 0, due: '25 Jul' }
 	] },
-	{ id: 'ORD-2026-0040', project: 'Ananya Album', customer: 'AM Studios', workType: 'Album design', status: 'Waiting Review', progress: 88, due: '19 Jul', files: 146, fileLink: 'drive.google.com/ananya-album', price: 8500, paid: 8500, color: '#22C55E', tasks: [
+	{ id: 'ORD-2026-0040', project: 'Ananya Album', customer: 'AM Studios', workType: 'Album design', status: 'Waiting Review', progress: 88, due: '19 Jul', files: 146, fileLink: 'drive.google.com/ananya-album', price: 8500, discount: 0, paid: 8500, color: '#22C55E', tasks: [
 		{ id: 'TSK-098', name: 'Image selection', assignee: 'Anil Kumar', status: 'Completed', progress: 100, due: '15 Jul' },
 		{ id: 'TSK-099', name: 'Album design', assignee: 'Megha Rao', status: 'Ready for review', progress: 100, due: '18 Jul', instructions: 'Minimal ivory layouts, 40 spreads.' },
 		{ id: 'TSK-100', name: 'Quality check', assignee: 'Unassigned', status: 'Not started', progress: 0, due: '19 Jul' }
 	] },
-	{ id: 'ORD-2026-0039', project: 'Aarav Reception', customer: 'Frame House', workType: 'Highlight video', status: 'Assigned', progress: 20, due: '28 Jul', files: 312, fileLink: 'r2.studioflow.app/aarav', price: 18500, paid: 0, color: '#EAB308', tasks: [
+	{ id: 'ORD-2026-0039', project: 'Aarav Reception', customer: 'Frame House', workType: 'Highlight video', status: 'Assigned', progress: 20, due: '28 Jul', files: 312, fileLink: 'r2.studioflow.app/aarav', price: 18500, discount: 0, paid: 0, color: '#EAB308', tasks: [
 		{ id: 'TSK-095', name: 'Footage organisation', assignee: 'Kabir Shah', status: 'Files downloaded', progress: 20, due: '18 Jul' },
 		{ id: 'TSK-096', name: 'Highlight edit', assignee: 'Kabir Shah', status: 'Not started', progress: 0, due: '25 Jul' },
 		{ id: 'TSK-097', name: 'Quality check', assignee: 'Anil Kumar', status: 'Not started', progress: 0, due: '27 Jul' }
 	] },
-	{ id: 'ORD-2026-0038', project: 'Mira Portraits', customer: 'Priya Nair', workType: 'Photo retouching', status: 'Ready Delivery', progress: 100, due: 'Today', files: 36, fileLink: 'drive.google.com/mira-portraits', price: 3500, paid: 3500, color: '#3B82F6', tasks: [
+	{ id: 'ORD-2026-0038', project: 'Mira Portraits', customer: 'Priya Nair', workType: 'Photo retouching', status: 'Ready Delivery', progress: 100, due: 'Today', files: 36, fileLink: 'drive.google.com/mira-portraits', price: 3500, discount: 0, paid: 3500, color: '#3B82F6', tasks: [
 		{ id: 'TSK-094', name: 'Portrait retouching', assignee: 'Meera Das', status: 'Completed', progress: 100, due: 'Today' }
 	] }
 ];
 
 export const money = (amount: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+
+function dateParts(value: string | Date, withTime = false) {
+	if (!value) return '';
+	const text = String(value);
+	const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text);
+	const date = new Date(dateOnly ? `${text}T00:00:00.000Z` : value);
+	if (Number.isNaN(date.getTime())) return text;
+	const parts = new Intl.DateTimeFormat('en-GB', {
+		day: '2-digit', month: 'short', year: 'numeric',
+		...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
+		timeZone: dateOnly ? 'UTC' : 'Asia/Kolkata'
+	}).formatToParts(date);
+	const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
+	return `${part('day')}-${part('month')}-${part('year')}${withTime ? `, ${part('hour')}:${part('minute')}` : ''}`;
+}
+
+export const formatDate = (value?: string | Date) => value ? dateParts(value) : '';
+export const formatDateTime = (value?: string | Date) => value ? dateParts(value, true) : '';

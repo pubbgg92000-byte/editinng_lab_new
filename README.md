@@ -40,3 +40,15 @@ npm run build
 You can preview the production build with `npm run preview`.
 
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+
+## Data retention and storage
+
+- Successfully synchronized Google Sheets outbox records are retained for 30 days.
+- Activity logs are retained for 12 months.
+- Retention runs automatically at most once per day when the application receives traffic.
+- Database usage is compared with `DATABASE_STORAGE_LIMIT_MB` (500 MB by default). The application shows notices at 60%, warnings at 75%, and critical warnings at 90%.
+- Orders are loaded in 25-record server-side pages. Dashboard and global search queries are independently bounded.
+
+## Media storage
+
+StudioFlow does not store uploaded images, videos, or editing outputs in PostgreSQL. Store files in Google Drive, Cloudflare R2, Amazon S3, or another file host and save only an `https://` link in StudioFlow. Task reference and output fields reject inline `data:` values, local file paths, and non-HTTP protocols.

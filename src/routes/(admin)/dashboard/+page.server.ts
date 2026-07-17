@@ -1,3 +1,3 @@
 import { readyDatabase } from '$lib/server/db';
-import { listOrders } from '$lib/server/repository';
-export const load = async ({ platform }) => ({ orders: await listOrders(await readyDatabase(platform), false) });
+import { getDashboardData } from '$lib/server/repository';
+export const load = async ({ platform }) => ({ ...(await getDashboardData(await readyDatabase(platform))), currentDateIso: new Date().toISOString() });

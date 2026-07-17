@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { createCustomer, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResult, pendingSyncItems } from './repository';
+import { archiveEditor, createCustomer, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResult, pendingSyncItems } from './repository';
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 const encoder = new TextEncoder();
@@ -67,12 +67,12 @@ export async function readSheetValues(sheet: string) {
 const sheetRange = (sheet: string, cells: string) => `'${sheet.replaceAll("'", "''")}'!${cells}`;
 
 const definitions: Record<string, { headers: string[]; values: (payload: any) => unknown[] }> = {
-	Orders: { headers: ['S', 'Studio Name', 'Mobile No.', 'Event', 'Names', 'Receiving', 'Duration', 'Amount', 'Advance', 'Balance', 'Source', 'Assigned Name', 'Remark', 'Record ID', 'Status', 'Progress', 'Due Date', 'Important', 'Historical'], values: (order) => [order.serial, order.customer, order.mobile || '', order.workType, order.project, order.receiving || '', order.duration || '', order.priceSet === false ? '' : order.price, order.advanceSet === false && !(order.payments || []).length ? '' : order.paid, order.priceSet === false ? '' : Math.max(0, order.price - order.paid), order.source || '', [...new Set((order.tasks || []).filter((task: any) => !task.archived && task.assignee !== 'Unassigned').map((task: any) => task.assignee))].join(', '), order.remarks || '', order.id, order.status, order.progress, order.due || '', order.important ? '★' : '', order.historical ? 'Yes' : 'No'] },
+	Orders: { headers: ['S', 'Studio Name', 'Mobile No.', 'Event', 'Names', 'Receiving', 'Duration', 'Subtotal', 'Discount %', 'Discount Amount', 'Total', 'Collected', 'Balance', 'Source', 'Assigned Name', 'Remark', 'Record ID', 'Status', 'Progress', 'Due Date', 'Important', 'Historical', 'Archived'], values: (order) => [order.serial, order.customer, order.mobile || '', order.workType, order.project, order.receiving || '', order.duration || '', order.priceSet === false ? '' : order.price, order.priceSet === false || !order.price ? 0 : Number(((order.discount || 0) / order.price * 100).toFixed(2)), order.discount || 0, order.priceSet === false ? '' : Math.max(0, order.price - order.discount), order.advanceSet === false && !(order.payments || []).length ? '' : order.paid, order.priceSet === false ? '' : Math.max(0, order.price - order.discount - order.paid), order.source || '', [...new Set((order.tasks || []).filter((task: any) => !task.archived && task.assignee !== 'Unassigned').map((task: any) => task.assignee))].join(', '), order.remarks || '', order.id, order.status, order.progress, order.due || '', order.important ? '★' : '', order.historical ? 'Yes' : 'No', order.archived ? 'Yes' : 'No'] },
 	Customers: { headers: ['Customer ID', 'Name', 'Studio Name', 'Phone', 'Email', 'Address', 'GSTIN', 'Projects', 'Pending', 'Archived', 'Record ID'], values: (customer) => [customer.id, customer.name, customer.business, customer.phone, customer.email, customer.address || '', customer.gst || '', customer.projects, customer.pending, customer.archived ? 'Yes' : 'No', customer.id] },
 	Editors: { headers: ['Editor ID', 'Name', 'Phone', 'Specialty', 'Availability', 'Active Tasks', 'Archived', 'Record ID'], values: (editor) => [editor.id, editor.name, editor.phone, editor.specialty, editor.availability || (editor.available ? 'available' : 'busy'), editor.activeTasks, editor.archived ? 'Yes' : 'No', editor.id] },
-	Tasks: { headers: ['Task ID', 'Order ID', 'Task', 'Editor ID', 'Editor Name', 'Due Date', 'Instructions', 'Text Link', 'Image URL', 'Status', 'Progress', 'Output Link', 'Notes', 'Archived', 'Record ID'], values: (task) => [task.id, task.orderId, task.name, task.editorId || '', task.assignee || '', task.due || '', task.instructions || '', task.textLink || '', task.imageUrl || '', task.status, task.progress, task.outputLink || '', task.notes || '', task.archived ? 'Yes' : 'No', task.id] },
-	Payments: { headers: ['Payment ID', 'Order ID', 'Amount', 'Date', 'Method', 'Note', 'Record ID'], values: (payment) => [payment.id, payment.orderId, payment.amount, payment.paidAt, payment.method, payment.note, payment.id] },
-	Invoices: { headers: ['Invoice ID', 'Invoice Number', 'Order ID', 'Message', 'Opened At', 'Record ID'], values: (invoice) => [invoice.id, invoice.number, invoice.orderId, invoice.message, invoice.openedAt, invoice.id] },
+	Tasks: { headers: ['Task ID', 'Order ID', 'Task', 'Editor ID', 'Editor Name', 'Due Date', 'Billable Amount', 'Invoiced Amount', 'Instructions', 'Text Link', 'Image URL', 'Status', 'Progress', 'Output Link', 'Notes', 'Archived', 'Record ID'], values: (task) => [task.id, task.orderId, task.name, task.editorId || '', task.assignee || '', task.due || '', task.billableAmount || 0, task.invoicedAmount || 0, task.instructions || '', task.textLink || '', task.imageUrl || '', task.status, task.progress, task.outputLink || '', task.notes || '', task.archived ? 'Yes' : 'No', task.id] },
+	Payments: { headers: ['Payment ID', 'Order ID', 'Type', 'Amount', 'Date', 'Method', 'Note', 'Record ID'], values: (payment) => [payment.id, payment.orderId, payment.kind === 'advance' ? 'Advance' : 'Payment', payment.amount, payment.paidAt, payment.method, payment.note, payment.id] },
+	Invoices: { headers: ['Invoice ID', 'Invoice Number', 'Order ID', 'Type', 'Payment ID', 'Amount Received', 'Subtotal', 'Discount %', 'Discount Amount', 'Total', 'Paid', 'Balance', 'Message', 'Created At', 'Record ID'], values: (invoice) => [invoice.id, invoice.number, invoice.orderId, invoice.kind, invoice.paymentId || '', invoice.amountReceived, invoice.subtotal, invoice.subtotal ? Number((invoice.discount / invoice.subtotal * 100).toFixed(2)) : 0, invoice.discount, invoice.total, invoice.paid, invoice.balance, invoice.message, invoice.openedAt, invoice.id] },
 	'Activity Logs': { headers: ['Time', 'Actor', 'Action', 'Entity Type', 'Entity ID', 'Details', 'Record ID'], values: (entry) => [entry.createdAt, entry.actor, entry.action, entry.entityType, entry.entityId, entry.details, entry.id] },
 	Settings: { headers: ['Key', 'Value', 'Record ID'], values: (settings) => ['studio', JSON.stringify(settings), 'studio'] }
 };
@@ -96,7 +96,7 @@ async function formatWorkbook(snapshots: Record<string, any[]>) {
 		Customers: [2, 4, 5],
 		Editors: [3],
 		Tasks: [2, 6, 7, 8, 11, 12],
-		Invoices: [3],
+		Invoices: [11],
 		'Activity Logs': [2, 5],
 		Settings: [1]
 	};
@@ -121,9 +121,9 @@ async function formatWorkbook(snapshots: Record<string, any[]>) {
 			if (columnIndex >= definition.headers.length) continue;
 			requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: columnIndex, endIndex: columnIndex + 1 }, properties: { pixelSize: sheet === 'Settings' || sheet === 'Invoices' ? 280 : 210 }, fields: 'pixelSize' } });
 		}
-		if (sheet === 'Orders') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 7, endColumnIndex: 10 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } });
+		if (sheet === 'Orders') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 7, endColumnIndex: 12 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } });
 		if (sheet === 'Orders') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 17, endColumnIndex: 18 }, cell: { userEnteredFormat: { textFormat: { foregroundColor: { red: 0.9, green: 0.12, blue: 0.12 }, bold: true, fontSize: 14 } } }, fields: 'userEnteredFormat.textFormat' } });
-		if (sheet === 'Payments') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 2, endColumnIndex: 3 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } });
+		if (sheet === 'Payments') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 3, endColumnIndex: 4 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } });
 		(snapshots[sheet] || []).forEach((record, index) => {
 			if (!record.archived) return;
 			requests.push({ repeatCell: { range: { sheetId, startRowIndex: index + 1, endRowIndex: index + 2, startColumnIndex: 0, endColumnIndex: definition.headers.length }, cell: { userEnteredFormat: { backgroundColor: { red: 0.94, green: 0.94, blue: 0.94 }, textFormat: { fontSize: 10, strikethrough: true, foregroundColor: { red: 0.45, green: 0.45, blue: 0.45 } } } }, fields: 'userEnteredFormat(backgroundColor,textFormat)' } });
@@ -138,7 +138,7 @@ async function formatWorkbook(snapshots: Record<string, any[]>) {
 
 async function writeWorkbookSnapshot(database: AppDatabase) {
 	const [orders, customers, editors, invoices, activityLogs, settings] = await Promise.all([
-		listOrders(database),
+		listOrders(database, true, true),
 		listCustomers(database, true),
 		listEditors(database, true),
 		listInvoices(database),
@@ -201,25 +201,50 @@ export async function importHistoricalOrders(database: AppDatabase) {
 	const sheet = ordersTab();
 	const values = await readSheetValues(sheet) || [];
 	if (values.length < 2) return { imported: 0, skipped: 0 };
+	const headers = values[0].map((value) => String(value || '').trim());
+	const cell = (row: unknown[], ...names: string[]) => {
+		const index = names.map((name) => headers.indexOf(name)).find((value) => value >= 0);
+		return index === undefined ? '' : row[index];
+	};
 	let imported = 0;
 	let skipped = 0;
 	for (const row of values.slice(1)) {
-		const serial = Number(row[0]);
-		const business = String(row[1] || '').trim();
-		const phone = String(row[2] || '').trim();
-		const event = String(row[3] || '').trim();
-		const project = String(row[4] || '').trim();
+		const serial = Number(cell(row, 'S', 'S.No.', 'Serial'));
+		const business = String(cell(row, 'Studio Name') || '').trim();
+		const phone = String(cell(row, 'Mobile No.', 'Phone') || '').trim();
+		const event = String(cell(row, 'Event') || '').trim();
+		const project = String(cell(row, 'Names', 'Project / Names', 'Project') || '').trim();
 		if (!serial || !business || (!event && !project)) { skipped++; continue; }
 		const existing = await database.prepare('SELECT id FROM orders WHERE serial = ?').bind(serial).first();
 		if (existing) { skipped++; continue; }
 		let customer = await database.prepare('SELECT id FROM customers WHERE lower(business) = lower(?) AND phone = ?').bind(business, phone).first<{ id: string }>();
 		if (!customer) customer = await createCustomer(database, { name: business, business, phone }) as unknown as { id: string };
-		const orderId = String(row[13] || '') || `ORD-IMPORT-${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const orderId = String(cell(row, 'Record ID', 'Order ID') || '') || `ORD-IMPORT-${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
 		const timestamp = nowIso();
-		await database.prepare("INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, advance, source, remarks, due_date, status, progress, historical, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'Historical', 100, 1, ?, ?)").bind(orderId, serial, customer.id, business, phone, event || 'Imported', project || event, String(row[5] || ''), String(row[6] || ''), Number(row[7] || 0), Number(row[8] || 0), String(row[10] || ''), [String(row[12] || ''), row[11] ? `Legacy assignee: ${row[11]}` : ''].filter(Boolean).join(' · '), timestamp, timestamp).run();
+		const subtotal = Number(cell(row, 'Subtotal', 'Amount') || 0);
+		const discountValue = cell(row, 'Discount Amount', 'Discount');
+		const discount = discountValue === '' ? Math.round(subtotal * Number(cell(row, 'Discount %') || 0) / 100) : Number(discountValue || 0);
+		await database.prepare("INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, source, remarks, due_date, status, progress, historical, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'Historical', 100, 1, ?, ?)").bind(orderId, serial, customer.id, business, phone, event || 'Imported', project || event, String(cell(row, 'Receiving') || ''), String(cell(row, 'Duration') || ''), subtotal, discount, Number(cell(row, 'Collected', 'Advance') || 0), String(cell(row, 'Source') || ''), [String(cell(row, 'Remark') || ''), cell(row, 'Assigned Name', 'Assigned Names') ? `Legacy assignee: ${cell(row, 'Assigned Name', 'Assigned Names')}` : ''].filter(Boolean).join(' · '), timestamp, timestamp).run();
 		imported++;
 	}
 	return { imported, skipped };
+}
+
+export async function reconcileEditorsFromSheet(database: AppDatabase) {
+	if (!configured()) throw new Error('Google Sheets service account is not configured.');
+	const values = await readSheetValues('Editors') || [];
+	if (!values.length) return { editorsArchived: 0, editorRows: 0 };
+	const headers = values[0].map((value) => String(value || '').trim());
+	const idIndex = headers.findIndex((header) => ['Editor ID', 'Record ID'].includes(header));
+	if (idIndex < 0 || !headers.includes('Name')) return { editorsArchived: 0, editorRows: 0, warning: 'Editors tab headers were not recognized.' };
+	const sheetIds = new Set(values.slice(1).map((row) => String(row[idIndex] || '').trim()).filter(Boolean));
+	const activeEditors = (await listEditors(database, true)).filter((editor) => !editor.archived);
+	let editorsArchived = 0;
+	for (const editor of activeEditors) {
+		if (sheetIds.has(editor.id)) continue;
+		if (await archiveEditor(database, editor.id)) editorsArchived++;
+	}
+	return { editorsArchived, editorRows: sheetIds.size };
 }
 
 const nowIso = () => new Date().toISOString();
