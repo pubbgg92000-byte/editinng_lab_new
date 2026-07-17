@@ -231,7 +231,7 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 		{ header: 'Entity Type', key: 'entityType', width: 16, format: 'center' }, { header: 'Entity ID', key: 'entityId', width: 24 }, { header: 'Details', key: 'details', width: 44 }, { header: 'Log ID', key: 'id', width: 24 }
 	], [...data.activity].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map((entry) => ({ createdAt: asDate(entry.createdAt), actor: entry.actor || null, action: entry.action, entityType: entry.entityType, entityId: entry.entityId || null, details: entry.details || null, id: entry.id })), { tabColor: 'FF64748B' });
 
-	const settingLabels: Record<string, string> = { studioName: 'Studio Name', address: 'Address', phone: 'Phone', email: 'Email', gstin: 'GSTIN', paymentNote: 'Payment Note', invoiceFooter: 'Invoice Footer', assignmentTemplate: 'Assignment Template', invoiceTemplate: 'Invoice Template', themePalette: 'Theme Palette', themeDefaultMode: 'Default Theme Mode' };
+	const settingLabels: Record<string, string> = { studioName: 'Studio Name', logoUrl: 'Logo URL', address: 'Address', phone: 'Phone', email: 'Email', gstin: 'GSTIN', paymentNote: 'Payment Note', invoiceFooter: 'Invoice Footer', assignmentTemplate: 'Assignment Template', invoiceTemplate: 'Invoice Template', themePalette: 'Theme Palette', themeDefaultMode: 'Default Theme Mode' };
 	addSheet(workbook, 'Settings', [
 		{ header: 'Setting', key: 'setting', width: 28 }, { header: 'Value', key: 'value', width: 90 }
 	], Object.entries(data.settings).map(([key, value]) => ({ setting: settingLabels[key] || key, value: value === null || value === undefined || value === '' ? null : String(value) })), { tabColor: 'FF475569' });

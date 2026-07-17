@@ -21,40 +21,26 @@
 			document.documentElement.style.colorScheme = 'light';
 		}
 	</script>
-	<link rel="icon" type="image/png" href="/anjana-creations-logo.png" />
-	<link rel="apple-touch-icon" href="/anjana-creations-logo.png" />
+	<link rel="icon" href={data.settings.logoUrl || '/studioflow.svg'} />
+	<link rel="apple-touch-icon" href={data.settings.logoUrl || '/studioflow.svg'} />
 	<meta name="theme-color" content="#0F1115" media="(prefers-color-scheme: dark)" />
 	<meta name="theme-color" content="#F8FAFC" media="(prefers-color-scheme: light)" />
-	<meta
-		name="description"
-		content="Anjana Creations manages customer projects, editing assignments, billing and delivery in one focused workflow."
-	/>
-	<meta name="application-name" content="Anjana Creations" />
-	<meta name="robots" content="index, follow" />
+	<meta name="description" content="StudioFlow manages customers, editing assignments, billing and delivery in one focused workflow." />
+	<meta name="application-name" content="StudioFlow" />
+	<meta name="robots" content="noindex, nofollow" />
 
 	<meta property="og:type" content="website" />
-	<meta property="og:site_name" content="Anjana Creations" />
-	<meta property="og:title" content="Anjana Creations — Editing studio workflow" />
+	<meta property="og:site_name" content="StudioFlow" />
+	<meta property="og:title" content="StudioFlow — Editing studio workflow" />
 	<meta
 		property="og:description"
 		content="Manage customers, editing orders, editors, invoices and delivery in one focused workflow."
 	/>
-	<meta property="og:url" content="https://editing-lab-new.vercel.app" />
-	<meta property="og:image" content="https://editing-lab-new.vercel.app/anjana-creations-logo-social-v3.png" />
-	<meta property="og:image:secure_url" content="https://editing-lab-new.vercel.app/anjana-creations-logo-social-v3.png" />
-	<meta property="og:image:type" content="image/png" />
-	<meta property="og:image:width" content="1200" />
-	<meta property="og:image:height" content="630" />
-	<meta property="og:image:alt" content="Anjana Creations gold logo on a deep navy background" />
-
-	<meta name="twitter:card" content="summary_large_image" />
-	<meta name="twitter:title" content="Anjana Creations — Editing studio workflow" />
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:title" content="StudioFlow — Editing studio workflow" />
 	<meta
 		name="twitter:description"
 		content="A lightweight workflow system for editing studios."
 	/>
-	<meta name="twitter:image" content="https://editing-lab-new.vercel.app/anjana-creations-logo-social-v3.png" />
-	<meta name="twitter:image:alt" content="Anjana Creations gold logo on a deep navy background" />
-	<link rel="canonical" href="https://editing-lab-new.vercel.app" />
 </svelte:head>
 {@render children()}

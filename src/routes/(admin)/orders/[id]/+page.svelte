@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { ArrowLeft, Archive, Check, Edit3, ExternalLink, FileText, IndianRupee, Plus, RotateCcw, Star, Settings2, PackageCheck, CircleCheckBig } from 'lucide-svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import BillingModal from '$lib/components/BillingModal.svelte';
@@ -11,9 +11,9 @@
 	import type { Editor, Order, Task } from '$lib/types';
 
 	let { data } = $props();
-	let order = $state<Order>(data.order);
-	let editors = $state<Editor[]>(data.editors);
-	let activities = $state(data.activity);
+	let order = $state<Order>(untrack(() => data.order));
+	let editors = $state<Editor[]>(untrack(() => data.editors));
+	let activities = $state(untrack(() => data.activity));
 	let taskModalOpen = $state(false);
 	let paymentModalOpen = $state(false);
 	let billingModalOpen = $state(false);
@@ -197,7 +197,7 @@
 	});
 </script>
 
-<svelte:head><title>{order.project} — Anjana Creations</title></svelte:head>
+<svelte:head><title>{order.project} — StudioFlow</title></svelte:head>
 
 <div class="detail-top">
 	<a href="/orders" class="back"><ArrowLeft size={16}/> Orders</a>

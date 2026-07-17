@@ -5,10 +5,10 @@ import { getOrder, getSettings, listEditors, recordActivity, regenerateEditorTok
 import { editorAssignmentMessage, whatsappUrl } from '$lib/server/whatsapp';
 import { flushSheetSync } from '$lib/server/googleSheets';
 
-export const POST = async ({ params, request, cookies, platform, url }) => {
+export const POST = async ({ params, request, cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const input = await request.json();
-	const database = await readyDatabase(platform);
+	const database = await readyDatabase(locals.tenant);
 	let editor = (await listEditors(database, true)).find((item) => item.id === params.id);
 	if (!editor) return json({ error: 'Editor not found' }, { status: 404 });
 	if (!editor.phone) return json({ error: 'Add the editor WhatsApp number first.' }, { status: 400 });
@@ -19,8 +19,8 @@ export const POST = async ({ params, request, cookies, platform, url }) => {
 	if (!order) return json({ error: 'Order not found' }, { status: 404 });
 	const tasks = order.tasks.filter((task) => !task.archived && task.editorId === editor!.id);
 	if (!tasks.length) return json({ error: 'Assign at least one task to this editor first.' }, { status: 400 });
-	const message = editorAssignmentMessage(await getSettings(database), editor, order, tasks, editor.token, url.origin);
+	const message = editorAssignmentMessage(await getSettings(database), editor, order, tasks, editor.token, url.origin, locals.tenant!.slug);
 	await recordActivity(database, 'admin', 'Editor assignment opened in WhatsApp', 'order', order.id, `${editor.name} · ${tasks.length} task(s)`);
-	await flushSheetSync(database);
+	await flushSheetSync(database, locals.tenant!);
 	return json({ ok: true, url: whatsappUrl(editor.phone, message), token: editor.token });
 };

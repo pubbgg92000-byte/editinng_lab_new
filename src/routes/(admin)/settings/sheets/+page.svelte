@@ -6,15 +6,15 @@
 	const isPhoneColumn = (column: string) => /phone|mobile|whatsapp/i.test(column);
 </script>
 
-<svelte:head><title>Sheets data — Anjana Creations</title></svelte:head>
+<svelte:head><title>Sheets data — StudioFlow</title></svelte:head>
 
 <div class="sheet-heading">
 	<div class="heading-copy"><a href="/settings"><ArrowLeft size={14}/> Back to settings</a><span class="eyebrow"><Sheet size={13}/> Data workspace</span><h1>Google Sheets data</h1><p>Browse the live tables behind your customers, orders, editors, billing, and studio activity.</p></div>
-	<div class="sheet-actions"><a class="secondary open-sheet" href={data.sheetUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13}/> Open Google Sheet</a><button class="secondary" onclick={() => location.reload()}><RefreshCw size={13}/> Refresh</button></div>
+	<div class="sheet-actions">{#if data.sheetUrl}<a class="secondary open-sheet" href={data.sheetUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13}/> Open Google Sheet</a>{/if}<button class="secondary" onclick={() => location.reload()}><RefreshCw size={13}/> Refresh</button></div>
 </div>
 
 <div class:live={data.live} class="mode-notice">
-	{#if data.live}<Sheet size={14}/><span><strong>{data.source === 'public' ? 'Live view-only Google Sheet' : 'Live Google Sheets'}</strong> — {data.source === 'public' ? 'showing real data from the shared sheet; editing and automatic sync require service-account credentials.' : 'showing synchronized spreadsheet data.'}</span>{:else}<CircleAlert size={14}/><span><strong>Demo data</strong> — the shared spreadsheet could not be read.</span>{/if}
+	{#if data.live}<Sheet size={14}/><span><strong>Live Google Sheets</strong> — showing synchronized data from this tenant’s isolated workbook.</span>{:else}<CircleAlert size={14}/><span><strong>Sheet unavailable</strong> — no fallback data is shown; ask the StudioFlow owner to validate this tenant’s workbook connection.</span>{/if}
 </div>
 
 <div class="sheet-tabs" role="tablist" aria-label="Google Sheets tables">

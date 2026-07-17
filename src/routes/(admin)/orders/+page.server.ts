@@ -1,8 +1,8 @@
 import { readyDatabase } from '$lib/server/db';
 import { countArchivedOrders, getOrderQueueCounts, listOrderEvents, listOrdersPage } from '$lib/server/repository';
 
-export const load = async ({ platform, url }) => {
-	const database = await readyDatabase(platform);
+export const load = async ({ locals, url }) => {
+	const database = await readyDatabase(locals.tenant);
 	const filters = {
 		query: String(url.searchParams.get('q') || '').trim(),
 		status: String(url.searchParams.get('status') || '').trim(),

@@ -1,8 +1,5 @@
-import { customers, editors, orders } from '$lib/data';
 import { readSheetValues } from '$lib/server/googleSheets';
 
-const sheetUrl = 'https://docs.google.com/spreadsheets/d/1jsxofckCwLiYPKiF9Di6CrXsET3foZKE9Jr8LFryADc/edit?usp=sharing';
-const publicSheetId = '1jsxofckCwLiYPKiF9Di6CrXsET3foZKE9Jr8LFryADc';
 
 function parseCsv(csv: string) {
 	const rows: string[][] = [];
@@ -24,14 +21,6 @@ function parseCsv(csv: string) {
 	return rows.filter((current) => current.some((value) => value.length > 0));
 }
 
-async function readPublicSheetValues(sheet: string) {
-	const endpoint = `https://docs.google.com/spreadsheets/d/${publicSheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheet)}`;
-	const response = await fetch(endpoint);
-	if (!response.ok) return null;
-	const body = await response.text();
-	if (body.includes('<!DOCTYPE html>') || body.includes('google.visualization.Query.setResponse')) return null;
-	return parseCsv(body);
-}
 
 function presentSheetValues(sheet: string, values: unknown[][]) {
 	if (sheet === 'Settings' && values.length > 1) {
@@ -117,29 +106,26 @@ function entityHref(entityType: string, entityId: string, taskOrders: Map<string
 }
 
 const definitions = [
-	{ name: 'Customers', columns: ['Customer ID', 'Name', 'Business', 'Phone', 'Email', 'Projects', 'Pending'], demo: customers.map((c) => [c.id, c.name, c.business, c.phone, c.email, c.projects, c.pending]) },
-	{ name: 'Orders', columns: ['S', 'Studio Name', 'Mobile No.', 'Event', 'Names', 'Receiving', 'Duration', 'Amount', 'Advance', 'Balance', 'Source', 'Assigned Name', 'Remark'], demo: orders.map((o) => [o.id, o.customer, o.mobile ?? '', o.workType, o.project, o.receiving ?? '', o.duration ?? '', o.price, o.paid, o.price - o.paid, o.source ?? '', o.assignedTo ?? '', o.remarks ?? '']) },
-	{ name: 'Tasks', columns: ['Task ID', 'Order ID', 'Task', 'Editor', 'Due date', 'Progress', 'Status'], demo: orders.flatMap((o) => o.tasks.map((t) => [t.id, o.id, t.name, t.assignee, t.due, `${t.progress}%`, t.status])) },
-	{ name: 'Editors', columns: ['Editor ID', 'Name', 'Speciality', 'Phone', 'Active tasks', 'Availability'], demo: editors.map((e) => [e.code || e.id, e.name, e.specialty, e.phone, e.activeTasks, e.available ? 'Available' : 'At capacity']) },
-	{ name: 'Invoices', columns: ['Invoice ID', 'Order ID', 'Customer', 'Project', 'Total', 'Paid', 'Balance', 'Status'], demo: orders.map((o) => [`INV-${o.id.slice(-4)}`, o.id, o.customer, o.project, o.price, o.paid, o.price - o.paid, o.paid === o.price ? 'Paid' : o.paid ? 'Partially paid' : 'Unpaid']) },
-	{ name: 'Payments', columns: ['Payment ID', 'Invoice ID', 'Customer', 'Amount', 'Date', 'Method'], demo: orders.filter((o) => o.paid > 0).map((o, i) => [`PAY-00${i + 1}`, `INV-${o.id.slice(-4)}`, o.customer, o.paid, '15 Jul 2026', i % 2 ? 'UPI' : 'Bank transfer']) },
-	{ name: 'Activity Logs', columns: ['Time', 'Action', 'Entity', 'Details'], demo: [['15 Jul, 11:42', 'Task updated', 'TSK-102', 'Colour correction · 70%'], ['14 Jul, 16:08', 'Task approved', 'TSK-101', 'Culling approved by admin'], ['12 Jul, 14:10', 'Order assigned', 'ORD-2026-0041', 'Editors notified on WhatsApp']] },
-	{ name: 'Settings', columns: ['Key', 'Value'], demo: [['Studio name', 'Anjana Creations'], ['Google Sheets sync', 'Demo mode'], ['WhatsApp notifications', 'Demo mode'], ['Default currency', 'INR']] }
+	{ name: 'Customers', columns: ['Customer ID', 'Name', 'Business', 'Phone', 'Email', 'Projects', 'Pending'], demo: [] as unknown[][] },
+	{ name: 'Orders', columns: ['S', 'Studio Name', 'Mobile No.', 'Event', 'Names', 'Receiving', 'Duration', 'Amount', 'Advance', 'Balance', 'Source', 'Assigned Name', 'Remark'], demo: [] as unknown[][] },
+	{ name: 'Tasks', columns: ['Task ID', 'Order ID', 'Task', 'Editor', 'Due date', 'Progress', 'Status'], demo: [] as unknown[][] },
+	{ name: 'Editors', columns: ['Editor ID', 'Name', 'Speciality', 'Phone', 'Active tasks', 'Availability'], demo: [] as unknown[][] },
+	{ name: 'Invoices', columns: ['Invoice ID', 'Order ID', 'Customer', 'Project', 'Total', 'Paid', 'Balance', 'Status'], demo: [] as unknown[][] },
+	{ name: 'Payments', columns: ['Payment ID', 'Invoice ID', 'Customer', 'Amount', 'Date', 'Method'], demo: [] as unknown[][] },
+	{ name: 'Activity Logs', columns: ['Time', 'Action', 'Entity', 'Details'], demo: [] as unknown[][] },
+	{ name: 'Settings', columns: ['Key', 'Value'], demo: [] as unknown[][] }
 ];
 
-export const load = async () => {
+export const load = async ({ locals }) => {
+	const tenant = locals.tenant!;
 	const liveResults = await Promise.all(definitions.map(async (sheet) => {
 		try {
-			const values = await readSheetValues(sheet.name);
+			const values = await readSheetValues(tenant, sheet.name === 'Orders' ? tenant.ordersTab : sheet.name);
 			if (values !== null) return { values, source: 'service-account' as const };
-		} catch { /* Fall through to the public view-only sheet. */ }
-		try {
-			const values = await readPublicSheetValues(sheet.name);
-			return values === null ? null : { values, source: 'public' as const };
 		} catch { return null; }
 	}));
 	const live = liveResults.some((result) => result !== null);
-	const source = liveResults.some((result) => result?.source === 'service-account') ? 'service-account' : live ? 'public' : 'demo';
+	const source = live ? 'service-account' : 'unavailable';
 	const sourceValues = Object.fromEntries(definitions.map((sheet, index) => [sheet.name, liveResults[index]?.values ?? [sheet.columns, ...sheet.demo]]));
 	const sourceRecords = Object.fromEntries(Object.entries(sourceValues).map(([name, values]) => [name, recordsFrom(values)])) as Record<string, Record<string, string>[]>;
 	const customerIds = new Map<string, string>();
@@ -163,7 +149,7 @@ export const load = async () => {
 	return {
 		live,
 		source,
-		sheetUrl,
+		sheetUrl: tenant.googleSheetId ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(tenant.googleSheetId)}/edit` : '',
 		sheets: definitions.map((sheet, index) => {
 			const rawValues = liveResults[index]?.values;
 			const values = rawValues ? presentSheetValues(sheet.name, rawValues) : rawValues;

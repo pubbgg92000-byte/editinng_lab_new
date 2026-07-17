@@ -6,9 +6,9 @@ import { applicationUrl, invoiceMessage, whatsappUrl } from '$lib/server/whatsap
 import { flushSheetSync } from '$lib/server/googleSheets';
 import { money } from '$lib/data';
 
-export const POST = async ({ params, request, cookies, platform, url }) => {
+export const POST = async ({ params, request, cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const database = await readyDatabase(platform);
+	const database = await readyDatabase(locals.tenant);
 	const order = await getOrder(database, params.id);
 	if (!order) return json({ error: 'Order not found' }, { status: 404 });
 	const input = await request.json().catch(() => ({})) as { kind?: 'advance' | 'payment' | 'partial' | 'final'; paymentId?: string; taskIds?: string[] };
@@ -29,8 +29,8 @@ export const POST = async ({ params, request, cookies, platform, url }) => {
 	const taskItems = partialTasks.map((task) => ({ taskId: task.id, name: task.name, amount: Math.max(0, Number(task.billableAmount || 0) - Number(task.invoicedAmount || 0)) }));
 	const partialTotal = taskItems.reduce((sum, item) => sum + item.amount, 0);
 	const invoice = await recordInvoice(database, order.id, (number) => {
-		if (kind !== 'partial') return invoiceMessage(settings, number, order, customer?.token || '', url.origin, { kind, amount: payment?.amount });
-		const portalLink = customer?.token ? `${applicationUrl(url.origin)}/customer/${customer.token}` : '';
+		if (kind !== 'partial') return invoiceMessage(settings, number, order, customer?.token || '', url.origin, { kind, amount: payment?.amount }, locals.tenant!.slug);
+		const portalLink = customer?.token ? `${applicationUrl(url.origin)}/portal/${locals.tenant!.slug}/customer/${customer.token}` : '';
 		return [
 			settings.studioName,
 			`Partial work invoice: ${number}`,
@@ -58,6 +58,6 @@ export const POST = async ({ params, request, cookies, platform, url }) => {
 		balance: kind === 'partial' ? partialTotal : order.priceSet === false ? 0 : Math.max(0, total - order.paid),
 		taskItems
 	});
-	await flushSheetSync(database);
+	await flushSheetSync(database, locals.tenant!);
 	return json({ ok: true, invoice, invoiceUrl: `/invoices/${invoice.id}`, url: order.mobile ? whatsappUrl(order.mobile, invoice.message) : '' });
 };

@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ArrowLeft, CalendarClock, FileText, IndianRupee, Printer, CheckCircle2, Ban, Send } from 'lucide-svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import { formatDate, formatDateTime, money } from '$lib/data';
 	import type { ActivityLog, Customer, Invoice, Order, StudioSettings } from '$lib/types';
 	let { data }: { data: { invoice: Invoice; order: Order | null; customer: Customer | null; settings: StudioSettings; activity: ActivityLog[] } } = $props();
-	let status = $state(data.invoice.status || 'draft'); let busy = $state(false); let error = $state('');
+	let status = $state(untrack(() => data.invoice.status || 'draft')); let busy = $state(false); let error = $state('');
 	const hasBillingSnapshot = $derived(Boolean(data.invoice.subtotal || data.invoice.total || data.invoice.discount || data.invoice.amountReceived || data.invoice.paid));
 	const subtotal = $derived(hasBillingSnapshot ? data.invoice.subtotal : data.order?.price || 0);
 	const discount = $derived(hasBillingSnapshot ? data.invoice.discount : data.order?.discount || 0);

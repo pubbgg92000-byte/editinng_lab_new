@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { Search, Check, Edit3, Copy, RefreshCw, Archive, RotateCcw, Eye, ExternalLink, FolderKanban, Mail, MapPin, ReceiptIndianRupee } from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -14,8 +14,8 @@
 	let editingCustomer = $state<Customer | null>(null);
 	let toast = $state('');
 	let { data } = $props();
-	let customers = $state<Customer[]>(data.customers);
-	let orders = $state<Order[]>(data.orders);
+	let customers = $state<Customer[]>(untrack(() => data.customers));
+	let orders = $state<Order[]>(untrack(() => data.orders));
 	let showArchived = $state(false);
 	let detailsOpen = $state(false);
 	let selectedCustomer = $state<Customer | null>(null);

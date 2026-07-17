@@ -1,2 +1,8 @@
 import { redirect } from '@sveltejs/kit';
-export const GET = ({ cookies }) => { cookies.delete('studioflow_session', { path: '/' }); redirect(303, '/login'); };
+import { destroyAuthSession, SESSION_COOKIE } from '$lib/server/auth';
+
+export const GET = async ({ cookies }) => {
+	await destroyAuthSession(cookies.get(SESSION_COOKIE));
+	cookies.delete(SESSION_COOKIE, { path: '/' });
+	redirect(303, '/login');
+};

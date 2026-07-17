@@ -53,7 +53,7 @@ export async function getSettings(database: AppDatabase): Promise<StudioSettings
 	const values = Object.fromEntries((await rows(database, 'SELECT key, value FROM settings')).map((row) => [row.key, row.value]));
 	const savedInvoiceTemplate = String(values.invoiceTemplate || defaultInvoiceTemplate);
 	const invoiceTemplate = savedInvoiceTemplate.includes('{{portal_link}}') ? savedInvoiceTemplate : `${savedInvoiceTemplate.trimEnd()}\n\nView your work status and bill:\n{{portal_link}}`;
-	return { studioName: values.studioName || 'Anjana Creations', address: values.address || '', phone: values.phone || '', email: values.email || '', gstin: values.gstin || '', paymentNote: values.paymentNote || '', invoiceFooter: values.invoiceFooter || '', assignmentTemplate: values.assignmentTemplate || defaultAssignmentTemplate, invoiceTemplate, themePalette: values.themePalette || 'graphite-aqua', themeDefaultMode: values.themeDefaultMode === 'dark' ? 'dark' : 'light' } as StudioSettings;
+	return { studioName: values.studioName || 'StudioFlow Studio', logoUrl: values.logoUrl || '', address: values.address || '', phone: values.phone || '', email: values.email || '', gstin: values.gstin || '', paymentNote: values.paymentNote || '', invoiceFooter: values.invoiceFooter || '', assignmentTemplate: values.assignmentTemplate || defaultAssignmentTemplate, invoiceTemplate, themePalette: values.themePalette || 'graphite-aqua', themeDefaultMode: values.themeDefaultMode === 'dark' ? 'dark' : 'light' } as StudioSettings;
 }
 
 export async function updateSettings(database: AppDatabase, input: Partial<StudioSettings>) {

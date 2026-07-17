@@ -149,6 +149,7 @@ export interface Order {
 
 export interface StudioSettings {
 	studioName: string;
+	logoUrl: string;
 	address: string;
 	phone: string;
 	email: string;
@@ -159,4 +160,46 @@ export interface StudioSettings {
 	invoiceTemplate: string;
 	themePalette: ThemePalette;
 	themeDefaultMode: ThemeMode;
+}
+
+export type TenantStatus = 'draft' | 'active' | 'suspended';
+export type AccountRole = 'owner' | 'client_admin';
+
+export interface Tenant {
+	id: string;
+	slug: string;
+	internalName: string;
+	studioName: string;
+	logoUrl: string;
+	databaseUrl: string;
+	googleSheetId: string;
+	ordersTab: string;
+	status: TenantStatus;
+	isDemo: boolean;
+	isLegacy: boolean;
+	connectionStatus: 'unknown' | 'healthy' | 'error';
+	connectionError: string;
+	lastValidatedAt?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface Account {
+	id: string;
+	email: string;
+	role: AccountRole;
+	tenantId?: string;
+}
+
+export interface AuthSession {
+	id: string;
+	account: Account;
+	tenant?: Tenant;
+	expiresAt: string;
+}
+
+export interface TenantConnection {
+	databaseUrl: string;
+	googleSheetId: string;
+	ordersTab: string;
 }

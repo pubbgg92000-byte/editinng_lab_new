@@ -42,11 +42,11 @@
 	}
 </script>
 <svelte:window onkeydown={keyboard} onpointerdown={closePopoversOutside}/>
-<svelte:head><title>Anjana Creations — Editing work, clearly managed</title><meta name="description" content="Anjana Creations workflow for customers, editing, billing and delivery." /></svelte:head>
+<svelte:head><title>{settings.studioName} — StudioFlow</title><meta name="description" content={`${settings.studioName} workflow for customers, editing, billing and delivery.`} /></svelte:head>
 <div class="app-shell">
 	{#if $sidebarOpen}<button class="scrim" aria-label="Close menu" onclick={() => ($sidebarOpen = false)}></button>{/if}
 	<aside class:open={$sidebarOpen}>
-		<div class="brand-row"><a href="/dashboard" class="brand" aria-label="Anjana Creations home"><span class="brand-logo" aria-hidden="true"><img src="/anjana-creations-logo.png" alt="" /></span><span class="brand-name"><strong>Anjana</strong><small>Creations</small></span></a><button class="icon-btn mobile-close" aria-label="Close menu" onclick={() => ($sidebarOpen = false)}><X size={18} /></button></div>
+		<div class="brand-row"><a href="/dashboard" class="brand" aria-label={`${settings.studioName} home`}><span class="brand-logo" aria-hidden="true">{#if settings.logoUrl}<img src={settings.logoUrl} alt="" />{:else}<b style="height:100%;display:grid;place-items:center;color:#f5d36b;font-size:11px">SF</b>{/if}</span><span class="brand-name"><strong>{settings.studioName}</strong><small>StudioFlow</small></span></a><button class="icon-btn mobile-close" aria-label="Close menu" onclick={() => ($sidebarOpen = false)}><X size={18} /></button></div>
 		<nav><p class="nav-label">Workspace</p>{#each nav as item}<a href={item.href} class:active={isNavActive(item.href)} onclick={() => ($sidebarOpen = false)}><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span></a>{/each}</nav>
 		<div class="sidebar-footer"><a class:pending={sheetSync.pending > 0} class:error={Boolean(sheetSync.lastError)} class="sync" href="/settings"><span class="sync-dot"></span><div><strong>{sheetSync.lastError ? 'Sheets needs attention' : sheetSync.pending ? `${sheetSync.pending} changes pending` : 'Sheets up to date'}</strong><small>{sheetSync.lastError ? 'Open settings to retry' : sheetSync.pending ? 'Automatic retry is active' : 'No pending changes'}</small></div></a><a href="/logout" class="profile" onclick={confirmSignOut}><span class="avatar">{settings.studioName.split(/\s+/).map((part) => part[0]).join('').slice(0,2).toUpperCase()}</span><div><strong>{settings.studioName}</strong><small>Sign out</small></div><span class="chev">→</span></a></div>
 	</aside>

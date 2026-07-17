@@ -3,11 +3,12 @@ import { neon, type FullQueryResults, type NeonQueryFunction } from '@neondataba
 import { schemaStatements } from '../../../db/schema';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate } from '$lib/messageTemplates';
 import { runScheduledMaintenance } from './maintenance';
+import type { Tenant } from '$lib/types';
 
-let initialized = false;
-let initializing: Promise<void> | null = null;
-let database: AppDatabase | null = null;
-let databaseUrl = '';
+const databases = new Map<string, AppDatabase>();
+const initialized = new Set<string>();
+const initializing = new Map<string, Promise<void>>();
+const brandInitialized = new Set<string>();
 
 const placeholders = (query: string) => {
 	let index = 0;
@@ -70,24 +71,32 @@ class NeonDatabase implements AppDatabase {
 	}
 }
 
-export function databaseFrom(): AppDatabase {
-	if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not configured. Connect the Neon database to this Vercel project.');
-	if (!database || databaseUrl !== env.DATABASE_URL) {
-		databaseUrl = env.DATABASE_URL;
+export function databaseFromUrl(databaseUrl: string): AppDatabase {
+	if (!databaseUrl) throw new Error('The tenant database URL is not configured.');
+	let database = databases.get(databaseUrl);
+	if (!database) {
 		database = new NeonDatabase(neon(databaseUrl, { fullResults: true }));
-		initialized = false;
+		databases.set(databaseUrl, database);
 	}
 	return database;
 }
 
-export async function ensureDatabase(database: AppDatabase) {
-	if (initialized) return;
-	if (initializing) return initializing;
-	initializing = (async () => {
+export function databaseFrom(): AppDatabase {
+	if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not configured. Use tenant-aware database access in production.');
+	return databaseFromUrl(env.DATABASE_URL);
+}
+
+export async function ensureDatabase(database: AppDatabase, cacheKey: string | AppDatabase = database) {
+	const key = typeof cacheKey === 'string' ? cacheKey : `database:${String(cacheKey)}`;
+	if (initialized.has(key)) return;
+	const pending = initializing.get(key);
+	if (pending) return pending;
+	const promise = (async () => {
 		await database.batch(schemaStatements.map((statement) => database.prepare(statement)));
 		const now = new Date().toISOString();
 		const defaultSettings: Record<string, string> = {
-			studioName: 'Anjana Creations',
+			studioName: 'StudioFlow Studio',
+			logoUrl: '',
 			address: '',
 			phone: '',
 			email: '',
@@ -100,23 +109,50 @@ export async function ensureDatabase(database: AppDatabase) {
 			themeDefaultMode: 'light'
 		};
 		await database.batch(Object.entries(defaultSettings).map(([key, value]) => database.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING').bind(key, value, now)));
-		const brandVersion = 'anjana-creations-v1';
-		await database.batch([
-			database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'studioName' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'brandVersion' AND value = ?)").bind('Anjana Creations', now, brandVersion),
-			database.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING').bind('brandVersion', brandVersion, now)
-		]);
-		initialized = true;
+		initialized.add(key);
 	})();
+	initializing.set(key, promise);
 	try {
-		await initializing;
+		await promise;
 	} finally {
-		initializing = null;
+		initializing.delete(key);
 	}
 }
 
-export async function readyDatabase(_platform?: unknown) {
-	const database = databaseFrom();
-	await ensureDatabase(database);
+export function clearDatabaseInitialization(cacheKey: string) {
+	initialized.delete(cacheKey);
+	brandInitialized.delete(cacheKey);
+}
+
+export async function inspectTenantDatabase(databaseUrl: string) {
+	const database = databaseFromUrl(databaseUrl);
+	await database.prepare('SELECT 1').first();
+	const exists = Boolean(await database.prepare("SELECT to_regclass('public.settings') AS table_name").first('table_name'));
+	if (!exists) return { empty: true, compatible: true, counts: { customers: 0, editors: 0, orders: 0 } };
+	const required = ['settings', 'customers', 'editors', 'orders', 'tasks'];
+	for (const table of required) {
+		if (!await database.prepare('SELECT to_regclass(?) AS table_name').bind(`public.${table}`).first('table_name')) return { empty: false, compatible: false, counts: {} };
+	}
+	const [customers, editors, orders] = await Promise.all([
+		database.prepare('SELECT COUNT(*) AS count FROM customers').first<number>('count'),
+		database.prepare('SELECT COUNT(*) AS count FROM editors').first<number>('count'),
+		database.prepare('SELECT COUNT(*) AS count FROM orders').first<number>('count')
+	]);
+	return { empty: false, compatible: true, counts: { customers: Number(customers || 0), editors: Number(editors || 0), orders: Number(orders || 0) } };
+}
+
+export async function readyDatabase(tenant?: Tenant | null) {
+	const databaseUrl = tenant?.databaseUrl || (env.CONTROL_DATABASE_URL ? '' : env.DATABASE_URL || '');
+	if (!databaseUrl) throw new Error('No tenant database is available for this request.');
+	const database = databaseFromUrl(databaseUrl);
+	await ensureDatabase(database, databaseUrl);
+	if (tenant && !brandInitialized.has(databaseUrl)) {
+		await database.batch([
+			database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'logoUrl' AND value = ''").bind(tenant.logoUrl || '', new Date().toISOString()),
+			database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'studioName' AND value = 'StudioFlow Studio'").bind(tenant.studioName, new Date().toISOString())
+		]);
+		brandInitialized.add(databaseUrl);
+	}
 	try {
 		await runScheduledMaintenance(database);
 	} catch (cause) {

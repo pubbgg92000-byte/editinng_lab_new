@@ -1,5 +1,5 @@
 {
-	"name": "editing-lab-new",
+	"name": "studioflow",
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
@@ -10,7 +10,10 @@
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test:tenancy": "node scripts/audit-tenancy.mjs",
+		"control:migrate": "node scripts/control-db.mjs migrate",
+		"control:bootstrap": "node scripts/control-db.mjs bootstrap"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-cloudflare": "^7.2.9",

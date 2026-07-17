@@ -4,9 +4,9 @@ import { readyDatabase } from '$lib/server/db';
 import { addEventOption, createCustomer, createOrder, createTask, defaultEventOptions, getOrder, listCustomers, listOrdersPage } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
 
-export const GET = async ({ cookies, platform, url }) => {
+export const GET = async ({ cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	return json(await listOrdersPage(await readyDatabase(platform), {
+	return json(await listOrdersPage(await readyDatabase(locals.tenant), {
 		page: Number(url.searchParams.get('page') || 1),
 		pageSize: Number(url.searchParams.get('pageSize') || 25),
 		query: url.searchParams.get('q') || '',
@@ -17,7 +17,7 @@ export const GET = async ({ cookies, platform, url }) => {
 	}));
 };
 
-export const POST = async ({ request, cookies, platform }) => {
+export const POST = async ({ request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const input = await request.json();
 	const orderInputs: Record<string, any>[] = Array.isArray(input.orders) ? input.orders : [input];
@@ -31,7 +31,7 @@ export const POST = async ({ request, cookies, platform }) => {
 		if (!Number.isFinite(price) || !Number.isFinite(paid)) return json({ error: `Amount and advance for “${item.project}” must be valid numbers.` }, { status: 400 });
 		if (priceSet && advanceSet && paid > price) return json({ error: `Advance cannot be greater than the total for “${item.project}”.` }, { status: 400 });
 	}
-	const database = await readyDatabase(platform);
+	const database = await readyDatabase(locals.tenant);
 	let customerId = String(input.customerId || '').trim();
 	let createdCustomer = null;
 	if (input.createCustomer) {
@@ -56,6 +56,6 @@ export const POST = async ({ request, cookies, platform }) => {
 		}
 		createdOrders.push(await getOrder(database, order.id) || order);
 	}
-	const sync = await flushSheetSync(database);
+	const sync = await flushSheetSync(database, locals.tenant!);
 	return json({ ok: true, order: createdOrders[0], orders: createdOrders, customer: createdCustomer, sync }, { status: 201 });
 };

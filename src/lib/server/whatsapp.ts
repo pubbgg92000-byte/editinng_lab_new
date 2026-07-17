@@ -17,7 +17,7 @@ export function applicationUrl(origin?: string) {
 	}
 }
 
-export function editorAssignmentMessage(settings: StudioSettings, editor: Editor, order: Order, tasks: Task[], token: string, origin?: string) {
+export function editorAssignmentMessage(settings: StudioSettings, editor: Editor, order: Order, tasks: Task[], token: string, origin?: string, tenantSlug = '') {
 	const publicUrl = applicationUrl(origin);
 	const taskLines = tasks.map((task, index) => `${index + 1}. ${task.name}${task.due ? ` — due ${task.due}` : ''}${task.instructions ? `\n   ${task.instructions}` : ''}${task.textLink ? `\n   Link: ${task.textLink}` : ''}${task.imageUrl ? `\n   Image: ${task.imageUrl}` : ''}`).join('\n');
 	return fillTemplate(settings.assignmentTemplate, {
@@ -26,13 +26,13 @@ export function editorAssignmentMessage(settings: StudioSettings, editor: Editor
 		project: order.project,
 		customer: order.customer,
 		task_list: taskLines,
-		portal_link: `${publicUrl}/editor/${token}`
+		portal_link: tenantSlug ? `${publicUrl}/portal/${tenantSlug}/editor/${token}` : `${publicUrl}/editor/${token}`
 	});
 }
 
-export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, order: Order, customerToken = '', origin?: string, receipt?: { kind?: 'advance' | 'payment' | 'final'; amount?: number }) {
+export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, order: Order, customerToken = '', origin?: string, receipt?: { kind?: 'advance' | 'payment' | 'final'; amount?: number }, tenantSlug = '') {
 	const publicUrl = applicationUrl(origin);
-	const portalLink = customerToken ? `${publicUrl}/customer/${customerToken}` : '';
+	const portalLink = customerToken ? (tenantSlug ? `${publicUrl}/portal/${tenantSlug}/customer/${customerToken}` : `${publicUrl}/customer/${customerToken}`) : '';
 	const netTotal = Math.max(0, order.price - order.discount);
 	const total = order.priceSet === false ? 'To be confirmed' : money(netTotal);
 	const paid = order.advanceSet === false && !(order.payments || []).length ? 'Not recorded' : money(order.paid);
@@ -66,9 +66,9 @@ export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, 
 	return message;
 }
 
-export function customerReadyMessage(settings: StudioSettings, order: Order, customerToken = '', origin?: string) {
+export function customerReadyMessage(settings: StudioSettings, order: Order, customerToken = '', origin?: string, tenantSlug = '') {
 	const publicUrl = applicationUrl(origin);
-	const portalLink = customerToken ? `${publicUrl}/customer/${customerToken}` : '';
+	const portalLink = customerToken ? (tenantSlug ? `${publicUrl}/portal/${tenantSlug}/customer/${customerToken}` : `${publicUrl}/customer/${customerToken}`) : '';
 	const netTotal = Math.max(0, order.price - order.discount);
 	const balance = Math.max(0, netTotal - order.paid);
 	const lines = [

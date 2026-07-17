@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { archiveEditor, createCustomer, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResult, pendingSyncItems } from './repository';
+import type { Tenant } from '$lib/types';
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 const encoder = new TextEncoder();
@@ -7,23 +8,22 @@ const cleanEnvironmentValue = (value?: string) => {
 	const cleaned = String(value || '').trim();
 	return cleaned.length >= 2 && ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) ? cleaned.slice(1, -1).trim() : cleaned;
 };
-const spreadsheetId = () => {
-	const value = cleanEnvironmentValue(env.GOOGLE_SHEETS_ID);
+const spreadsheetId = (tenant: Pick<Tenant, 'googleSheetId'>) => {
+	const value = cleanEnvironmentValue(tenant.googleSheetId);
 	const fromUrl = value.match(/\/spreadsheets\/d\/([^/?#]+)/)?.[1];
 	return fromUrl || value;
 };
-const ordersTab = () => cleanEnvironmentValue(env.GOOGLE_SHEETS_ORDERS_TAB) || 'Orders';
+const ordersTab = (tenant: Pick<Tenant, 'ordersTab'>) => cleanEnvironmentValue(tenant.ordersTab) || 'Orders';
 const base64url = (value: string | Uint8Array) => {
 	const bytes = typeof value === 'string' ? encoder.encode(value) : value;
 	return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 };
 
-function configured() {
-	return Boolean(spreadsheetId() && cleanEnvironmentValue(env.GOOGLE_SERVICE_ACCOUNT_EMAIL) && cleanEnvironmentValue(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY));
+function configured(tenant: Pick<Tenant, 'googleSheetId'>) {
+	return Boolean(spreadsheetId(tenant) && cleanEnvironmentValue(env.GOOGLE_SERVICE_ACCOUNT_EMAIL) && cleanEnvironmentValue(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY));
 }
 
 async function accessToken() {
-	if (!configured()) throw new Error('Google Sheets service account is not configured.');
 	const serviceAccountEmail = cleanEnvironmentValue(env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
 	const privateKey = cleanEnvironmentValue(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
 	if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
@@ -40,27 +40,28 @@ async function accessToken() {
 	return payload.access_token;
 }
 
-async function googleFetch(path: string, init: RequestInit = {}) {
-	const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId()}${path}`, { ...init, headers: { Authorization: `Bearer ${await accessToken()}`, 'content-type': 'application/json', ...(init.headers || {}) } });
+async function googleFetch(tenant: Pick<Tenant, 'googleSheetId'>, path: string, init: RequestInit = {}) {
+	if (!configured(tenant)) throw new Error('Google Sheets service account or tenant Sheet is not configured.');
+	const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId(tenant)}${path}`, { ...init, headers: { Authorization: `Bearer ${await accessToken()}`, 'content-type': 'application/json', ...(init.headers || {}) } });
 	if (!response.ok) throw new Error(`Google Sheets request failed: ${response.status} ${await response.text()}`);
 	return response;
 }
 
 const tabNames = ['Orders', 'Customers', 'Editors', 'Tasks', 'Payments', 'Invoices', 'Activity Logs', 'Settings'];
 
-export async function ensureWorkbookTabs() {
-	if (!configured()) return false;
-	const metadata = await (await googleFetch('?fields=sheets.properties.title')).json() as { sheets?: { properties: { title: string } }[] };
+export async function ensureWorkbookTabs(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	if (!configured(tenant)) return false;
+	const metadata = await (await googleFetch(tenant, '?fields=sheets.properties.title')).json() as { sheets?: { properties: { title: string } }[] };
 	const existing = new Set((metadata.sheets || []).map((sheet) => sheet.properties.title));
-	const required = [ordersTab(), ...tabNames.filter((name) => name !== 'Orders')];
+	const required = [ordersTab(tenant), ...tabNames.filter((name) => name !== 'Orders')];
 	const missing = required.filter((name) => !existing.has(name));
-	if (missing.length) await googleFetch(':batchUpdate', { method: 'POST', body: JSON.stringify({ requests: missing.map((title) => ({ addSheet: { properties: { title } } })) }) });
+	if (missing.length) await googleFetch(tenant, ':batchUpdate', { method: 'POST', body: JSON.stringify({ requests: missing.map((title) => ({ addSheet: { properties: { title } } })) }) });
 	return true;
 }
 
-export async function readSheetValues(sheet: string) {
-	if (!configured()) return null;
-	const response = await googleFetch(`/values/${encodeURIComponent(sheetRange(sheet, 'A:Z'))}`);
+export async function readSheetValues(tenant: Pick<Tenant, 'googleSheetId'>, sheet: string) {
+	if (!configured(tenant)) return null;
+	const response = await googleFetch(tenant, `/values/${encodeURIComponent(sheetRange(sheet, 'A:Z'))}`);
 	return ((await response.json()) as { values?: unknown[][] }).values || [];
 }
 
@@ -88,8 +89,8 @@ const columnName = (count: number) => {
 	return name;
 };
 
-async function formatWorkbook(snapshots: Record<string, any[]>) {
-	const metadata = await (await googleFetch('?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))')).json() as { sheets?: { properties: { sheetId: number; title: string; gridProperties?: { rowCount?: number; columnCount?: number } } }[] };
+async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>, snapshots: Record<string, any[]>) {
+	const metadata = await (await googleFetch(tenant, '?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))')).json() as { sheets?: { properties: { sheetId: number; title: string; gridProperties?: { rowCount?: number; columnCount?: number } } }[] };
 	const byTitle = new Map((metadata.sheets || []).map((sheet) => [sheet.properties.title, sheet.properties]));
 	const wideColumns: Record<string, number[]> = {
 		Orders: [1, 4, 12, 13],
@@ -102,7 +103,7 @@ async function formatWorkbook(snapshots: Record<string, any[]>) {
 	};
 	const requests: Record<string, unknown>[] = [];
 	for (const [sheet, definition] of Object.entries(definitions)) {
-		const title = sheet === 'Orders' ? ordersTab() : sheet;
+		const title = sheet === 'Orders' ? ordersTab(tenant) : sheet;
 		const properties = byTitle.get(title);
 		if (!properties) continue;
 		const sheetId = properties.sheetId;
@@ -141,13 +142,13 @@ async function formatWorkbook(snapshots: Record<string, any[]>) {
 		});
 	}
 	if (!requests.length) return;
-	await googleFetch(':batchUpdate', {
+	await googleFetch(tenant, ':batchUpdate', {
 		method: 'POST',
 		body: JSON.stringify({ requests })
 	});
 }
 
-async function writeWorkbookSnapshot(database: AppDatabase) {
+async function writeWorkbookSnapshot(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
 	const [orders, customers, editors, invoices, activityLogs, settings] = await Promise.all([
 		listOrders(database, true, true),
 		listCustomers(database, true),
@@ -170,33 +171,33 @@ async function writeWorkbookSnapshot(database: AppDatabase) {
 	const clearRanges: string[] = [];
 	for (const [sheet, records] of Object.entries(snapshots)) {
 		const definition = definitions[sheet];
-		const targetSheet = sheet === 'Orders' ? ordersTab() : sheet;
+		const targetSheet = sheet === 'Orders' ? ordersTab(tenant) : sheet;
 		data.push({ range: sheetRange(targetSheet, 'A1'), majorDimension: 'ROWS', values: [definition.headers, ...records.map(definition.values)] });
 		clearRanges.push(sheetRange(targetSheet, `A${records.length + 2}:ZZ`));
 		clearRanges.push(sheetRange(targetSheet, `${columnName(definition.headers.length + 1)}:ZZ`));
 	}
 
-	await googleFetch('/values:batchUpdate', {
+	await googleFetch(tenant, '/values:batchUpdate', {
 		method: 'POST',
 		body: JSON.stringify({ valueInputOption: 'RAW', data })
 	});
-	await googleFetch('/values:batchClear', { method: 'POST', body: JSON.stringify({ ranges: clearRanges }) });
-	await formatWorkbook(snapshots);
+	await googleFetch(tenant, '/values:batchClear', { method: 'POST', body: JSON.stringify({ ranges: clearRanges }) });
+	await formatWorkbook(tenant, snapshots);
 	return orders.length;
 }
 
-export async function flushSheetSync(database: AppDatabase) {
-	if (!configured()) return { configured: false, processed: 0, failed: 0 };
+export async function flushSheetSync(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	if (!configured(tenant)) return { configured: false, processed: 0, failed: 0 };
 	const items = await pendingSyncItems(database);
 	try {
-		await ensureWorkbookTabs();
+		await ensureWorkbookTabs(tenant);
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : 'Google Sheets setup failed';
 		for (const item of items) await markSyncResult(database, item.id, message);
 		return { configured: true, processed: 0, failed: items.length, error: message };
 	}
 	try {
-		const orderCount = await writeWorkbookSnapshot(database);
+		const orderCount = await writeWorkbookSnapshot(database, tenant);
 		for (const item of items) await markSyncResult(database, item.id);
 		return { configured: true, processed: items.length, failed: 0, orders: orderCount };
 	} catch (cause) {
@@ -206,11 +207,11 @@ export async function flushSheetSync(database: AppDatabase) {
 	}
 }
 
-export async function importHistoricalOrders(database: AppDatabase) {
-	if (!configured()) throw new Error('Google Sheets service account is not configured.');
-	await ensureWorkbookTabs();
-	const sheet = ordersTab();
-	const values = await readSheetValues(sheet) || [];
+export async function importHistoricalOrders(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	if (!configured(tenant)) throw new Error('Google Sheets service account is not configured.');
+	await ensureWorkbookTabs(tenant);
+	const sheet = ordersTab(tenant);
+	const values = await readSheetValues(tenant, sheet) || [];
 	if (values.length < 2) return { imported: 0, skipped: 0 };
 	const headers = values[0].map((value) => String(value || '').trim());
 	const cell = (row: unknown[], ...names: string[]) => {
@@ -241,9 +242,9 @@ export async function importHistoricalOrders(database: AppDatabase) {
 	return { imported, skipped };
 }
 
-export async function reconcileEditorsFromSheet(database: AppDatabase) {
-	if (!configured()) throw new Error('Google Sheets service account is not configured.');
-	const values = await readSheetValues('Editors') || [];
+export async function reconcileEditorsFromSheet(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId'>) {
+	if (!configured(tenant)) throw new Error('Google Sheets service account is not configured.');
+	const values = await readSheetValues(tenant, 'Editors') || [];
 	if (!values.length) return { editorsArchived: 0, editorRows: 0 };
 	const headers = values[0].map((value) => String(value || '').trim());
 	const recordIdIndex = headers.indexOf('Record ID');
@@ -258,6 +259,12 @@ export async function reconcileEditorsFromSheet(database: AppDatabase) {
 		if (await archiveEditor(database, editor.id)) editorsArchived++;
 	}
 	return { editorsArchived, editorRows: sheetIds.size };
+}
+
+export async function validateSheetConnection(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	if (!configured(tenant)) throw new Error('Sheet ID or Google service-account credentials are missing.');
+	const metadata = await (await googleFetch(tenant, '?fields=spreadsheetId,properties.title')).json() as { spreadsheetId?: string; properties?: { title?: string } };
+	return { id: metadata.spreadsheetId || spreadsheetId(tenant), title: metadata.properties?.title || '' };
 }
 
 const nowIso = () => new Date().toISOString();

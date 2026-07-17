@@ -3,7 +3,11 @@
 declare global {
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals {
+			session: import('$lib/types').AuthSession | null;
+			account: import('$lib/types').Account | null;
+			tenant: import('$lib/types').Tenant | null;
+		}
 		// interface PageData {}
 		// interface PageState {}
 	}

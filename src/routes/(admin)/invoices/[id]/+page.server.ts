@@ -2,8 +2,8 @@ import { error } from '@sveltejs/kit';
 import { readyDatabase } from '$lib/server/db';
 import { getInvoice, getOrder, getSettings, listActivity, listCustomers } from '$lib/server/repository';
 
-export const load = async ({ params, platform }) => {
-	const database = await readyDatabase(platform);
+export const load = async ({ params, locals }) => {
+	const database = await readyDatabase(locals.tenant);
 	const invoice = await getInvoice(database, params.id);
 	if (!invoice) error(404, 'Invoice not found');
 	const order = await getOrder(database, invoice.orderId);
