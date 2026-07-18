@@ -11,8 +11,14 @@ export const PATCH = async ({ request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
 	const input = await request.json() as Record<string, unknown>;
-	const allowed = new Set(['studioName', 'logoUrl', 'address', 'phone', 'email', 'gstin', 'paymentNote', 'invoiceFooter', 'assignmentTemplate', 'invoiceTemplate', 'themePalette', 'themeDefaultMode']);
+	const allowed = new Set(['studioName', 'orderPrefix', 'editorPrefix', 'logoUrl', 'address', 'phone', 'email', 'gstin', 'paymentNote', 'invoiceFooter', 'assignmentTemplate', 'invoiceTemplate', 'themePalette', 'themeDefaultMode']);
 	const safeInput = Object.fromEntries(Object.entries(input).filter(([key]) => allowed.has(key)));
+	for (const key of ['orderPrefix', 'editorPrefix']) {
+		if (safeInput[key] === undefined) continue;
+		const prefix = String(safeInput[key] || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 8);
+		if (!prefix) return json({ error: `${key === 'orderPrefix' ? 'Order' : 'Editor'} prefix must contain letters or numbers.` }, { status: 400 });
+		safeInput[key] = prefix;
+	}
 	const logoUrl = String(safeInput.logoUrl || '').trim();
 	if (logoUrl && !logoUrl.startsWith('https://') && !logoUrl.startsWith('/')) return json({ error: 'Logo URL must use HTTPS.' }, { status: 400 });
 	if (safeInput.phone !== undefined && String(safeInput.phone || '').trim()) {

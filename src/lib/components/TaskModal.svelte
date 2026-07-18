@@ -2,7 +2,7 @@
 	import Modal from './Modal.svelte';
 	import EditorModal from './EditorModal.svelte';
 	import { durationBillableAmount, formatVideoDuration, parseVideoDurationMinutes } from '$lib/duration';
-	import type { Editor, Task, TaskBillingMode } from '$lib/types';
+	import type { Editor, EditorSettlement, Task, TaskBillingMode } from '$lib/types';
 
 	let { open = $bindable(), orderId, editors = $bindable(), devices = $bindable(), task = null, onsaved = () => {} }: { open:boolean; orderId:string; editors:Editor[]; devices:string[]; task?:Task|null; onsaved?:()=>void } = $props();
 	let titles = $state('');
@@ -20,6 +20,7 @@
 	let saving = $state(false);
 	let showEditor = $state(false);
 	let addingDevice = $state(false);
+	let editorSettlement = $state<EditorSettlement>('not-set');
 	const calculatedAmount = $derived(durationBillableAmount(hourlyRate, parseVideoDurationMinutes(videoDuration)));
 
 	$effect(() => {
@@ -32,6 +33,7 @@
 		imageUrl = task?.imageUrl || '';
 		device = task?.device || '';
 		addingDevice = Boolean(task?.device && !devices.includes(task.device));
+		editorSettlement = task?.editorSettlement || 'not-set';
 		billingMode = task?.billingMode || 'manual';
 		billableAmount = task?.billableAmount || undefined;
 		hourlyRate = task?.hourlyRate || undefined;
@@ -57,7 +59,7 @@
 		saving = true;
 		error = '';
 		const endpoint = task ? `/api/tasks/${task.id}` : `/api/orders/${orderId}/tasks`;
-		const shared = { editorId, due, instructions, textLink, imageUrl, device: device.trim(), billingMode, hourlyRate: billingMode === 'duration' ? Number(hourlyRate || 0) : 0, videoDuration };
+		const shared = { editorId, due, instructions, textLink, imageUrl, device: device.trim(), editorSettlement, billingMode, hourlyRate: billingMode === 'duration' ? Number(hourlyRate || 0) : 0, videoDuration };
 		const body = task
 			? { name: names[0], ...shared, billableAmount: billingMode === 'manual' ? Number(billableAmount || 0) : calculatedAmount }
 			: { tasks: names.map((line) => ({ ...(billingMode === 'manual' ? parseLine(line) : { name: line, billableAmount: 0 }), ...shared })) };
@@ -79,6 +81,7 @@
 		<div class="field"><label for="task-editor">Editor *</label><div class="editor-select"><select id="task-editor" bind:value={editorId}><option value="">Choose editor</option>{#each editors.filter((editor) => editor.availability !== 'inactive') as editor}<option value={editor.id}>{editor.name} · {editor.activeTasks} active</option>{/each}</select><button class="secondary" onclick={() => showEditor = true}>New</button></div></div>
 		<div class="field"><label for="task-due">Due date</label><input id="task-due" type="date" bind:value={due}/></div>
 		<div class="field"><label for="task-device">Device given to editor *</label><div class="device-select">{#if addingDevice}<input id="task-device" bind:value={device} placeholder="e.g. HD-1, HD-2, SSD-3"/>{:else}<select id="task-device" bind:value={device}><option value="">Choose device</option>{#each devices as option}<option value={option}>{option}</option>{/each}</select>{/if}<button class="secondary" type="button" onclick={() => { addingDevice = !addingDevice; if (addingDevice) device = ''; }}>{addingDevice ? 'Use list' : 'Add new device'}</button></div><small>New devices are saved to the reusable list when this task is assigned.</small></div>
+		<div class="field"><label for="editor-settlement">Future editor payment handling</label><select id="editor-settlement" bind:value={editorSettlement}><option value="not-set">Not decided</option><option value="editor-bills-admin">Editor will bill the admin</option><option value="admin-issues-statement">Admin will issue editor statement</option></select><small>This is an admin-only flag for a future editor billing workflow.</small></div>
 		<div class="field"><label for="billing-mode">Default task billing</label><select id="billing-mode" bind:value={billingMode}><option value="manual">Manual task value</option><option value="duration">Rate × editor video duration</option></select><small>The admin can still choose manual or duration billing when creating the final invoice.</small></div>
 	</div>
 

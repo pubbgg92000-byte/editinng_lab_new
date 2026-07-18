@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { archiveEditor, createCustomer, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResult, pendingSyncItems } from './repository';
 import type { Tenant } from '$lib/types';
+import { editorCode, orderCode } from '$lib/identifiers';
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 const encoder = new TextEncoder();
@@ -75,10 +76,10 @@ const istStamp = (value?: string) => {
 };
 
 const definitions: Record<string, { headers: string[]; values: (payload: any) => unknown[] }> = {
-	Orders: { headers: ['Date', 'Time (IST)', 'S', 'Studio Name', 'Mobile No.', 'Event', 'Names', 'Receiving', 'Duration', 'Subtotal', 'Discount %', 'Discount Amount', 'Total', 'Collected', 'Balance', 'Source', 'Assigned Name', 'Remark', 'Record ID', 'Status', 'Progress', 'Due Date', 'Important', 'Historical', 'Archived'], values: (order) => { const stamp = istStamp(order.createdAt || order.updatedAt); return [stamp.date, stamp.time, order.serial, order.customer, order.mobile || '', order.workType, order.project, order.receiving || '', order.duration || '', order.priceSet === false ? '' : order.price, order.priceSet === false || !order.price ? 0 : Number(((order.discount || 0) / order.price).toFixed(4)), order.discount || 0, order.priceSet === false ? '' : Math.max(0, order.price - order.discount), order.advanceSet === false && !(order.payments || []).length ? '' : order.paid, order.priceSet === false ? '' : Math.max(0, order.price - order.discount - order.paid), order.source || '', [...new Set((order.tasks || []).filter((task: any) => !task.archived && task.assignee !== 'Unassigned').map((task: any) => task.assignee))].join(', '), order.remarks || '', order.id, order.status, order.progress, order.due || '', order.important ? '★' : '', order.historical ? 'Yes' : 'No', order.archived ? 'Yes' : 'No']; } },
-	Customers: { headers: ['Customer ID', 'Name', 'Studio Name', 'Phone', 'Email', 'Address', 'GSTIN', 'Projects', 'Pending', 'Archived', 'Record ID'], values: (customer) => [customer.id, customer.name, customer.business, customer.phone, customer.email, customer.address || '', customer.gst || '', customer.projects, customer.pending, customer.archived ? 'Yes' : 'No', customer.id] },
-	Editors: { headers: ['Editor ID', 'Name', 'Phone', 'Specialty', 'Availability', 'Active Tasks', 'Archived', 'Record ID'], values: (editor) => [editor.code || editor.id, editor.name, editor.phone, editor.specialty, editor.availability || (editor.available ? 'available' : 'busy'), editor.activeTasks, editor.archived ? 'Yes' : 'No', editor.id] },
-	Tasks: { headers: ['Task ID', 'Order ID', 'Task', 'Editor ID', 'Editor Name', 'Device', 'Billing Method', 'Rate / Video Hour', 'Video Duration (Minutes)', 'Due Date', 'Task Value (Billable)', 'Already Invoiced', 'Instructions', 'Text Link', 'Image URL', 'Status', 'Progress', 'Output Link', 'Notes', 'Archived', 'Record ID'], values: (task) => [task.id, task.orderId, task.name, task.editorCode || '', task.assignee || '', task.device || '', task.billingMode === 'duration' ? 'By video duration' : 'Manual amount', task.hourlyRate || 0, task.videoDurationMinutes || 0, task.due || '', task.billableAmount || 0, task.invoicedAmount || 0, task.instructions || '', task.textLink || '', task.imageUrl || '', task.status, task.progress, task.outputLink || '', task.notes || '', task.archived ? 'Yes' : 'No', task.id] },
+	Orders: { headers: ['Date', 'Time (IST)', 'Order ID', 'Studio Name', 'Mobile No.', 'Event', 'Names', 'Receiving', 'Duration', 'Subtotal', 'Discount %', 'Discount Amount', 'Total', 'Collected', 'Balance', 'Source', 'Assigned Name', 'Remark', 'Record ID', 'Status', 'Progress', 'Due Date', 'Important', 'Historical', 'Archived'], values: (order) => { const stamp = istStamp(order.createdAt || order.updatedAt); return [stamp.date, stamp.time, order.displayCode || order.serial, order.customer, order.mobile || '', order.workType, order.project, order.receiving || '', order.duration || '', order.priceSet === false ? '' : order.price, order.priceSet === false || !order.price ? 0 : Number(((order.discount || 0) / order.price).toFixed(4)), order.discount || 0, order.priceSet === false ? '' : Math.max(0, order.price - order.discount), order.advanceSet === false && !(order.payments || []).length ? '' : order.paid, order.priceSet === false ? '' : Math.max(0, order.price - order.discount - order.paid), order.source || '', [...new Set((order.tasks || []).filter((task: any) => !task.archived && task.assignee !== 'Unassigned').map((task: any) => task.assignee))].join(', '), order.remarks || '', order.id, order.status, order.progress, order.due || '', order.important ? '★' : '', order.historical ? 'Yes' : 'No', order.archived ? 'Yes' : 'No']; } },
+	Customers: { headers: ['Customer ID', 'Name', 'Studio Name', 'Phone', 'Email', 'Address', 'Google Maps Location', 'GSTIN', 'Projects', 'Pending', 'Archived', 'Record ID'], values: (customer) => [customer.id, customer.name, customer.business, customer.phone, customer.email, customer.address || '', customer.locationUrl || '', customer.gst || '', customer.projects, customer.pending, customer.archived ? 'Yes' : 'No', customer.id] },
+	Editors: { headers: ['Editor ID', 'Name', 'Phone', 'Google Maps Location', 'Specialty', 'Availability', 'Active Tasks', 'Archived', 'Record ID'], values: (editor) => [editor.code || editor.id, editor.name, editor.phone, editor.locationUrl || '', editor.specialty, editor.availability || (editor.available ? 'available' : 'busy'), editor.activeTasks, editor.archived ? 'Yes' : 'No', editor.id] },
+	Tasks: { headers: ['Task ID', 'Order ID', 'Task', 'Editor ID', 'Editor Name', 'Device', 'Editor Payment Arrangement', 'Billing Method', 'Rate / Video Hour', 'Video Duration (Minutes)', 'Due Date', 'Task Value (Billable)', 'Already Invoiced', 'Instructions', 'Text Link', 'Image URL', 'Status', 'Progress', 'Output Link', 'Notes', 'Archived', 'Record ID'], values: (task) => [task.id, task.orderId, task.name, task.editorCode || '', task.assignee || '', task.device || '', task.editorSettlement === 'editor-bills-admin' ? 'Editor bills admin' : task.editorSettlement === 'admin-issues-statement' ? 'Admin issues statement' : 'Not decided', task.billingMode === 'duration' ? 'By video duration' : 'Manual amount', task.hourlyRate || 0, task.videoDurationMinutes || 0, task.due || '', task.billableAmount || 0, task.invoicedAmount || 0, task.instructions || '', task.textLink || '', task.imageUrl || '', task.status, task.progress, task.outputLink || '', task.notes || '', task.archived ? 'Yes' : 'No', task.id] },
 	Payments: { headers: ['Payment ID', 'Order ID', 'Type', 'Amount', 'Date', 'Method', 'Note', 'Record ID'], values: (payment) => [payment.id, payment.orderId, payment.kind === 'advance' ? 'Advance' : 'Payment', payment.amount, payment.paidAt, payment.method, payment.note, payment.id] },
 	Invoices: { headers: ['Invoice ID', 'Invoice Number', 'Order ID', 'Type', 'Billing Method', 'Discount Type', 'Payment ID', 'Amount Received', 'Subtotal', 'Discount %', 'Discount Amount', 'Total', 'Paid', 'Balance', 'Message', 'Created At', 'Record ID'], values: (invoice) => [invoice.id, invoice.number, invoice.orderId, invoice.kind, invoice.billingMode === 'duration' ? 'Video duration' : 'Manual total', invoice.discountMode === 'percent' ? 'Percentage' : 'Manual amount', invoice.paymentId || '', invoice.amountReceived, invoice.subtotal, invoice.subtotal ? Number((invoice.discount / invoice.subtotal).toFixed(4)) : 0, invoice.discount, invoice.total, invoice.paid, invoice.balance, invoice.message, invoice.openedAt, invoice.id] },
 	'Activity Logs': { headers: ['Time', 'Actor', 'Action', 'Entity Type', 'Entity ID', 'Details', 'Record ID'], values: (entry) => [entry.createdAt, entry.actor, entry.action, entry.entityType, entry.entityId, entry.details, entry.id] },
@@ -101,9 +102,9 @@ async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'
 	const byTitle = new Map((metadata.sheets || []).map((sheet) => [sheet.properties.title, sheet.properties]));
 	const wideColumns: Record<string, number[]> = {
 		Orders: [3, 6, 14, 15],
-		Customers: [2, 4, 5],
-		Editors: [3],
-		Tasks: [2, 6, 7, 8, 11, 12],
+		Customers: [2, 4, 5, 6],
+		Editors: [3, 4],
+		Tasks: [2, 6, 7, 8, 9, 12, 13],
 		Invoices: [13, 14],
 		'Activity Logs': [2, 5],
 		Settings: [1]
@@ -134,10 +135,10 @@ async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'
 			{ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 10, endColumnIndex: 11 }, cell: { userEnteredFormat: { numberFormat: { type: 'PERCENT', pattern: '0.00%' } } }, fields: 'userEnteredFormat.numberFormat' } },
 			{ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 11, endColumnIndex: 15 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } }
 		);
-		if (sheet === 'Customers') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 8, endColumnIndex: 9 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } });
+		if (sheet === 'Customers') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 9, endColumnIndex: 10 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } });
 		if (sheet === 'Tasks') requests.push(
-			{ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 7, endColumnIndex: 8 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } },
-			{ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 10, endColumnIndex: 12 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } }
+			{ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 8, endColumnIndex: 9 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } },
+			{ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 11, endColumnIndex: 13 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } }
 		);
 		if (sheet === 'Orders') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 19, endColumnIndex: 20 }, cell: { userEnteredFormat: { textFormat: { foregroundColor: { red: 0.9, green: 0.12, blue: 0.12 }, bold: true, fontSize: 14 } } }, fields: 'userEnteredFormat.textFormat' } });
 		if (sheet === 'Payments') requests.push({ repeatCell: { range: { sheetId, startRowIndex: 1, startColumnIndex: 3, endColumnIndex: 4 }, cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '₹#,##0.00' } } }, fields: 'userEnteredFormat.numberFormat' } });
@@ -168,10 +169,10 @@ async function writeWorkbookSnapshot(database: AppDatabase, tenant: Pick<Tenant,
 		getSettings(database)
 	]);
 	const snapshots: Record<string, any[]> = {
-		Orders: [...orders].sort((left, right) => Number(left.serial || 0) - Number(right.serial || 0)),
+		Orders: [...orders].sort((left, right) => Number(left.serial || 0) - Number(right.serial || 0)).map((order) => ({ ...order, displayCode: orderCode(settings, order.serial) })),
 		Customers: customers,
-		Editors: editors,
-		Tasks: orders.flatMap((order) => order.tasks),
+		Editors: editors.map((editor) => ({ ...editor, code: editorCode(settings, editor.code) })),
+		Tasks: orders.flatMap((order) => order.tasks).map((task) => ({ ...task, editorCode: editorCode(settings, task.editorCode) })),
 		Payments: orders.flatMap((order) => order.payments || []),
 		Invoices: invoices,
 		'Activity Logs': activityLogs,

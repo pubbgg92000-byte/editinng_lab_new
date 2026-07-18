@@ -9,6 +9,7 @@
 	let phone = $state('');
 	let email = $state('');
 	let address = $state('');
+	let locationUrl = $state('');
 	let gst = $state('');
 	let saving = $state(false);
 	let error = $state('');
@@ -20,6 +21,7 @@
 		phone = customer?.phone || '';
 		email = customer?.email || '';
 		address = customer?.address || '';
+		locationUrl = customer?.locationUrl || '';
 		gst = customer?.gst || '';
 		error = '';
 	});
@@ -28,6 +30,7 @@
 		if (!name.trim() || !phone.trim()) { error = 'Customer name and phone number are required.'; return; }
 		const phoneError = indianMobileError(phone, true);
 		if (phoneError) { error = phoneError; return; }
+		if (locationUrl.trim() && !/^https:\/\//i.test(locationUrl.trim())) { error = 'Google Maps location must be an HTTPS link.'; return; }
 		phone = normalizeIndianMobile(phone);
 		saving = true;
 		error = '';
@@ -35,7 +38,7 @@
 			const response = await fetch(customer ? `/api/customers/${customer.id}` : '/api/customers', {
 				method: customer ? 'PATCH' : 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ name, business: business || name, phone, email, address, gst })
+				body: JSON.stringify({ name, business: business || name, phone, email, address, locationUrl: locationUrl.trim(), gst })
 			});
 			const result = await response.json();
 			if (!response.ok) throw new Error(result.error || 'Unable to save customer');
@@ -56,6 +59,7 @@
 		<div class="field"><label for="customer-gst">GST details</label><input id="customer-gst" bind:value={gst} placeholder="Optional" /></div>
 	</div>
 	<div class="field address"><label for="customer-address">Address</label><textarea id="customer-address" bind:value={address} placeholder="Billing address"></textarea></div>
+	<div class="field address"><label for="customer-location">Google Maps home / delivery location</label><input id="customer-location" type="url" bind:value={locationUrl} placeholder="https://maps.app.goo.gl/..."/><small>Optional. Paste the location shared from Google Maps.</small></div>
 	{#if error}<p class="error">{error}</p>{/if}
 	{#snippet footer()}<button class="secondary" onclick={() => open = false}>Cancel</button><button class="primary" disabled={saving} onclick={save}>{saving ? 'Saving...' : customer ? 'Save changes' : 'Add customer'}</button>{/snippet}
 </Modal>

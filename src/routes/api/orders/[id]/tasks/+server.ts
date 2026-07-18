@@ -17,6 +17,7 @@ export const POST = async ({ params, request, cookies, locals }) => {
 		if (task.billableAmount !== undefined && (!Number.isFinite(Number(task.billableAmount)) || Number(task.billableAmount) < 0)) return json({ error: 'Task value must be zero or a positive number.' }, { status: 400 });
 		if (task.hourlyRate !== undefined && (!Number.isFinite(Number(task.hourlyRate)) || Number(task.hourlyRate) < 0)) return json({ error: 'Hourly rate must be zero or a positive number.' }, { status: 400 });
 		if (task.billingMode && !['manual', 'duration'].includes(String(task.billingMode))) return json({ error: 'Choose manual billing or duration billing.' }, { status: 400 });
+		if (task.editorSettlement && !['not-set', 'editor-bills-admin', 'admin-issues-statement'].includes(String(task.editorSettlement))) return json({ error: 'Choose a valid editor payment arrangement.' }, { status: 400 });
 		if (task.videoDuration !== undefined) {
 			const minutes = parseVideoDurationMinutes(task.videoDuration);
 			if (!Number.isFinite(minutes)) return json({ error: 'Enter duration like 30 min, 1.5 hr, or 1:30.' }, { status: 400 });

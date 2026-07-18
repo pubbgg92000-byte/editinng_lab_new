@@ -1,63 +1,727 @@
 <script lang="ts">
-	import { page } from '$app/state';
-	import { sidebarOpen } from '$lib/stores/app';
-	import type { ActivityLog, Customer, DatabaseStorageUsage, Editor, Order, StudioSettings } from '$lib/types';
-	import { LayoutDashboard, Users, ClipboardList, UserRound, ReceiptText, Sheet, Settings, Menu, Search, Bell, Command, X, ArrowUpRight, LogOut, Mail, Phone, Database } from '@lucide/svelte';
-	type Notification = ActivityLog & { path: string };
-	let { children, settings, customers = [], editors = [], orders = [], notifications = [], storage, sheetSync = { pending: 0, attempts: 0, lastError: '', lastAttemptAt: '' } }: { children: import('svelte').Snippet; settings: StudioSettings; customers?: Customer[]; editors?: Editor[]; orders?: Order[]; notifications?: Notification[]; storage?: DatabaseStorageUsage; sheetSync?: { pending: number; attempts: number; lastError: string; lastAttemptAt: string } } = $props();
-	const nav = [
-		{ label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard }, { label: 'Customers', href: '/customers', icon: Users },
-		{ label: 'Orders', href: '/orders', icon: ClipboardList }, { label: 'Editors', href: '/editors', icon: UserRound },
-		{ label: 'Invoices', href: '/invoices', icon: ReceiptText }, { label: 'Sheets data', href: '/settings/sheets', icon: Sheet },
-		{ label: 'Settings', href: '/settings', icon: Settings }
-	];
-	const workflowPages = [
-		{ title: 'Review queue', subtitle: 'Orders waiting for approval', href: '/orders?status=Waiting%20Review', type: 'Workflow' },
-		{ title: 'Ready for delivery', subtitle: 'Notify customers and collect balances', href: '/orders?status=Ready%20Delivery', type: 'Workflow' },
-		{ title: 'Delivered orders', subtitle: 'Completed customer deliveries', href: '/orders?status=Delivered', type: 'Workflow' }
-	];
-	let searchOpen = $state(false);
-	let notificationsOpen = $state(false);
-	let profileOpen = $state(false);
-	let notificationWrap = $state<HTMLDivElement>();
-	let profileWrap = $state<HTMLDivElement>();
-	let query = $state('');
-	let searchInput = $state<HTMLInputElement>();
-	$effect(() => {
-		if (!$sidebarOpen && !searchOpen) return;
-		const overflow = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => { document.body.style.overflow = overflow; };
-	});
-	const searchResults = $derived([
-		...nav.map((item) => ({ title: item.label, subtitle: 'Workspace', href: item.href, type: 'Page' })),
-		...workflowPages,
-		...orders.map((order) => ({ title: order.project, subtitle: `${order.customer} · ${order.workType}`, href: `/orders/${order.id}`, type: 'Order' })),
-		...customers.map((customer) => ({ title: customer.business, subtitle: customer.phone || customer.name, href: `/customers?customer=${customer.id}`, type: 'Customer' })),
-		...editors.map((editor) => ({ title: editor.name, subtitle: editor.specialty || editor.phone, href: `/editors?editor=${editor.id}`, type: 'Editor' }))
-	].filter((item) => `${item.title} ${item.subtitle} ${item.type}`.toLowerCase().includes(query.toLowerCase())).slice(0, 12));
-	function openSearch() { searchOpen = true; query = ''; setTimeout(() => searchInput?.focus()); }
-	function isNavActive(href: string) { return href === '/settings' ? page.url.pathname === href : page.url.pathname.startsWith(href); }
-	function keyboard(event: KeyboardEvent) { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openSearch(); } if (event.key === 'Escape') { searchOpen = false; notificationsOpen = false; profileOpen = false; } }
-	function closePopoversOutside(event: PointerEvent) {
-		if (notificationsOpen && notificationWrap && !notificationWrap.contains(event.target as Node)) notificationsOpen = false;
-		if (profileOpen && profileWrap && !profileWrap.contains(event.target as Node)) profileOpen = false;
-	}
-	function confirmSignOut(event: MouseEvent) {
-		if (!window.confirm('Are you sure you want to sign out?')) event.preventDefault();
-	}
+  import { page } from "$app/state";
+  import { onMount, untrack } from "svelte";
+  import { sidebarOpen } from "$lib/stores/app";
+  import type {
+    ActivityLog,
+    Customer,
+    DatabaseStorageUsage,
+    Editor,
+    Order,
+    StudioSettings,
+  } from "$lib/types";
+  import { formatDateTime } from "$lib/data";
+  import {
+    LayoutDashboard,
+    Users,
+    ClipboardList,
+    UserRound,
+    ReceiptText,
+    Sheet,
+    Settings,
+    Menu,
+    Search,
+    Bell,
+    Command,
+    X,
+    ArrowUpRight,
+    LogOut,
+    Mail,
+    Phone,
+    Database,
+  } from "@lucide/svelte";
+  type Notification = ActivityLog & {
+    path: string;
+    editorId: string;
+    editorName: string;
+    taskTitle: string;
+  };
+  type NotificationGroup = {
+    editorId: string;
+    editorName: string;
+    count: number;
+    path: string;
+    latest: Notification;
+  };
+  let {
+    children,
+    settings,
+    customers = [],
+    editors = [],
+    orders = [],
+    notifications = [],
+    storage,
+    sheetSync = { pending: 0, attempts: 0, lastError: "", lastAttemptAt: "" },
+  }: {
+    children: import("svelte").Snippet;
+    settings: StudioSettings;
+    customers?: Customer[];
+    editors?: Editor[];
+    orders?: Order[];
+    notifications?: Notification[];
+    storage?: DatabaseStorageUsage;
+    sheetSync?: {
+      pending: number;
+      attempts: number;
+      lastError: string;
+      lastAttemptAt: string;
+    };
+  } = $props();
+  const nav = [
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "Customers", href: "/customers", icon: Users },
+    { label: "Orders", href: "/orders", icon: ClipboardList },
+    { label: "Editors", href: "/editors", icon: UserRound },
+    { label: "Invoices", href: "/invoices", icon: ReceiptText },
+    { label: "Sheets data", href: "/settings/sheets", icon: Sheet },
+    { label: "Settings", href: "/settings", icon: Settings },
+  ];
+  const workflowPages = [
+    {
+      title: "Review queue",
+      subtitle: "Orders waiting for approval",
+      href: "/orders?status=Waiting%20Review",
+      type: "Workflow",
+    },
+    {
+      title: "Ready for delivery",
+      subtitle: "Notify customers and collect balances",
+      href: "/orders?status=Ready%20Delivery",
+      type: "Workflow",
+    },
+    {
+      title: "Delivered orders",
+      subtitle: "Completed customer deliveries",
+      href: "/orders?status=Delivered",
+      type: "Workflow",
+    },
+  ];
+  let searchOpen = $state(false);
+  let notificationsOpen = $state(false);
+  let notificationItems = $state<Notification[]>(untrack(() => notifications));
+  let profileOpen = $state(false);
+  let notificationWrap = $state<HTMLDivElement>();
+  let profileWrap = $state<HTMLDivElement>();
+  let query = $state("");
+  let searchInput = $state<HTMLInputElement>();
+  function groupNotifications(items: Notification[]): NotificationGroup[] {
+    const groups = new Map<string, NotificationGroup>();
+    for (const item of items) {
+      const group = groups.get(item.editorId);
+      if (group) group.count += 1;
+      else
+        groups.set(item.editorId, {
+          editorId: item.editorId,
+          editorName: item.editorName || item.actor,
+          count: 1,
+          path: item.path,
+          latest: item,
+        });
+    }
+    return [...groups.values()];
+  }
+  const notificationGroups = $derived(groupNotifications(notificationItems));
+  $effect(() => {
+    notificationItems = notifications;
+  });
+  $effect(() => {
+    if (!$sidebarOpen && !searchOpen) return;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = overflow;
+    };
+  });
+  const searchResults = $derived(
+    [
+      ...nav.map((item) => ({
+        title: item.label,
+        subtitle: "Workspace",
+        href: item.href,
+        type: "Page",
+      })),
+      ...workflowPages,
+      ...orders.map((order) => ({
+        title: order.project,
+        subtitle: `${order.customer} · ${order.workType}`,
+        href: `/orders/${order.id}`,
+        type: "Order",
+      })),
+      ...customers.map((customer) => ({
+        title: customer.business,
+        subtitle: customer.phone || customer.name,
+        href: `/customers?customer=${customer.id}`,
+        type: "Customer",
+      })),
+      ...editors.map((editor) => ({
+        title: editor.name,
+        subtitle: editor.specialty || editor.phone,
+        href: `/editors?editor=${editor.id}`,
+        type: "Editor",
+      })),
+    ]
+      .filter((item) =>
+        `${item.title} ${item.subtitle} ${item.type}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+      )
+      .slice(0, 12),
+  );
+  function openSearch() {
+    searchOpen = true;
+    query = "";
+    setTimeout(() => searchInput?.focus());
+  }
+  function isNavActive(href: string) {
+    return href === "/settings"
+      ? page.url.pathname === href
+      : page.url.pathname.startsWith(href);
+  }
+  function keyboard(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      openSearch();
+    }
+    if (event.key === "Escape") {
+      searchOpen = false;
+      notificationsOpen = false;
+      profileOpen = false;
+    }
+  }
+  function closePopoversOutside(event: PointerEvent) {
+    if (
+      notificationsOpen &&
+      notificationWrap &&
+      !notificationWrap.contains(event.target as Node)
+    )
+      notificationsOpen = false;
+    if (
+      profileOpen &&
+      profileWrap &&
+      !profileWrap.contains(event.target as Node)
+    )
+      profileOpen = false;
+  }
+  function confirmSignOut(event: MouseEvent) {
+    if (!window.confirm("Are you sure you want to sign out?"))
+      event.preventDefault();
+  }
+  async function refreshNotifications() {
+    const response = await fetch("/api/notifications");
+    if (!response.ok) return;
+    const result = await response.json();
+    notificationItems = result.notifications || [];
+  }
+  async function openNotificationGroup(group: NotificationGroup) {
+    await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ editorId: group.editorId }),
+    });
+    notificationItems = notificationItems.filter(
+      (item) => item.editorId !== group.editorId,
+    );
+    location.href = group.path;
+  }
+  async function markAllNotificationsRead() {
+    await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    notificationItems = [];
+  }
+  onMount(() => {
+    const timer = window.setInterval(refreshNotifications, 15000);
+    return () => window.clearInterval(timer);
+  });
 </script>
-<svelte:window onkeydown={keyboard} onpointerdown={closePopoversOutside}/>
-<svelte:head><title>{settings.studioName} — StudioFlow</title><meta name="description" content={`${settings.studioName} workflow for customers, editing, billing and delivery.`} /></svelte:head>
-<div class="app-shell">
-	{#if $sidebarOpen}<button class="scrim" aria-label="Close menu" onclick={() => ($sidebarOpen = false)}></button>{/if}
-	<aside class:open={$sidebarOpen}>
-		<div class="brand-row"><a href="/dashboard" class="brand" aria-label={`${settings.studioName} home`}><span class="brand-logo" aria-hidden="true">{#if settings.logoUrl}<img src={settings.logoUrl} alt="" />{:else}<b style="height:100%;display:grid;place-items:center;color:#f5d36b;font-size:11px">SF</b>{/if}</span><span class="brand-name"><strong>{settings.studioName}</strong><small>StudioFlow</small></span></a><button class="icon-btn mobile-close" aria-label="Close menu" onclick={() => ($sidebarOpen = false)}><X size={18} /></button></div>
-		<nav><p class="nav-label">Workspace</p>{#each nav as item}<a href={item.href} class:active={isNavActive(item.href)} onclick={() => ($sidebarOpen = false)}><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span></a>{/each}</nav>
-		<div class="sidebar-footer"><a class:pending={sheetSync.pending > 0} class:error={Boolean(sheetSync.lastError)} class="sync" href="/settings"><span class="sync-dot"></span><div><strong>{sheetSync.lastError ? 'Sheets needs attention' : sheetSync.pending ? `${sheetSync.pending} changes pending` : 'Sheets up to date'}</strong><small>{sheetSync.lastError ? 'Open settings to retry' : sheetSync.pending ? 'Automatic retry is active' : 'No pending changes'}</small></div></a><a href="/logout" class="profile" onclick={confirmSignOut}><span class="avatar">{settings.studioName.split(/\s+/).map((part) => part[0]).join('').slice(0,2).toUpperCase()}</span><div><strong>{settings.studioName}</strong><small>Sign out</small></div><span class="chev">→</span></a></div>
-	</aside>
-	<section class="workspace"><div class="topbar"><button class="icon-btn menu-btn" aria-label="Open menu" onclick={() => ($sidebarOpen = true)}><Menu size={20} /></button><button class="search-button" onclick={openSearch}><Search size={16} /><span>Search anything...</span><kbd><Command size={11} /> K</kbd></button><div class="top-actions"><div class="notification-wrap" bind:this={notificationWrap}><button class="icon-btn" aria-label="Notifications" aria-expanded={notificationsOpen} onclick={() => { notificationsOpen = !notificationsOpen; profileOpen = false; }}><Bell size={18} />{#if notifications.length}<span class="notice"></span>{/if}</button>{#if notificationsOpen}<div class="notification-popover"><div class="popover-head"><strong>Notifications</strong><span>{notifications.length} recent</span></div>{#each notifications as notification}<a href={notification.path} onclick={() => (notificationsOpen = false)}><span>{notification.action}</span><small>{notification.details || `${notification.entityType} update`}</small><time>{new Date(notification.createdAt).toLocaleString()}</time><ArrowUpRight size={13}/></a>{/each}{#if !notifications.length}<p>No notifications yet.</p>{/if}</div>{/if}</div><div class="profile-wrap" bind:this={profileWrap}><button class="top-avatar" aria-label="Open profile details" aria-expanded={profileOpen} onclick={() => { profileOpen = !profileOpen; notificationsOpen = false; }}>{settings.studioName.split(/\s+/).map((part)=>part[0]).join('').slice(0,2).toUpperCase()}</button>{#if profileOpen}<div class="profile-popover"><div class="profile-head"><span class="profile-avatar">{settings.studioName.split(/\s+/).map((part)=>part[0]).join('').slice(0,2).toUpperCase()}</span><div><strong>{settings.studioName}</strong><small>Administrator</small></div></div><div class="profile-details">{#if settings.email}<p><Mail size={13}/><span>{settings.email}</span></p>{/if}{#if settings.phone}<p><Phone size={13}/><span>{settings.phone}</span></p>{/if}</div><div class="profile-menu"><a href="/settings" onclick={() => (profileOpen = false)}><Settings size={14}/><span><strong>Profile settings</strong><small>Studio and account details</small></span><ArrowUpRight size={13}/></a><a href="/logout" class="sign-out" onclick={confirmSignOut}><LogOut size={14}/><span><strong>Sign out</strong><small>End this session</small></span></a></div></div>{/if}</div></div></div>{#if storage && storage.level !== 'healthy'}<a class:critical={storage.level === 'critical'} class:warning={storage.level === 'warning'} class="storage-warning" href="/settings"><Database size={14}/><span><strong>Database storage is {storage.percent}% full</strong><small>{storage.level === 'critical' ? 'Immediate cleanup or a plan upgrade is required.' : storage.level === 'warning' ? 'Plan cleanup or a storage upgrade soon.' : 'Storage monitoring has reached the 60% notice level.'}</small></span><ArrowUpRight size={13}/></a>{/if}<main>{@render children()}</main></section>
-</div>
-{#if searchOpen}<div class="search-overlay" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) searchOpen = false; }}><div class="search-dialog" role="dialog" aria-modal="true" aria-label="Search"><div class="search-input"><Search size={18}/><input bind:this={searchInput} bind:value={query} placeholder="Search orders, customers, editors and pages"/><button onclick={() => (searchOpen = false)}><X size={16}/></button></div><div class="search-results">{#each searchResults as result}<a href={result.href} onclick={() => (searchOpen = false)}><div><strong>{result.title}</strong><small>{result.subtitle}</small></div><span>{result.type}</span><ArrowUpRight size={14}/></a>{/each}{#if !searchResults.length}<p>No matching results.</p>{/if}</div></div></div>{/if}
 
-<style>.notification-wrap,.profile-wrap{position:relative}.notification-popover,.profile-popover{position:absolute;right:0;top:42px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:0 24px 70px #0005;z-index:80}.notification-popover{width:340px;max-height:430px;overflow:auto;padding:8px}.popover-head{display:flex;justify-content:space-between;align-items:center;padding:9px 10px 12px}.popover-head strong{font-size:12px}.popover-head span{font-size:8px;color:var(--muted)}.notification-popover>a{position:relative;display:grid;grid-template-columns:1fr auto;gap:3px 10px;border-radius:9px;padding:10px;color:inherit}.notification-popover>a:hover{background:var(--theme-soft)}.notification-popover>a span{font-size:10px;font-weight:600}.notification-popover>a small,.notification-popover>a time{font-size:8px;color:var(--muted)}.notification-popover>a time{grid-column:1}.notification-popover>a :global(svg){grid-column:2;grid-row:1/3;color:var(--purple);align-self:center}.notification-popover>p,.search-results>p{text-align:center;color:var(--muted);font-size:10px;padding:24px}.top-avatar{border:0;padding:0;transition:transform .18s ease,box-shadow .18s ease}.top-avatar:hover,.top-avatar[aria-expanded="true"]{transform:translateY(-1px);box-shadow:0 0 0 3px color-mix(in srgb,var(--purple) 16%,transparent),inset 0 0 0 1px color-mix(in srgb,var(--purple) 45%,var(--line))}.profile-popover{width:288px;padding:8px;overflow:hidden}.profile-head{display:flex;align-items:center;gap:11px;padding:12px 11px}.profile-avatar{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(135deg,var(--purple),color-mix(in srgb,var(--purple) 60%,#38bdf8));color:#fff;font-size:12px;font-weight:750;box-shadow:0 8px 22px color-mix(in srgb,var(--purple) 24%,transparent)}.profile-head>div{display:flex;min-width:0;flex-direction:column;gap:3px}.profile-head strong{overflow:hidden;text-overflow:ellipsis;font-size:12px;white-space:nowrap}.profile-head small{color:var(--muted);font-size:9px}.profile-details{margin:0 4px 7px;padding:8px 9px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--theme-soft) 58%,var(--card))}.profile-details p{display:flex;align-items:center;gap:8px;margin:0;padding:4px 0;color:var(--muted);font-size:9px}.profile-details p span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.profile-details :global(svg){flex:0 0 auto;color:var(--purple)}.profile-menu{padding-top:4px;border-top:1px solid var(--line)}.profile-menu a{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;padding:9px 8px;border-radius:9px;color:var(--theme-text)}.profile-menu a:hover{background:var(--theme-soft)}.profile-menu a>:global(svg):first-child{color:var(--purple)}.profile-menu a>span{display:flex;flex-direction:column;gap:2px}.profile-menu strong{font-size:10px}.profile-menu small{color:var(--muted);font-size:8px}.profile-menu a>:global(svg):last-child{color:var(--muted)}.profile-menu .sign-out{grid-template-columns:28px 1fr;color:#ef7777}.profile-menu .sign-out>:global(svg){color:#ef7777}.search-overlay{position:fixed;inset:0;z-index:200;background:#02061780;backdrop-filter:blur(8px);display:flex;justify-content:center;align-items:flex-start;padding-top:12vh}.search-dialog{width:min(620px,calc(100vw - 30px));border:1px solid var(--line);border-radius:17px;background:var(--card);box-shadow:0 32px 100px #0008;overflow:hidden}.search-input{height:58px;display:flex;align-items:center;gap:11px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--purple)}.search-input input{flex:1;border:0;outline:0;background:transparent;color:inherit;font-size:13px}.search-input button{border:0;background:transparent;color:var(--muted);display:grid}.search-results{max-height:430px;overflow:auto;padding:8px}.search-results>a{display:grid;grid-template-columns:1fr auto 18px;gap:12px;align-items:center;padding:11px;border-radius:10px;color:inherit}.search-results>a:hover{background:var(--theme-soft)}.search-results>a div{display:flex;flex-direction:column;gap:3px}.search-results strong{font-size:11px}.search-results small,.search-results>a>span{color:var(--muted);font-size:8px}.search-results :global(svg){color:var(--purple)}@media(max-width:600px){.notification-popover,.profile-popover{position:fixed;left:12px;right:12px;top:65px;width:auto}}</style>
+<svelte:window onkeydown={keyboard} onpointerdown={closePopoversOutside} />
+<svelte:head
+  ><title>{settings.studioName} — StudioFlow</title><meta
+    name="description"
+    content={`${settings.studioName} workflow for customers, editing, billing and delivery.`}
+  /></svelte:head
+>
+<div class="app-shell">
+  {#if $sidebarOpen}<button
+      class="scrim"
+      aria-label="Close menu"
+      onclick={() => ($sidebarOpen = false)}
+    ></button>{/if}
+  <aside class:open={$sidebarOpen}>
+    <div class="brand-row">
+      <a
+        href="/dashboard"
+        class="brand"
+        aria-label={`${settings.studioName} home`}
+        ><span class="brand-logo" aria-hidden="true"
+          >{#if settings.logoUrl}<img src={settings.logoUrl} alt="" />{:else}<b
+              style="height:100%;display:grid;place-items:center;color:#f5d36b;font-size:11px"
+              >SF</b
+            >{/if}</span
+        ><span class="brand-name"
+          ><strong>{settings.studioName}</strong><small>StudioFlow</small></span
+        ></a
+      ><button
+        class="icon-btn mobile-close"
+        aria-label="Close menu"
+        onclick={() => ($sidebarOpen = false)}><X size={18} /></button
+      >
+    </div>
+    <nav>
+      <p class="nav-label">Workspace</p>
+      {#each nav as item}<a
+          href={item.href}
+          class:active={isNavActive(item.href)}
+          onclick={() => ($sidebarOpen = false)}
+          ><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span></a
+        >{/each}
+    </nav>
+    <div class="sidebar-footer">
+      <a
+        class:pending={sheetSync.pending > 0}
+        class:error={Boolean(sheetSync.lastError)}
+        class="sync"
+        href="/settings"
+        ><span class="sync-dot"></span>
+        <div>
+          <strong
+            >{sheetSync.lastError
+              ? "Sheets needs attention"
+              : sheetSync.pending
+                ? `${sheetSync.pending} changes pending`
+                : "Sheets up to date"}</strong
+          ><small
+            >{sheetSync.lastError
+              ? "Open settings to retry"
+              : sheetSync.pending
+                ? "Automatic retry is active"
+                : "No pending changes"}</small
+          >
+        </div></a
+      ><a href="/logout" class="profile" onclick={confirmSignOut}
+        ><span class="avatar"
+          >{settings.studioName
+            .split(/\s+/)
+            .map((part) => part[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase()}</span
+        >
+        <div><strong>{settings.studioName}</strong><small>Sign out</small></div>
+        <span class="chev">→</span></a
+      >
+    </div>
+  </aside>
+  <section class="workspace">
+    <div class="topbar">
+      <button
+        class="icon-btn menu-btn"
+        aria-label="Open menu"
+        onclick={() => ($sidebarOpen = true)}><Menu size={20} /></button
+      ><button class="search-button" onclick={openSearch}
+        ><Search size={16} /><span>Search anything...</span><kbd
+          ><Command size={11} /> K</kbd
+        ></button
+      >
+      <div class="top-actions">
+        <div class="notification-wrap" bind:this={notificationWrap}>
+          <button
+            class="icon-btn notification-button"
+            aria-label={`Editor notifications${notificationItems.length ? `, ${notificationItems.length} unread` : ""}`}
+            aria-expanded={notificationsOpen}
+            onclick={() => {
+              notificationsOpen = !notificationsOpen;
+              profileOpen = false;
+            }}
+            ><Bell size={18} />{#if notificationItems.length}<span
+                class="notice-count"
+                >{notificationItems.length > 99
+                  ? "99+"
+                  : notificationItems.length}</span
+              >{/if}</button
+          >{#if notificationsOpen}<div class="notification-popover">
+              <div class="popover-head">
+                <span
+                  ><strong>Editor updates</strong><small
+                    >{notificationItems.length} unread</small
+                  ></span
+                >{#if notificationItems.length}<button
+                    class="mark-read"
+                    onclick={markAllNotificationsRead}>Mark all read</button
+                  >{/if}
+              </div>
+              {#each notificationGroups as group}<button
+                  class="notification-item"
+                  onclick={() => openNotificationGroup(group)}
+                  ><span class="editor-notice"><i>{group.count}</i></span><span
+                    class="notice-copy"
+                    ><strong>{group.editorName}</strong><small
+                      >{group.latest.details || group.latest.taskTitle}</small
+                    ><time>{formatDateTime(group.latest.createdAt)}</time></span
+                  ><ArrowUpRight size={13} /></button
+                >{/each}{#if !notificationItems.length}<p>
+                  No unread editor updates.
+                </p>{/if}
+            </div>{/if}
+        </div>
+        <div class="profile-wrap" bind:this={profileWrap}>
+          <button
+            class="top-avatar"
+            aria-label="Open profile details"
+            aria-expanded={profileOpen}
+            onclick={() => {
+              profileOpen = !profileOpen;
+              notificationsOpen = false;
+            }}
+            >{settings.studioName
+              .split(/\s+/)
+              .map((part) => part[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase()}</button
+          >{#if profileOpen}<div class="profile-popover">
+              <div class="profile-head">
+                <span class="profile-avatar"
+                  >{settings.studioName
+                    .split(/\s+/)
+                    .map((part) => part[0])
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase()}</span
+                >
+                <div>
+                  <strong>{settings.studioName}</strong><small
+                    >Administrator</small
+                  >
+                </div>
+              </div>
+              <div class="profile-details">
+                {#if settings.email}<p>
+                    <Mail size={13} /><span>{settings.email}</span>
+                  </p>{/if}{#if settings.phone}<p>
+                    <Phone size={13} /><span>{settings.phone}</span>
+                  </p>{/if}
+              </div>
+              <div class="profile-menu">
+                <a href="/settings" onclick={() => (profileOpen = false)}
+                  ><Settings size={14} /><span
+                    ><strong>Profile settings</strong><small
+                      >Studio and account details</small
+                    ></span
+                  ><ArrowUpRight size={13} /></a
+                ><a href="/logout" class="sign-out" onclick={confirmSignOut}
+                  ><LogOut size={14} /><span
+                    ><strong>Sign out</strong><small>End this session</small
+                    ></span
+                  ></a
+                >
+              </div>
+            </div>{/if}
+        </div>
+      </div>
+    </div>
+    {#if storage && storage.level !== "healthy"}<a
+        class:critical={storage.level === "critical"}
+        class:warning={storage.level === "warning"}
+        class="storage-warning"
+        href="/settings"
+        ><Database size={14} /><span
+          ><strong>Database storage is {storage.percent}% full</strong><small
+            >{storage.level === "critical"
+              ? "Immediate cleanup or a plan upgrade is required."
+              : storage.level === "warning"
+                ? "Plan cleanup or a storage upgrade soon."
+                : "Storage monitoring has reached the 60% notice level."}</small
+          ></span
+        ><ArrowUpRight size={13} /></a
+      >{/if}
+    <main>{@render children()}</main>
+  </section>
+</div>
+{#if searchOpen}<div
+    class="search-overlay"
+    role="presentation"
+    onclick={(event) => {
+      if (event.currentTarget === event.target) searchOpen = false;
+    }}
+  >
+    <div
+      class="search-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Search"
+    >
+      <div class="search-input">
+        <Search size={18} /><input
+          bind:this={searchInput}
+          bind:value={query}
+          placeholder="Search orders, customers, editors and pages"
+        /><button onclick={() => (searchOpen = false)}><X size={16} /></button>
+      </div>
+      <div class="search-results">
+        {#each searchResults as result}<a
+            href={result.href}
+            onclick={() => (searchOpen = false)}
+            ><div>
+              <strong>{result.title}</strong><small>{result.subtitle}</small>
+            </div>
+            <span>{result.type}</span><ArrowUpRight size={14} /></a
+          >{/each}{#if !searchResults.length}<p>No matching results.</p>{/if}
+      </div>
+    </div>
+  </div>{/if}
+
+<style>
+  .notification-wrap,
+  .profile-wrap {
+    position: relative;
+  }
+  .notification-popover,
+  .profile-popover {
+    position: absolute;
+    right: 0;
+    top: 42px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--card);
+    box-shadow: 0 24px 70px #0005;
+    z-index: 80;
+  }
+  .notification-popover {
+    width: 340px;
+    max-height: 430px;
+    overflow: auto;
+    padding: 8px;
+  }
+  .popover-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 10px 12px;
+  }
+  .popover-head strong {
+    font-size: 12px;
+  }
+  .popover-head span {
+    font-size: 8px;
+    color: var(--muted);
+  }
+  .notification-popover > p,
+  .search-results > p {
+    text-align: center;
+    color: var(--muted);
+    font-size: 10px;
+    padding: 24px;
+  }
+  .top-avatar {
+    border: 0;
+    padding: 0;
+    transition:
+      transform 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+  .top-avatar:hover,
+  .top-avatar[aria-expanded="true"] {
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--purple) 16%, transparent),
+      inset 0 0 0 1px color-mix(in srgb, var(--purple) 45%, var(--line));
+  }
+  .profile-popover {
+    width: 288px;
+    padding: 8px;
+    overflow: hidden;
+  }
+  .profile-head {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 12px 11px;
+  }
+  .profile-avatar {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: linear-gradient(
+      135deg,
+      var(--purple),
+      color-mix(in srgb, var(--purple) 60%, #38bdf8)
+    );
+    color: #fff;
+    font-size: 12px;
+    font-weight: 750;
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--purple) 24%, transparent);
+  }
+  .profile-head > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .profile-head strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .profile-head small {
+    color: var(--muted);
+    font-size: 9px;
+  }
+  .profile-details {
+    margin: 0 4px 7px;
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--theme-soft) 58%, var(--card));
+  }
+  .profile-details p {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 4px 0;
+    color: var(--muted);
+    font-size: 9px;
+  }
+  .profile-details p span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .profile-details :global(svg) {
+    flex: 0 0 auto;
+    color: var(--purple);
+  }
+  .profile-menu {
+    padding-top: 4px;
+    border-top: 1px solid var(--line);
+  }
+  .profile-menu a {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 8px;
+    border-radius: 9px;
+    color: var(--theme-text);
+  }
+  .profile-menu a:hover {
+    background: var(--theme-soft);
+  }
+  .profile-menu a > :global(svg):first-child {
+    color: var(--purple);
+  }
+  .profile-menu a > span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .profile-menu strong {
+    font-size: 10px;
+  }
+  .profile-menu small {
+    color: var(--muted);
+    font-size: 8px;
+  }
+  .profile-menu a > :global(svg):last-child {
+    color: var(--muted);
+  }
+  .profile-menu .sign-out {
+    grid-template-columns: 28px 1fr;
+    color: #ef7777;
+  }
+  .profile-menu .sign-out > :global(svg) {
+    color: #ef7777;
+  }
+  .search-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: #02061780;
+    backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 12vh;
+  }
+  .search-dialog {
+    width: min(620px, calc(100vw - 30px));
+    border: 1px solid var(--line);
+    border-radius: 17px;
+    background: var(--card);
+    box-shadow: 0 32px 100px #0008;
+    overflow: hidden;
+  }
+  .search-input {
+    height: 58px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+    color: var(--purple);
+  }
+  .search-input input {
+    flex: 1;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 13px;
+  }
+  .search-input button {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    display: grid;
+  }
+  .search-results {
+    max-height: 430px;
+    overflow: auto;
+    padding: 8px;
+  }
+  .search-results > a {
+    display: grid;
+    grid-template-columns: 1fr auto 18px;
+    gap: 12px;
+    align-items: center;
+    padding: 11px;
+    border-radius: 10px;
+    color: inherit;
+  }
+  .search-results > a:hover {
+    background: var(--theme-soft);
+  }
+  .search-results > a div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .search-results strong {
+    font-size: 11px;
+  }
+  .search-results small,
+  .search-results > a > span {
+    color: var(--muted);
+    font-size: 8px;
+  }
+  .search-results :global(svg) {
+    color: var(--purple);
+  }
+  @media (max-width: 600px) {
+    .notification-popover,
+    .profile-popover {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      top: 65px;
+      width: auto;
+    }
+  }
+</style>

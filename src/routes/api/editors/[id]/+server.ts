@@ -13,6 +13,7 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 		const phoneError = indianMobileError(input.phone, true);
 		if (phoneError) return json({ error: phoneError }, { status: 400 });
 	}
+	if (String(input.locationUrl || '').trim() && !/^https:\/\//i.test(String(input.locationUrl).trim())) return json({ error: 'Google Maps location must be an HTTPS link.' }, { status: 400 });
 	let editor;
 	try { editor = await updateEditor(database, params.id, input); }
 	catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to update editor.' }, { status: 400 }); }

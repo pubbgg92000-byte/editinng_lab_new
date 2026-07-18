@@ -20,6 +20,7 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 	if (input.billableAmount !== undefined && (!Number.isFinite(Number(input.billableAmount)) || Number(input.billableAmount) < 0)) return json({ error: 'Task value must be zero or a positive number.' }, { status: 400 });
 	if (input.hourlyRate !== undefined && (!Number.isFinite(Number(input.hourlyRate)) || Number(input.hourlyRate) < 0)) return json({ error: 'Hourly rate must be zero or a positive number.' }, { status: 400 });
 	if (input.billingMode && !['manual', 'duration'].includes(input.billingMode)) return json({ error: 'Choose manual billing or duration billing.' }, { status: 400 });
+	if (input.editorSettlement && !['not-set', 'editor-bills-admin', 'admin-issues-statement'].includes(input.editorSettlement)) return json({ error: 'Choose a valid editor payment arrangement.' }, { status: 400 });
 	let task;
 	try {
 		task = await updateTask(database, params.id, input, 'admin');

@@ -1,5 +1,6 @@
 import ExcelJS, { type Cell, type Worksheet } from 'exceljs';
 import type { ActivityLog, Customer, Editor, Invoice, Order, StudioSettings } from '$lib/types';
+import { editorCode, orderCode } from '$lib/identifiers';
 
 type ColumnDefinition = {
 	header: string;
@@ -150,7 +151,7 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 
 	const orders = [...data.orders].sort((left, right) => Number(right.serial || 0) - Number(left.serial || 0));
 	const ordersSheet = addSheet(workbook, 'Orders', [
-		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' },
+		{ header: 'Order ID', key: 'serial', width: 14 },
 		{ header: 'Studio Name', key: 'customer', width: 24 },
 		{ header: 'Mobile No.', key: 'mobile', width: 16, format: 'center' },
 		{ header: 'Event', key: 'event', width: 16 },
@@ -174,7 +175,7 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 		{ header: 'Archived', key: 'archived', width: 11, format: 'center' },
 		{ header: 'Order ID', key: 'orderId', width: 24 }
 	], orders.map((order, index) => ({
-		serial: index + 1, customer: order.customer, mobile: order.mobile || null, event: order.workType, project: order.project,
+		serial: orderCode(data.settings, order.serial), customer: order.customer, mobile: order.mobile || null, event: order.workType, project: order.project,
 		receiving: order.receiving || null, duration: order.duration || null, amount: order.priceSet === false ? null : order.price,
 		discountPercent: order.priceSet === false ? null : order.price > 0 ? Number(order.discount || 0) / order.price : 0,
 		discount: order.priceSet === false ? null : Number(order.discount || 0), total: order.priceSet === false ? null : { formula: `MAX(0,H${index + 2}-J${index + 2})`, result: Math.max(0, order.price - Number(order.discount || 0)) },
@@ -188,26 +189,26 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 
 	addSheet(workbook, 'Customers', [
 		{ header: 'Customer ID', key: 'id', width: 24 }, { header: 'Contact Name', key: 'name', width: 22 }, { header: 'Studio Name', key: 'business', width: 26 },
-		{ header: 'Phone', key: 'phone', width: 16, format: 'center' }, { header: 'Email', key: 'email', width: 28 }, { header: 'Address', key: 'address', width: 36 },
+		{ header: 'Phone', key: 'phone', width: 16, format: 'center' }, { header: 'Email', key: 'email', width: 28 }, { header: 'Address', key: 'address', width: 36 }, { header: 'Google Maps Location', key: 'locationUrl', width: 36, format: 'link' },
 		{ header: 'GSTIN', key: 'gst', width: 20 }, { header: 'Projects', key: 'projects', width: 12, format: 'integer' }, { header: 'Pending', key: 'pending', width: 15, format: 'currency' },
 		{ header: 'Archived', key: 'archived', width: 11, format: 'center' }
-	], [...data.customers].sort((a, b) => byText(a.business, b.business)).map((customer) => ({ id: customer.id, name: customer.name, business: customer.business, phone: customer.phone || null, email: customer.email || null, address: customer.address || null, gst: customer.gst || null, projects: customer.projects, pending: customer.pending, archived: customer.archived ? 'Yes' : null })), { archivedKey: 'archived', tabColor: 'FF2563EB' });
+	], [...data.customers].sort((a, b) => byText(a.business, b.business)).map((customer) => ({ id: customer.id, name: customer.name, business: customer.business, phone: customer.phone || null, email: customer.email || null, address: customer.address || null, locationUrl: externalLink(customer.locationUrl), gst: customer.gst || null, projects: customer.projects, pending: customer.pending, archived: customer.archived ? 'Yes' : null })), { archivedKey: 'archived', tabColor: 'FF2563EB' });
 
 	addSheet(workbook, 'Editors', [
-		{ header: 'Editor ID', key: 'id', width: 22 }, { header: 'Name', key: 'name', width: 22 }, { header: 'Phone', key: 'phone', width: 16, format: 'center' },
+		{ header: 'Editor ID', key: 'id', width: 22 }, { header: 'Name', key: 'name', width: 22 }, { header: 'Phone', key: 'phone', width: 16, format: 'center' }, { header: 'Google Maps Location', key: 'locationUrl', width: 36, format: 'link' },
 		{ header: 'Specialty', key: 'specialty', width: 24 }, { header: 'Availability', key: 'availability', width: 16, format: 'center' },
 		{ header: 'Active Tasks', key: 'activeTasks', width: 14, format: 'integer' }, { header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: 'Record ID', key: 'recordId', width: 24 }
-	], [...data.editors].sort((a, b) => byText(a.name, b.name)).map((editor) => ({ id: editor.code || editor.id, name: editor.name, phone: editor.phone || null, specialty: editor.specialty || null, availability: editor.availability || (editor.available ? 'available' : 'busy'), activeTasks: editor.activeTasks, archived: editor.archived ? 'Yes' : null, recordId: editor.id })), { statusKey: 'availability', archivedKey: 'archived', tabColor: 'FF7C3AED' });
+	], [...data.editors].sort((a, b) => byText(a.name, b.name)).map((editor) => ({ id: editorCode(data.settings, editor.code) || editor.id, name: editor.name, phone: editor.phone || null, locationUrl: externalLink(editor.locationUrl), specialty: editor.specialty || null, availability: editor.availability || (editor.available ? 'available' : 'busy'), activeTasks: editor.activeTasks, archived: editor.archived ? 'Yes' : null, recordId: editor.id })), { statusKey: 'availability', archivedKey: 'archived', tabColor: 'FF7C3AED' });
 
 	addSheet(workbook, 'Tasks', [
 		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' }, { header: 'Project', key: 'project', width: 26 }, { header: 'Task', key: 'task', width: 24 },
 		{ header: 'Editor ID', key: 'editorId', width: 14 }, { header: 'Editor', key: 'editor', width: 20 }, { header: 'Status', key: 'status', width: 22, format: 'center' }, { header: 'Progress', key: 'progress', width: 12, format: 'percent' },
-		{ header: 'Device', key: 'device', width: 14 }, { header: 'Billing Method', key: 'billingMode', width: 20 }, { header: 'Rate / Video Hour', key: 'hourlyRate', width: 18, format: 'currency' }, { header: 'Video Duration (Minutes)', key: 'videoDurationMinutes', width: 23, format: 'integer' },
+		{ header: 'Device', key: 'device', width: 14 }, { header: 'Editor Payment Arrangement', key: 'editorSettlement', width: 28 }, { header: 'Billing Method', key: 'billingMode', width: 20 }, { header: 'Rate / Video Hour', key: 'hourlyRate', width: 18, format: 'currency' }, { header: 'Video Duration (Minutes)', key: 'videoDurationMinutes', width: 23, format: 'integer' },
 		{ header: 'Due Date', key: 'dueDate', width: 15, format: 'date' }, { header: 'Task Value (Billable)', key: 'billableAmount', width: 19, format: 'currency' }, { header: 'Already Invoiced', key: 'invoicedAmount', width: 17, format: 'currency' }, { header: 'Instructions', key: 'instructions', width: 38 },
 		{ header: 'Reference Link', key: 'textLink', width: 34, format: 'link' }, { header: 'Image URL', key: 'imageUrl', width: 34, format: 'link' },
 		{ header: 'Output Link', key: 'outputLink', width: 34, format: 'link' }, { header: 'Notes', key: 'notes', width: 34 },
 		{ header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: 'Task ID', key: 'taskId', width: 24 }, { header: 'Order ID', key: 'orderId', width: 24 }
-	], orders.flatMap((order) => order.tasks.map((task) => ({ project: order.project, task: task.name, editorId: task.editorCode || null, editor: task.assignee, device: task.device || null, billingMode: task.billingMode === 'duration' ? 'By video duration' : 'Manual amount', hourlyRate: task.hourlyRate || null, videoDurationMinutes: task.videoDurationMinutes || null, status: task.status, progress: Number(task.progress || 0) / 100, dueDate: asDate(task.due), billableAmount: task.billableAmount || null, invoicedAmount: task.invoicedAmount || null, instructions: task.instructions || null, textLink: externalLink(task.textLink), imageUrl: externalLink(task.imageUrl), outputLink: externalLink(task.outputLink), notes: task.notes || null, archived: task.archived ? 'Yes' : null, taskId: task.id, orderId: order.id }))).map((record, index) => ({ serial: index + 1, ...record })), { statusKey: 'status', archivedKey: 'archived', tabColor: 'FF0EA5E9' });
+	], orders.flatMap((order) => order.tasks.map((task) => ({ project: order.project, task: task.name, editorId: editorCode(data.settings, task.editorCode) || null, editor: task.assignee, device: task.device || null, editorSettlement: task.editorSettlement === 'editor-bills-admin' ? 'Editor bills admin' : task.editorSettlement === 'admin-issues-statement' ? 'Admin issues statement' : 'Not decided', billingMode: task.billingMode === 'duration' ? 'By video duration' : 'Manual amount', hourlyRate: task.hourlyRate || null, videoDurationMinutes: task.videoDurationMinutes || null, status: task.status, progress: Number(task.progress || 0) / 100, dueDate: asDate(task.due), billableAmount: task.billableAmount || null, invoicedAmount: task.invoicedAmount || null, instructions: task.instructions || null, textLink: externalLink(task.textLink), imageUrl: externalLink(task.imageUrl), outputLink: externalLink(task.outputLink), notes: task.notes || null, archived: task.archived ? 'Yes' : null, taskId: task.id, orderId: order.id }))).map((record, index) => ({ serial: index + 1, ...record })), { statusKey: 'status', archivedKey: 'archived', tabColor: 'FF0EA5E9' });
 
 	addSheet(workbook, 'Payments', [
 		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' }, { header: 'Studio Name', key: 'customer', width: 24 }, { header: 'Project', key: 'project', width: 26 },

@@ -16,6 +16,7 @@ export const POST = async ({ request, cookies, locals }) => {
 	if (!String(input.name || '').trim()) return json({ error: 'Editor name is required.' }, { status: 400 });
 	const phoneError = indianMobileError(input.phone, true);
 	if (phoneError) return json({ error: phoneError }, { status: 400 });
+	if (String(input.locationUrl || '').trim() && !/^https:\/\//i.test(String(input.locationUrl).trim())) return json({ error: 'Google Maps location must be an HTTPS link.' }, { status: 400 });
 	const database = await readyDatabase(locals.tenant);
 	let editor;
 	try { editor = await createEditor(database, input); }

@@ -1,50 +1,599 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { ArrowLeft, CalendarClock, FileText, IndianRupee, Printer, CheckCircle2, Ban, Send } from '@lucide/svelte';
-	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
-	import { formatDate, formatDateTime, money } from '$lib/data';
-	import { whatsappNumber } from '$lib/phone';
-	import type { ActivityLog, Customer, Invoice, Order, StudioSettings } from '$lib/types';
-	let { data }: { data: { invoice: Invoice; order: Order | null; customer: Customer | null; settings: StudioSettings; activity: ActivityLog[] } } = $props();
-	let status = $state(untrack(() => data.invoice.status || 'draft')); let busy = $state(false); let error = $state('');
-	const hasBillingSnapshot = $derived(Boolean(data.invoice.subtotal || data.invoice.total || data.invoice.discount || data.invoice.amountReceived || data.invoice.paid));
-	const subtotal = $derived(hasBillingSnapshot ? data.invoice.subtotal : data.order?.price || 0);
-	const discount = $derived(hasBillingSnapshot ? data.invoice.discount : data.order?.discount || 0);
-	const discountPercent = $derived(subtotal > 0 ? discount / subtotal * 100 : 0);
-	const total = $derived(hasBillingSnapshot ? data.invoice.total : data.order?.priceSet === false ? 0 : Math.max(0, (data.order?.price || 0) - (data.order?.discount || 0)));
-	const paid = $derived(hasBillingSnapshot ? data.invoice.paid : data.order?.paid || 0);
-	const balance = $derived(hasBillingSnapshot ? data.invoice.balance : data.order?.priceSet === false ? 0 : Math.max(0, total - paid));
-	const title = $derived(data.invoice.kind === 'advance' ? 'Advance receipt' : data.invoice.kind === 'payment' ? 'Payment receipt' : data.invoice.kind === 'partial' ? 'Partial work invoice' : 'Tax invoice');
-	const whatsappUrl = $derived(data.order?.mobile ? `https://wa.me/${whatsappNumber(data.order.mobile)}?text=${encodeURIComponent(data.invoice.message)}` : '');
-	async function updateStatus(next: 'draft' | 'sent' | 'paid' | 'cancelled') {
-		busy = true; error = '';
-		const response = await fetch(`/api/invoices/${data.invoice.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: next }) });
-		const result = await response.json(); busy = false;
-		if (!response.ok) { error = result.error || 'Unable to update invoice status.'; return false; }
-		status = next; return true;
-	}
-	async function sendWhatsApp() { if (!whatsappUrl) return; const tab = window.open('about:blank', '_blank'); await updateStatus('sent'); if (tab) tab.location.href = whatsappUrl; else window.open(whatsappUrl, '_blank', 'noopener,noreferrer'); }
+  import { untrack } from "svelte";
+  import {
+    ArrowLeft,
+    CalendarClock,
+    FileText,
+    IndianRupee,
+    Printer,
+    CheckCircle2,
+    Ban,
+    Send,
+  } from "@lucide/svelte";
+  import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
+  import { formatDate, formatDateTime, money } from "$lib/data";
+  import { orderCode } from "$lib/identifiers";
+  import { whatsappNumber } from "$lib/phone";
+  import type {
+    ActivityLog,
+    Customer,
+    Invoice,
+    Order,
+    StudioSettings,
+  } from "$lib/types";
+  let {
+    data,
+  }: {
+    data: {
+      invoice: Invoice;
+      order: Order | null;
+      customer: Customer | null;
+      settings: StudioSettings;
+      activity: ActivityLog[];
+    };
+  } = $props();
+  let status = $state(untrack(() => data.invoice.status || "draft"));
+  let busy = $state(false);
+  let error = $state("");
+  const hasBillingSnapshot = $derived(
+    Boolean(
+      data.invoice.subtotal ||
+        data.invoice.total ||
+        data.invoice.discount ||
+        data.invoice.amountReceived ||
+        data.invoice.paid,
+    ),
+  );
+  const subtotal = $derived(
+    hasBillingSnapshot ? data.invoice.subtotal : data.order?.price || 0,
+  );
+  const discount = $derived(
+    hasBillingSnapshot ? data.invoice.discount : data.order?.discount || 0,
+  );
+  const discountPercent = $derived(
+    subtotal > 0 ? (discount / subtotal) * 100 : 0,
+  );
+  const total = $derived(
+    hasBillingSnapshot
+      ? data.invoice.total
+      : data.order?.priceSet === false
+        ? 0
+        : Math.max(0, (data.order?.price || 0) - (data.order?.discount || 0)),
+  );
+  const paid = $derived(
+    hasBillingSnapshot ? data.invoice.paid : data.order?.paid || 0,
+  );
+  const balance = $derived(
+    hasBillingSnapshot
+      ? data.invoice.balance
+      : data.order?.priceSet === false
+        ? 0
+        : Math.max(0, total - paid),
+  );
+  const title = $derived(
+    data.invoice.kind === "advance"
+      ? "Advance receipt"
+      : data.invoice.kind === "payment"
+        ? "Payment receipt"
+        : data.invoice.kind === "partial"
+          ? "Partial work invoice"
+          : "Tax invoice",
+  );
+  const customerMobile = $derived(
+    data.customer?.phone || data.order?.mobile || "",
+  );
+  const whatsappUrl = $derived(
+    customerMobile
+      ? `https://wa.me/${whatsappNumber(customerMobile)}?text=${encodeURIComponent(data.invoice.message)}`
+      : "",
+  );
+  async function updateStatus(next: "draft" | "sent" | "paid" | "cancelled") {
+    busy = true;
+    error = "";
+    const response = await fetch(`/api/invoices/${data.invoice.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: next }),
+    });
+    const result = await response.json();
+    busy = false;
+    if (!response.ok) {
+      error = result.error || "Unable to update invoice status.";
+      return false;
+    }
+    status = next;
+    return true;
+  }
+  async function sendWhatsApp() {
+    if (!whatsappUrl) return;
+    const tab = window.open("about:blank", "_blank");
+    await updateStatus("sent");
+    if (tab) tab.location.href = whatsappUrl;
+    else window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+  }
 </script>
 
-<div class="detail-top no-print"><a href="/invoices"><ArrowLeft size={15}/> Invoices</a><div class="actions"><button class="secondary" onclick={() => window.print()}><Printer size={15}/> Print / save PDF</button>{#if whatsappUrl}<button class="primary whatsapp" onclick={sendWhatsApp}><WhatsAppIcon size={16}/> Send in WhatsApp</button>{/if}</div></div>
-<div class="invoice-heading no-print"><span><FileText size={20}/></span><div><p>{title}</p><h1>{data.invoice.number}</h1><small>Generated {formatDateTime(data.invoice.openedAt)}</small></div><div class:cancelled={status==='cancelled'} class="status-pill">{status}</div></div>
+<div class="detail-top no-print">
+  <a href="/invoices"><ArrowLeft size={15} /> Invoices</a>
+  <div class="actions">
+    <button class="secondary" onclick={() => window.print()}
+      ><Printer size={15} /> Print / save PDF</button
+    >{#if whatsappUrl}<button class="primary whatsapp" onclick={sendWhatsApp}
+        ><WhatsAppIcon size={16} /> Send in WhatsApp</button
+      >{/if}
+  </div>
+</div>
+<div class="invoice-heading no-print">
+  <span><FileText size={20} /></span>
+  <div>
+    <p>Customer studio</p>
+    <h1>{data.customer?.business || data.order?.customer || "Customer studio"}</h1>
+    <small>{data.invoice.number} · {data.order?.project || "Order"} · Generated {formatDateTime(data.invoice.openedAt)}</small>
+  </div>
+  <div class:cancelled={status === "cancelled"} class="status-pill">
+    {status}
+  </div>
+</div>
 {#if error}<p class="error no-print">{error}</p>{/if}
 
 <section class="card printable-invoice">
-	<header><div><h1>{data.settings.studioName}</h1><p>{data.settings.address}</p><p>{data.settings.phone}{data.settings.email ? ` · ${data.settings.email}` : ''}</p>{#if data.settings.gstin}<p>GSTIN: {data.settings.gstin}</p>{/if}</div><div class="document-title"><span>{title}</span><strong>{data.invoice.number}</strong><small>Date: {formatDate(data.invoice.openedAt)}</small></div></header>
-	<div class="bill-grid"><div><small>Bill to</small><strong>{data.order?.customer || 'Customer'}</strong>{#if data.customer?.address}<p>{data.customer.address}</p>{/if}<p>{data.order?.mobile || data.customer?.phone || ''}</p>{#if data.customer?.gst}<p>GSTIN: {data.customer.gst}</p>{/if}</div><div><small>Project</small><strong>{data.order?.project || '—'}</strong><p>{data.order?.workType || ''}</p><p>Order #{data.order?.serial || '—'}</p></div></div>
-	<table><thead><tr><th>Description</th><th>Qty</th><th class="number">Amount</th></tr></thead><tbody>{#if data.invoice.taskItems?.length}{#each data.invoice.taskItems as item}<tr><td>{item.name}</td><td>1</td><td class="number">{money(item.amount)}</td></tr>{/each}{:else}<tr><td>{data.order?.project || 'Editing services'}<small>{data.order?.workType || ''}</small></td><td>1</td><td class="number">{money(subtotal)}</td></tr>{/if}</tbody></table>
-	<div class="totals"><div><p>{data.settings.paymentNote}</p></div><dl><div><dt>Subtotal</dt><dd>{money(subtotal)}</dd></div>{#if discount}<div><dt>Discount ({discountPercent.toFixed(discountPercent % 1 ? 2 : 0)}%)</dt><dd>−{money(discount)}</dd></div>{/if}<div class="grand"><dt>Total</dt><dd>{money(total)}</dd></div>{#if data.invoice.amountReceived}<div><dt>Received on this receipt</dt><dd>{money(data.invoice.amountReceived)}</dd></div>{/if}{#if data.invoice.kind !== 'partial'}<div><dt>Total paid</dt><dd>{money(paid)}</dd></div><div><dt>Balance</dt><dd>{money(balance)}</dd></div>{/if}</dl></div>
-	<footer><p>{data.settings.invoiceFooter || 'Thank you for choosing us.'}</p><span>Generated digitally by {data.settings.studioName}</span></footer>
+  <header>
+    <div>
+      <h1>{data.settings.studioName}</h1>
+      <p>{data.settings.address}</p>
+      <p>
+        {data.settings.phone}{data.settings.email
+          ? ` · ${data.settings.email}`
+          : ""}
+      </p>
+      {#if data.settings.gstin}<p>GSTIN: {data.settings.gstin}</p>{/if}
+    </div>
+    <div class="document-title">
+      <span>{title}</span><strong>{data.invoice.number}</strong><small
+        >Date: {formatDate(data.invoice.openedAt)}</small
+      >
+    </div>
+  </header>
+  <div class="customer-document-heading">
+    <small>Invoice for</small>
+    <h2>{data.customer?.business || data.order?.customer || "Customer studio"}</h2>
+    <p><strong>{data.invoice.number}</strong> · {data.order?.project || "Order"}{#if data.order?.tasks?.length} · {data.order.tasks.filter((task) => !task.archived).map((task) => task.name).join(", ")}{/if}</p>
+    {#if data.customer?.name}<span>Customer contact: {data.customer.name}</span>{/if}
+  </div>
+  <div class="bill-grid">
+    <div>
+      <small>Customer studio</small><strong
+        >{data.customer?.business ||
+          data.order?.customer ||
+          "Customer studio"}</strong
+      >{#if data.customer?.name}<p>
+          Contact: {data.customer.name}
+        </p>{/if}{#if data.customer?.address}<p>{data.customer.address}</p>{/if}
+      <p>{customerMobile}</p>
+      {#if data.customer?.gst}<p>GSTIN: {data.customer.gst}</p>{/if}
+    </div>
+    <div>
+      <small>Order details</small><strong>{data.order?.project || "—"}</strong>
+      <p>{data.order?.workType || ""}</p>
+      <p>Order {orderCode(data.settings, data.order?.serial)}</p>
+      {#if data.order?.tasks?.length}<p>
+          {data.order.tasks.filter((task) => !task.archived).length} assigned task(s)
+        </p>{/if}
+    </div>
+  </div>
+  <table>
+    <thead
+      ><tr><th>Order / task</th><th>Qty</th><th class="number">Amount</th></tr
+      ></thead
+    ><tbody
+      >{#if data.invoice.taskItems?.length}{#each data.invoice.taskItems as item}<tr
+            ><td>{item.name}</td><td>1</td><td class="number"
+              >{money(item.amount)}</td
+            ></tr
+          >{/each}{:else}<tr
+          ><td
+            >{data.order?.project || "Editing services"}<small
+              >{data.order?.workType || ""}{#if data.order?.tasks?.length}
+                · {data.order.tasks
+                  .filter((task) => !task.archived)
+                  .map((task) => task.name)
+                  .join(", ")}{/if}</small
+            ></td
+          ><td>1</td><td class="number">{money(subtotal)}</td></tr
+        >{/if}</tbody
+    >
+  </table>
+  <div class="totals">
+    <div><p>{data.settings.paymentNote}</p></div>
+    <dl>
+      <div>
+        <dt>Subtotal</dt>
+        <dd>{money(subtotal)}</dd>
+      </div>
+      {#if discount}<div>
+          <dt>
+            Discount ({discountPercent.toFixed(discountPercent % 1 ? 2 : 0)}%)
+          </dt>
+          <dd>−{money(discount)}</dd>
+        </div>{/if}
+      <div class="grand">
+        <dt>Total</dt>
+        <dd>{money(total)}</dd>
+      </div>
+      {#if data.invoice.amountReceived}<div>
+          <dt>Received on this receipt</dt>
+          <dd>{money(data.invoice.amountReceived)}</dd>
+        </div>{/if}{#if data.invoice.kind !== "partial"}<div>
+          <dt>Total paid</dt>
+          <dd>{money(paid)}</dd>
+        </div>
+        <div>
+          <dt>Balance</dt>
+          <dd>{money(balance)}</dd>
+        </div>{/if}
+    </dl>
+  </div>
+  <footer>
+    <p>{data.settings.invoiceFooter || "Thank you for choosing us."}</p>
+    <span>Generated digitally by {data.settings.studioName}</span>
+  </footer>
 </section>
 
 <div class="detail-grid no-print">
-	<section class="card message-card"><h2>Customer message</h2><p>This is the WhatsApp message stored with the invoice for communication history.</p><pre>{data.invoice.message}</pre></section>
-	<div class="side-grid">
-		<section class="card summary-card"><div><CalendarClock size={15}/><span>Invoice status</span></div><select bind:value={status} disabled={busy} onchange={(event) => updateStatus((event.currentTarget as HTMLSelectElement).value as 'draft'|'sent'|'paid'|'cancelled')}><option value="draft">Draft</option><option value="sent">Sent</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select><div class="status-help">{#if status==='paid'}<CheckCircle2 size={14}/> Payment complete{:else if status==='cancelled'}<Ban size={14}/> This invoice is cancelled{:else if status==='sent'}<Send size={14}/> Sent to customer{:else}<FileText size={14}/> Not sent yet{/if}</div></section>
-		<section class="card summary-card"><div><IndianRupee size={15}/><span>Billing snapshot</span></div><strong>{money(total)}</strong><p>{money(balance)} balance at generation</p></section>
-		<section class="card summary-card"><h2>History</h2>{#each data.activity as item}<div class="activity"><strong>{item.action}</strong><small>{formatDateTime(item.createdAt)}</small></div>{/each}</section>
-	</div>
+  <section class="card message-card">
+    <h2>Customer message</h2>
+    <p>
+      This is the WhatsApp message stored with the invoice for communication
+      history.
+    </p>
+    <pre>{data.invoice.message}</pre>
+  </section>
+  <div class="side-grid">
+    <section class="card summary-card">
+      <div><CalendarClock size={15} /><span>Invoice status</span></div>
+      <select
+        bind:value={status}
+        disabled={busy}
+        onchange={(event) =>
+          updateStatus(
+            (event.currentTarget as HTMLSelectElement).value as
+              | "draft"
+              | "sent"
+              | "paid"
+              | "cancelled",
+          )}
+        ><option value="draft">Draft</option><option value="sent">Sent</option
+        ><option value="paid">Paid</option><option value="cancelled"
+          >Cancelled</option
+        ></select
+      >
+      <div class="status-help">
+        {#if status === "paid"}<CheckCircle2 size={14} /> Payment complete{:else if status === "cancelled"}<Ban
+            size={14}
+          /> This invoice is cancelled{:else if status === "sent"}<Send
+            size={14}
+          /> Sent to customer{:else}<FileText size={14} /> Not sent yet{/if}
+      </div>
+    </section>
+    <section class="card summary-card">
+      <div><IndianRupee size={15} /><span>Billing snapshot</span></div>
+      <strong>{money(total)}</strong>
+      <p>{money(balance)} balance at generation</p>
+    </section>
+    <section class="card summary-card">
+      <h2>History</h2>
+      {#each data.activity as item}<div class="activity">
+          <strong>{item.action}</strong><small
+            >{formatDateTime(item.createdAt)}</small
+          >
+        </div>{/each}
+    </section>
+  </div>
 </div>
 
-<style>.detail-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.detail-top>a,.actions{display:flex;align-items:center;gap:8px}.detail-top>a{color:var(--muted);font-size:11px}.actions button{display:flex;align-items:center;gap:7px}.invoice-heading{display:flex;align-items:center;gap:14px;margin-bottom:22px}.invoice-heading>span{width:48px;height:48px;border-radius:13px;background:var(--theme-soft);color:var(--purple);display:grid;place-items:center}.invoice-heading p,.invoice-heading small{margin:0;color:var(--muted);font-size:10px}.invoice-heading h1{margin:3px 0;font-size:24px}.status-pill{margin-left:auto;padding:7px 10px;border-radius:999px;background:#22c55e12;color:#16a34a;text-transform:capitalize;font-size:10px;font-weight:700}.status-pill.cancelled{background:#ef444412;color:#ef4444}.error{color:#ef4444}.printable-invoice{padding:38px;margin-bottom:18px;background:#fff!important;color:#172033!important}.printable-invoice header{display:flex;justify-content:space-between;gap:30px;padding-bottom:24px;border-bottom:2px solid #172033}.printable-invoice header h1{font-size:24px;margin:0 0 7px}.printable-invoice p{margin:3px 0;color:#526075;font-size:10px;line-height:1.5}.document-title{text-align:right;display:flex;flex-direction:column;gap:5px}.document-title span{text-transform:uppercase;letter-spacing:.12em;color:#64748b;font-size:10px}.document-title strong{font-size:20px}.document-title small{font-size:10px;color:#64748b}.bill-grid{display:grid;grid-template-columns:1fr 1fr;gap:40px;padding:24px 0}.bill-grid>div{display:flex;flex-direction:column;gap:4px}.bill-grid small{color:#64748b;text-transform:uppercase;letter-spacing:.1em;font-size:9px}.bill-grid strong{font-size:13px}.printable-invoice table{width:100%;border-collapse:collapse}.printable-invoice th{padding:10px;background:#172033;color:#fff;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.08em}.printable-invoice td{padding:12px 10px;border-bottom:1px solid #dbe2ea;font-size:11px}.printable-invoice td small{display:block;color:#64748b;margin-top:3px}.number{text-align:right!important}.totals{display:grid;grid-template-columns:1fr 260px;gap:30px;margin-top:18px}.totals dl{margin:0}.totals dl div{display:flex;justify-content:space-between;padding:7px 0;font-size:10px}.totals dd{margin:0;font-weight:600}.totals .grand{border-top:1px solid #172033;border-bottom:1px solid #172033;font-size:13px}.printable-invoice footer{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-top:36px;padding-top:16px;border-top:1px solid #dbe2ea}.printable-invoice footer span{font-size:8px;color:#64748b}.detail-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.7fr);gap:16px}.message-card,.summary-card{padding:20px}.message-card h2,.summary-card h2{font-size:12px;margin:0}.message-card>p,.summary-card>p{color:var(--muted);font-size:9px}.message-card pre{margin:18px 0 0;border:1px solid var(--line);background:var(--theme-soft);border-radius:12px;padding:18px;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}.side-grid{display:flex;flex-direction:column;gap:13px}.summary-card>div:first-child{display:flex;align-items:center;gap:7px;color:var(--purple);font-size:9px;margin-bottom:10px}.summary-card select{width:100%}.status-help{margin:10px 0 0!important;color:var(--muted)!important}.activity{display:flex;flex-direction:column;gap:3px;padding:9px 0;border-bottom:1px solid var(--line)}.activity strong{font-size:9px}.activity small{font-size:8px;color:var(--muted)}@media(max-width:760px){.detail-grid{grid-template-columns:1fr}.printable-invoice{padding:22px}.printable-invoice header,.printable-invoice footer{flex-direction:column;align-items:flex-start}.document-title{text-align:left}.bill-grid,.totals{grid-template-columns:1fr}.totals dl{width:100%}}@media print{@page{size:A4;margin:12mm}:global(body *){visibility:hidden!important}.printable-invoice,.printable-invoice *{visibility:visible!important}.printable-invoice{position:absolute;inset:0;width:100%;box-shadow:none!important;border:0!important;margin:0;padding:0}.no-print{display:none!important}}</style>
+<style>
+  .detail-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+  .detail-top > a,
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .detail-top > a {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .actions button {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .invoice-heading {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+  .invoice-heading > span {
+    width: 48px;
+    height: 48px;
+    border-radius: 13px;
+    background: var(--theme-soft);
+    color: var(--purple);
+    display: grid;
+    place-items: center;
+  }
+  .invoice-heading p,
+  .invoice-heading small {
+    margin: 0;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .invoice-heading h1 {
+    margin: 3px 0;
+    font-size: 24px;
+  }
+  .customer-document-heading{margin:20px 0 14px;padding:15px 17px;border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.customer-document-heading small{color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.08em}.customer-document-heading h2{margin:4px 0;font-size:18px}.customer-document-heading p,.customer-document-heading span{margin:0;color:var(--muted);font-size:9px;line-height:1.6}.customer-document-heading p strong{color:var(--theme-text)}
+  .status-pill {
+    margin-left: auto;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: #22c55e12;
+    color: #16a34a;
+    text-transform: capitalize;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .status-pill.cancelled {
+    background: #ef444412;
+    color: #ef4444;
+  }
+  .error {
+    color: #ef4444;
+  }
+  .printable-invoice {
+    padding: 38px;
+    margin-bottom: 18px;
+    background: #fff !important;
+    color: #172033 !important;
+  }
+  .printable-invoice header {
+    display: flex;
+    justify-content: space-between;
+    gap: 30px;
+    padding-bottom: 24px;
+    border-bottom: 2px solid #172033;
+  }
+  .printable-invoice header h1 {
+    font-size: 24px;
+    margin: 0 0 7px;
+  }
+  .printable-invoice p {
+    margin: 3px 0;
+    color: #526075;
+    font-size: 10px;
+    line-height: 1.5;
+  }
+  .document-title {
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .document-title span {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #64748b;
+    font-size: 10px;
+  }
+  .document-title strong {
+    font-size: 20px;
+  }
+  .document-title small {
+    font-size: 10px;
+    color: #64748b;
+  }
+  .bill-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    padding: 24px 0;
+  }
+  .bill-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .bill-grid small {
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 9px;
+  }
+  .bill-grid strong {
+    font-size: 13px;
+  }
+  .printable-invoice table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .printable-invoice th {
+    padding: 10px;
+    background: #172033;
+    color: #fff;
+    text-align: left;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .printable-invoice td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #dbe2ea;
+    font-size: 11px;
+  }
+  .printable-invoice td small {
+    display: block;
+    color: #64748b;
+    margin-top: 3px;
+  }
+  .number {
+    text-align: right !important;
+  }
+  .totals {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 30px;
+    margin-top: 18px;
+  }
+  .totals dl {
+    margin: 0;
+  }
+  .totals dl div {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 0;
+    font-size: 10px;
+  }
+  .totals dd {
+    margin: 0;
+    font-weight: 600;
+  }
+  .totals .grand {
+    border-top: 1px solid #172033;
+    border-bottom: 1px solid #172033;
+    font-size: 13px;
+  }
+  .printable-invoice footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 20px;
+    margin-top: 36px;
+    padding-top: 16px;
+    border-top: 1px solid #dbe2ea;
+  }
+  .printable-invoice footer span {
+    font-size: 8px;
+    color: #64748b;
+  }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.7fr);
+    gap: 16px;
+  }
+  .message-card,
+  .summary-card {
+    padding: 20px;
+  }
+  .message-card h2,
+  .summary-card h2 {
+    font-size: 12px;
+    margin: 0;
+  }
+  .message-card > p,
+  .summary-card > p {
+    color: var(--muted);
+    font-size: 9px;
+  }
+  .message-card pre {
+    margin: 18px 0 0;
+    border: 1px solid var(--line);
+    background: var(--theme-soft);
+    border-radius: 12px;
+    padding: 18px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font:
+      10px/1.7 ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      monospace;
+  }
+  .side-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+  }
+  .summary-card > div:first-child {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--purple);
+    font-size: 9px;
+    margin-bottom: 10px;
+  }
+  .summary-card select {
+    width: 100%;
+  }
+  .status-help {
+    margin: 10px 0 0 !important;
+    color: var(--muted) !important;
+  }
+  .activity {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .activity strong {
+    font-size: 9px;
+  }
+  .activity small {
+    font-size: 8px;
+    color: var(--muted);
+  }
+  @media (max-width: 760px) {
+    .detail-grid {
+      grid-template-columns: 1fr;
+    }
+    .printable-invoice {
+      padding: 22px;
+    }
+    .printable-invoice header,
+    .printable-invoice footer {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .document-title {
+      text-align: left;
+    }
+    .bill-grid,
+    .totals {
+      grid-template-columns: 1fr;
+    }
+    .totals dl {
+      width: 100%;
+    }
+  }
+  @media print {
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+    :global(body *) {
+      visibility: hidden !important;
+    }
+    .printable-invoice,
+    .printable-invoice * {
+      visibility: visible !important;
+    }
+    .printable-invoice {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      box-shadow: none !important;
+      border: 0 !important;
+      margin: 0;
+      padding: 0;
+    }
+    .no-print {
+      display: none !important;
+    }
+  }
+</style>

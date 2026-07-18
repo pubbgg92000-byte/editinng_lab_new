@@ -86,5 +86,6 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 		discountMode
 	});
 	await flushSheetSync(database, locals.tenant!);
-	return json({ ok: true, invoice, invoiceUrl: `/invoices/${invoice.id}`, url: order.mobile ? whatsappUrl(order.mobile, invoice.message) : '' });
+	const currentCustomerPhone = customer?.phone || order.mobile;
+	return json({ ok: true, invoice, invoiceUrl: `/invoices/${invoice.id}`, url: currentCustomerPhone ? whatsappUrl(currentCustomerPhone, invoice.message) : '' });
 };

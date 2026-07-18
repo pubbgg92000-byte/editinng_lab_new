@@ -23,5 +23,6 @@ export async function loadEditorPortal(tenant: Tenant, token: string) {
 	const database = await readyDatabase(tenant);
 	const editor = await findEditorByToken(database, token);
 	if (!editor) error(404, 'This private editor link is invalid or has been regenerated.');
-	return { editor, tasks: await tasksForEditor(database, editor.id), token, settings: await getSettings(database), tenantSlug: tenant.slug };
+	const tasks = (await tasksForEditor(database, editor.id)).map(({ billingMode: _billingMode, hourlyRate: _hourlyRate, billableAmount: _billableAmount, invoicedAmount: _invoicedAmount, editorSettlement: _editorSettlement, ...task }) => task);
+	return { editor, tasks, token, settings: await getSettings(database), tenantSlug: tenant.slug };
 }

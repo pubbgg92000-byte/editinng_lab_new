@@ -1,6 +1,7 @@
 export type OrderStatus = 'Historical' | 'Received' | 'Assigned' | 'Editing' | 'Waiting Review' | 'Revision' | 'Ready Delivery' | 'Delivered' | 'Stopped' | 'Completed';
 export type TaskStatus = 'Not started' | 'Files downloaded' | 'In progress' | 'Waiting for clarification' | 'Ready for review' | 'Revision required' | 'Completed';
 export type TaskBillingMode = 'manual' | 'duration';
+export type EditorSettlement = 'not-set' | 'editor-bills-admin' | 'admin-issues-statement';
 export type EditorAvailability = 'available' | 'busy' | 'inactive';
 export type ThemeMode = 'light' | 'dark';
 export type ThemePalette = 'graphite-aqua' | 'ice-cyan' | 'forest-gold' | 'lime-cream' | 'meadow-amber' | 'coral-teal' | 'sky-sorbet' | 'nordic-stone' | 'midnight-violet' | 'obsidian-blue' | 'heritage-sage' | 'merlot-copper' | 'citrus-evergreen' | 'graphite-coral';
@@ -26,6 +27,7 @@ export interface Customer {
 	phone: string;
 	email: string;
 	address?: string;
+	locationUrl?: string;
 	gst?: string;
 	projects: number;
 	pending: number;
@@ -40,6 +42,7 @@ export interface Editor {
 	initials: string;
 	specialty: string;
 	phone: string;
+	locationUrl?: string;
 	activeTasks: number;
 	available: boolean;
 	availability?: EditorAvailability;
@@ -69,6 +72,7 @@ export interface Task {
 	hourlyRate?: number;
 	videoDurationMinutes?: number;
 	device?: string;
+	editorSettlement?: EditorSettlement;
 	archived?: boolean;
 }
 
@@ -158,6 +162,8 @@ export interface Order {
 
 export interface StudioSettings {
 	studioName: string;
+	orderPrefix: string;
+	editorPrefix: string;
 	logoUrl: string;
 	address: string;
 	phone: string;

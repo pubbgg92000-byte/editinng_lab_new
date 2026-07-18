@@ -3,7 +3,7 @@
 	import { ArrowUpRight, CalendarDays, Check, ChevronLeft, Clock3, FileUp, FolderOpen, HardDrive, Image, Link as LinkIcon } from '@lucide/svelte';
 	import PortalHeader from '$lib/components/PortalHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { formatDate, money } from '$lib/data';
+	import { formatDate } from '$lib/data';
 	import { formatVideoDuration } from '$lib/duration';
 	import type { Task, TaskStatus } from '$lib/types';
 
@@ -50,7 +50,14 @@
 	}
 </script>
 
-<svelte:head><title>{data.editor.name}’s work — {data.settings.studioName}</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
+<svelte:head>
+	<title>{data.editor.name} — {data.settings.studioName} editor portal</title>
+	<meta property="og:title" content={`${data.editor.name} — Private editor work portal`} />
+	<meta property="og:description" content={`View assigned tasks, source files and submit editing updates to ${data.settings.studioName}.`} />
+	<meta property="og:type" content="website" />
+	{#if data.settings.logoUrl}<meta property="og:image" content={data.settings.logoUrl} />{/if}
+	<meta name="robots" content="noindex,nofollow" />
+</svelte:head>
 <PortalHeader label="Editor portal" settings={data.settings}/>
 
 <main class="portal-main">
@@ -63,7 +70,7 @@
 					<button class="task-card" onclick={() => openTask(task)}>
 						<div class="task-card-top"><div><span class="customer">{task.customer}</span><h3>{task.project}</h3></div><StatusBadge status={task.status}/></div>
 						<p>{task.name}</p>
-						<div class="task-meta">{#if task.device}<span><HardDrive size={12}/> {task.device}</span>{/if}{#if task.billingMode === 'duration'}<span><Clock3 size={12}/> Duration billing</span>{/if}</div>
+						<div class="task-meta">{#if task.device}<span><HardDrive size={12}/> {task.device}</span>{/if}{#if task.videoDurationMinutes}<span><Clock3 size={12}/> {formatVideoDuration(task.videoDurationMinutes)}</span>{/if}</div>
 						<div class="task-footer"><span><CalendarDays size={13}/> {task.due ? `Due ${formatDate(task.due)}` : 'No due date'}</span><span class="open">Open <ArrowUpRight size={13}/></span></div>
 					</button>
 				{/each}
@@ -76,20 +83,20 @@
 		<div class="task-layout">
 			<section class="card details">
 				<h2>Work details</h2>
-				<dl><div><dt>Task</dt><dd>{selected.name}</dd></div><div><dt>Due date</dt><dd>{selected.due ? formatDate(selected.due) : 'Not set'}</dd></div><div><dt>Event</dt><dd>{selected.workType || '—'}</dd></div><div><dt>Assigned device</dt><dd>{selected.device || 'Not specified'}</dd></div><div><dt>Billing method</dt><dd>{selected.billingMode === 'duration' ? `${money(selected.hourlyRate || 0)} per video hour` : 'Final choice by admin'}</dd></div><div><dt>Recorded duration</dt><dd>{formatVideoDuration(selected.videoDurationMinutes) || 'Not submitted'}</dd></div></dl>
+				<dl><div><dt>Task</dt><dd>{selected.name}</dd></div><div><dt>Due date</dt><dd>{selected.due ? formatDate(selected.due) : 'Not set'}</dd></div><div><dt>Event</dt><dd>{selected.workType || '—'}</dd></div><div><dt>Assigned device</dt><dd>{selected.device || 'Not specified'}</dd></div><div><dt>Edited video length</dt><dd>{formatVideoDuration(selected.videoDurationMinutes) || 'Not submitted'}</dd></div></dl>
 				<div class="instructions"><span>Instructions</span><p>{selected.instructions || 'Follow the project brief and notify the admin if anything is missing.'}</p></div>
 				<div class="references">
-					{#if selected.textLink}<a href={selected.textLink} target="_blank" rel="noreferrer"><LinkIcon size={14}/> Open reference <ArrowUpRight size={12}/></a>{/if}
+					{#if selected.textLink}<a href={selected.textLink} target="_blank" rel="noreferrer"><LinkIcon size={14}/> Open source files / Drive link <ArrowUpRight size={12}/></a>{/if}
 					{#if selected.imageUrl}<a href={selected.imageUrl} target="_blank" rel="noreferrer"><Image size={14}/> Open reference image <ArrowUpRight size={12}/></a>{/if}
-					{#if !selected.textLink && !selected.imageUrl}<span><FolderOpen size={14}/> No reference links added</span>{/if}
+					{#if !selected.textLink && !selected.imageUrl}<span><FolderOpen size={14}/> No source file link added</span>{/if}
 				</div>
 			</section>
 			<section class="card update">
 				<h2>Update your work</h2>
 				<div class="field"><label for="task-status">Status</label><select id="task-status" bind:value={status}><option>Not started</option><option>Files downloaded</option><option>In progress</option><option>Waiting for clarification</option><option>Ready for review</option></select></div>
 				<div class="field"><label for="task-progress">Progress <b>{progress}%</b></label><input id="task-progress" class="range" type="range" min="0" max="100" step="10" bind:value={progress}/></div>
-				<div class="field duration-field"><label for="video-duration">Final video duration <span>Optional</span></label><div class="with-icon"><Clock3 size={14}/><input id="video-duration" bind:value={videoDuration} placeholder="30 min, 1.5 hr, or 1:30"/></div><small>You can add or correct this anytime. The admin chooses whether the invoice uses duration or a manual total.</small></div>
-				<div class="field"><label for="task-output">External output link</label><div class="with-icon"><FileUp size={14}/><input id="task-output" type="url" inputmode="url" bind:value={outputLink} placeholder="Paste a Drive or delivery link"/></div></div>
+				<div class="field duration-field"><label for="video-duration">Edited video length <span>Optional</span></label><div class="with-icon"><Clock3 size={14}/><input id="video-duration" bind:value={videoDuration} placeholder="30 min, 1.5 hr, or 1:30"/></div><small>Add the final length of the video you edited. You can correct it later.</small></div>
+				<div class="field"><label for="task-output">Return edited files / Drive link</label><div class="with-icon"><FileUp size={14}/><input id="task-output" type="url" inputmode="url" bind:value={outputLink} placeholder="Paste the edited-file Drive or delivery link"/></div></div>
 				<div class="field"><label for="task-notes">Notes for admin</label><textarea id="task-notes" bind:value={notes} placeholder="Add an update, question, or missing-file report..."></textarea></div>
 				{#if error}<p class="error">{error}</p>{/if}
 				<button class="primary save" disabled={saving} onclick={update}>{saving ? 'Saving…' : 'Update task'}</button>
