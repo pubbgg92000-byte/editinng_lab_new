@@ -1,9 +1,10 @@
 import { env } from '$env/dynamic/private';
 import type { Editor, Order, StudioSettings, Task } from '$lib/types';
+import { whatsappNumber } from '$lib/phone';
 import { money } from '$lib/data';
 import { fillTemplate } from '$lib/messageTemplates';
 
-export const normalizePhone = (phone: string) => phone.replace(/\D/g, '');
+export const normalizePhone = (phone: string) => whatsappNumber(phone);
 export const whatsappUrl = (phone: string, message: string) => `https://wa.me/${normalizePhone(phone)}?text=${encodeURIComponent(message)}`;
 
 export function applicationUrl(origin?: string) {

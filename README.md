@@ -11,6 +11,8 @@ StudioFlow is a multi-tenant workflow system for editing studios. One Vercel dep
 
 ## Production deployment
 
+This repository is Vercel-only. Follow [`VERCEL_SETUP.md`](./VERCEL_SETUP.md) for a clean first deployment or production update.
+
 1. Create a separate Neon database for the control plane.
 2. Copy `.env.example` into the hosting environment and provide `CONTROL_DATABASE_URL`, independent encryption/session secrets, the owner bootstrap credentials, Google service-account credentials, and `PUBLIC_APP_URL`.
 3. Run `npm run control:migrate`, then `npm run control:bootstrap` in an environment with those variables.

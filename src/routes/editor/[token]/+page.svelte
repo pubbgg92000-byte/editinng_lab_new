@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowUpRight, CalendarDays, Check, ChevronLeft, FileUp, FolderOpen, Image, Link as LinkIcon } from 'lucide-svelte';
+	import { ArrowUpRight, CalendarDays, Check, ChevronLeft, Clock3, FileUp, FolderOpen, HardDrive, Image, Link as LinkIcon } from '@lucide/svelte';
 	import PortalHeader from '$lib/components/PortalHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { formatDate } from '$lib/data';
+	import { formatDate, money } from '$lib/data';
+	import { formatVideoDuration } from '$lib/duration';
 	import type { Task, TaskStatus } from '$lib/types';
 
 	let { data } = $props();
@@ -13,6 +14,7 @@
 	let progress = $state(0);
 	let outputLink = $state('');
 	let notes = $state('');
+	let videoDuration = $state('');
 	let saved = $state(false);
 	let saving = $state(false);
 	let error = $state('');
@@ -25,6 +27,7 @@
 		progress = task.progress;
 		outputLink = task.outputLink || '';
 		notes = task.notes || '';
+		videoDuration = formatVideoDuration(task.videoDurationMinutes);
 		error = '';
 	}
 
@@ -35,7 +38,7 @@
 		const response = await fetch(`/api/portal/${data.tenantSlug}/tasks/${selected.id}`, {
 			method: 'PATCH',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ status, progress, outputLink, notes, token: data.token })
+			body: JSON.stringify({ status, progress, outputLink, notes, videoDuration: selected.billingMode === 'duration' ? videoDuration : undefined, token: data.token })
 		});
 		const result = await response.json();
 		saving = false;
@@ -60,6 +63,7 @@
 					<button class="task-card" onclick={() => openTask(task)}>
 						<div class="task-card-top"><div><span class="customer">{task.customer}</span><h3>{task.project}</h3></div><StatusBadge status={task.status}/></div>
 						<p>{task.name}</p>
+						<div class="task-meta">{#if task.device}<span><HardDrive size={12}/> {task.device}</span>{/if}{#if task.billingMode === 'duration'}<span><Clock3 size={12}/> Duration billing</span>{/if}</div>
 						<div class="task-footer"><span><CalendarDays size={13}/> {task.due ? `Due ${formatDate(task.due)}` : 'No due date'}</span><span class="open">Open <ArrowUpRight size={13}/></span></div>
 					</button>
 				{/each}
@@ -72,7 +76,7 @@
 		<div class="task-layout">
 			<section class="card details">
 				<h2>Work details</h2>
-				<dl><div><dt>Task</dt><dd>{selected.name}</dd></div><div><dt>Due date</dt><dd>{selected.due ? formatDate(selected.due) : 'Not set'}</dd></div><div><dt>Event</dt><dd>{selected.workType || '—'}</dd></div></dl>
+				<dl><div><dt>Task</dt><dd>{selected.name}</dd></div><div><dt>Due date</dt><dd>{selected.due ? formatDate(selected.due) : 'Not set'}</dd></div><div><dt>Event</dt><dd>{selected.workType || '—'}</dd></div><div><dt>Assigned device</dt><dd>{selected.device || 'Not specified'}</dd></div><div><dt>Billing method</dt><dd>{selected.billingMode === 'duration' ? `${money(selected.hourlyRate || 0)} per video hour` : 'Amount set by admin'}</dd></div>{#if selected.billingMode === 'duration'}<div><dt>Recorded duration</dt><dd>{formatVideoDuration(selected.videoDurationMinutes) || 'Not submitted'}</dd></div>{/if}</dl>
 				<div class="instructions"><span>Instructions</span><p>{selected.instructions || 'Follow the project brief and notify the admin if anything is missing.'}</p></div>
 				<div class="references">
 					{#if selected.textLink}<a href={selected.textLink} target="_blank" rel="noreferrer"><LinkIcon size={14}/> Open reference <ArrowUpRight size={12}/></a>{/if}
@@ -84,6 +88,7 @@
 				<h2>Update your work</h2>
 				<div class="field"><label for="task-status">Status</label><select id="task-status" bind:value={status}><option>Not started</option><option>Files downloaded</option><option>In progress</option><option>Waiting for clarification</option><option>Ready for review</option></select></div>
 				<div class="field"><label for="task-progress">Progress <b>{progress}%</b></label><input id="task-progress" class="range" type="range" min="0" max="100" step="10" bind:value={progress}/></div>
+				{#if selected.billingMode === 'duration'}<div class="field duration-field"><label for="video-duration">Final video duration *</label><div class="with-icon"><Clock3 size={14}/><input id="video-duration" bind:value={videoDuration} placeholder="30 min, 1.5 hr, or 1:30"/></div><small>This remains editable. The task amount is calculated from the hourly rate.</small></div>{/if}
 				<div class="field"><label for="task-output">External output link</label><div class="with-icon"><FileUp size={14}/><input id="task-output" type="url" inputmode="url" bind:value={outputLink} placeholder="Paste a Drive or delivery link"/></div></div>
 				<div class="field"><label for="task-notes">Notes for admin</label><textarea id="task-notes" bind:value={notes} placeholder="Add an update, question, or missing-file report..."></textarea></div>
 				{#if error}<p class="error">{error}</p>{/if}
@@ -97,4 +102,5 @@
 <style>
 	.portal-main{max-width:880px;margin:0 auto;padding:58px 22px 80px}.welcome{display:flex;align-items:center;gap:14px;margin-bottom:46px}.avatar{width:44px;height:44px;border-radius:12px;background:var(--theme-soft);color:var(--purple);display:grid;place-items:center;font-size:12px;font-weight:700}.welcome p{color:var(--muted);font-size:11px;margin:0 0 3px}.welcome h1{font-size:22px;margin:0}.work-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.work-title h2{font-size:13px;margin:0}.work-title span{color:var(--muted);font-size:10px}.task-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}.task-card{display:block;text-align:left;border:1px solid var(--line);background:var(--card);color:inherit;border-radius:12px;padding:18px;transition:.15s}.task-card:hover{transform:translateY(-2px);border-color:var(--purple)}.task-card-top{display:flex;align-items:start;justify-content:space-between}.customer{color:var(--muted);font-size:9px}.task-card h3{font-size:14px;margin:4px 0}.task-card>p{color:var(--purple);font-size:10px;margin:14px 0 25px}.task-footer{border-top:1px solid var(--line);padding-top:12px;display:flex;justify-content:space-between;color:var(--muted);font-size:9px}.task-footer span,.references a,.references span{display:flex;align-items:center;gap:5px}.task-footer .open{color:var(--purple)}.empty{text-align:center;padding:50px;color:var(--muted)}.empty h2{color:inherit}.back{display:flex;gap:5px;align-items:center;border:0;background:transparent;color:var(--muted);font-size:10px;padding:0;margin-bottom:27px}.task-heading{display:flex;align-items:start;justify-content:space-between;margin-bottom:24px}.task-heading span{color:var(--muted);font-size:10px}.task-heading h1{font-size:24px;margin:4px 0}.task-heading p{color:var(--purple);font-size:11px;margin:0}.task-layout{display:grid;grid-template-columns:1fr 1fr;gap:14px}.details,.update{padding:20px}.details h2,.update h2{font-size:12px;margin:0 0 20px}.details dl{margin:0}.details dl div{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:10px}.details dt,.instructions span{color:var(--muted)}.details dd{margin:0}.instructions{margin-top:19px}.instructions span{font-size:10px}.instructions p{font-size:10px;line-height:1.7;color:inherit}.references{display:grid;gap:8px;margin-top:20px}.references a,.references span{min-height:36px;justify-content:center;border:1px solid var(--line);background:var(--theme-soft);color:var(--purple);border-radius:8px;font-size:10px}.references span{color:var(--muted)}.update{display:flex;flex-direction:column;gap:16px}.update h2{margin-bottom:3px}.field label{display:flex;justify-content:space-between}.field label b{color:var(--purple)}.range{padding:5px 0!important;accent-color:var(--purple)}.with-icon{position:relative}.with-icon input{padding-left:32px}.save{width:100%;margin-top:2px}.saved{display:flex;align-items:center;justify-content:center;gap:6px;color:#45c982;font-size:9px}.error{color:#ef7777;font-size:10px;margin:0}.portal-main :global(.badge){pointer-events:none}@media(max-width:650px){.task-cards,.task-layout{grid-template-columns:1fr}.portal-main{padding-top:38px}}
 	.completed-title{margin-top:34px}.completed-cards{opacity:.86}.completed-cards .task-card{background:color-mix(in srgb,var(--card) 94%,#22c55e 6%)}
+	.task-card>p{margin-bottom:12px}.task-meta{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.task-meta span{display:flex;align-items:center;gap:4px;padding:5px 7px;border-radius:99px;background:var(--theme-soft);color:var(--muted);font-size:8px}.details dl div{gap:14px}.details dd{text-align:right}.field small{color:var(--muted);font-size:8px;line-height:1.5}.duration-field{padding:13px;border:1px solid color-mix(in srgb,var(--purple) 30%,var(--line));border-radius:10px;background:var(--theme-soft)}.with-icon :global(svg){position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--purple)}
 </style>

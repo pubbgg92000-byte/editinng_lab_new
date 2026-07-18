@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowLeft, ArrowUpRight, RefreshCw, Sheet, CircleAlert, ExternalLink } from 'lucide-svelte';
+	import { ArrowLeft, ArrowUpRight, RefreshCw, Sheet, CircleAlert, ExternalLink } from '@lucide/svelte';
 	let { data } = $props();
 	let active = $state('Customers');
 	const selected = $derived(data.sheets.find((sheet) => sheet.name === active) ?? data.sheets[0]);

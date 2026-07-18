@@ -91,7 +91,7 @@
 
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	let { title, open = $bindable(), wide = false, children, footer }: { title: string; open: boolean; wide?: boolean; children: import('svelte').Snippet; footer?: import('svelte').Snippet } = $props();
 	const modalId = ++nextModalId;
 	let modalElement: HTMLElement | undefined = $state();

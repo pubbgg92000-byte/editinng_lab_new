@@ -4,9 +4,10 @@
 	import EditorModal from '$lib/components/EditorModal.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
-	import { Pencil, Link2, Check, Archive, RotateCcw, Eye, Phone, Sparkles, ClipboardList, Trash2, RefreshCw, ArrowLeft } from 'lucide-svelte';
+	import { Pencil, Link2, Check, Archive, RotateCcw, Eye, Phone, Sparkles, ClipboardList, Trash2, RefreshCw, ArrowLeft } from '@lucide/svelte';
 	import { editorStore } from '$lib/stores/app';
 	import { formatDate } from '$lib/data';
+	import { whatsappNumber } from '$lib/phone';
 	import type { Editor, Order } from '$lib/types';
 
 	let { data } = $props();
@@ -43,7 +44,7 @@
 			token = result.token;
 			editor.token = token;
 		}
-		await navigator.clipboard.writeText(`${location.origin}/editor/${token}`);
+		await navigator.clipboard.writeText(`${location.origin}/portal/${data.tenantSlug}/editor/${token}`);
 		copied = editor.id;
 		setTimeout(() => copied = '', 1800);
 	}
@@ -118,7 +119,7 @@
 					{#if editor.archived}<button aria-label={`Restore ${editor.name}`} onclick={() => restoreEditor(editor)}><RotateCcw size={13}/><span class="action-label">Restore</span></button><button class="delete-permanent" aria-label={`Permanently delete ${editor.name}`} title="Delete permanently" onclick={() => permanentlyDelete(editor)}><Trash2 size={13}/><span class="action-label">Delete</span></button>{:else}
 						<button aria-label={`Copy ${editor.name} portal link`} onclick={() => copyPortal(editor)}>{#if copied === editor.id}<Check size={13}/><span class="action-label">Copied</span>{:else}<Link2 size={13}/><span class="action-label">Portal</span>{/if}</button>
 						<button aria-label={`Edit ${editor.name}`} onclick={() => openEditor(editor)}><Pencil size={13}/><span class="action-label">Edit</span></button>
-						{#if editor.phone}<a class="whatsapp" href={'https://wa.me/' + editor.phone.replace(/\D/g, '')} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp ${editor.name}`}><WhatsAppIcon size={14}/></a>{:else}<button type="button" class="whatsapp unavailable" aria-disabled="true" aria-label={`No WhatsApp number for ${editor.name}`}><WhatsAppIcon size={14}/></button>{/if}
+						{#if editor.phone}<a class="whatsapp" href={'https://wa.me/' + whatsappNumber(editor.phone)} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp ${editor.name}`}><WhatsAppIcon size={14}/></a>{:else}<button type="button" class="whatsapp unavailable" aria-disabled="true" aria-label={`No WhatsApp number for ${editor.name}`}><WhatsAppIcon size={14}/></button>{/if}
 						<button class="danger" aria-label={`Archive ${editor.name}`} onclick={() => archiveEditor(editor)}><Archive size={13}/></button>
 					{/if}
 				</div>

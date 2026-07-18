@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import type { Customer } from '$lib/types';
+	import { indianMobileError, normalizeIndianMobile } from '$lib/phone';
 
 	let { open = $bindable(), customer = null, onsaved = () => {} }: { open: boolean; customer?: Customer | null; onsaved?: (customer: Customer, synced: boolean) => void } = $props();
 	let name = $state('');
@@ -25,6 +26,9 @@
 
 	async function save() {
 		if (!name.trim() || !phone.trim()) { error = 'Customer name and phone number are required.'; return; }
+		const phoneError = indianMobileError(phone, true);
+		if (phoneError) { error = phoneError; return; }
+		phone = normalizeIndianMobile(phone);
 		saving = true;
 		error = '';
 		try {
@@ -47,7 +51,7 @@
 	<div class="form-grid">
 		<div class="field"><label for="customer-name">Customer name *</label><input id="customer-name" bind:value={name} placeholder="e.g. Rahul Sharma" /></div>
 		<div class="field"><label for="business-name">Business name</label><input id="business-name" bind:value={business} placeholder="e.g. Rahul Photography" /></div>
-		<div class="field"><label for="customer-phone">WhatsApp / phone *</label><input id="customer-phone" bind:value={phone} placeholder="+91 98765 43210" /></div>
+		<div class="field"><label for="customer-phone">10-digit mobile number *</label><input id="customer-phone" bind:value={phone} inputmode="tel" autocomplete="tel" placeholder="98765 43210 or +91 98765 43210" /></div>
 		<div class="field"><label for="customer-email">Email</label><input id="customer-email" bind:value={email} type="email" placeholder="name@studio.com" /></div>
 		<div class="field"><label for="customer-gst">GST details</label><input id="customer-gst" bind:value={gst} placeholder="Optional" /></div>
 	</div>

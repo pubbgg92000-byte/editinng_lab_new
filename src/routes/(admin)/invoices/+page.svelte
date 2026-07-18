@@ -1,7 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { formatDateTime, money } from '$lib/data';
-	import { ArrowUpRight, Download, Search } from 'lucide-svelte';
+	import { ArrowUpRight, Download, Search } from '@lucide/svelte';
 	import type { Invoice, Order } from '$lib/types';
 
 	let { data }: { data: { orders: Order[]; invoices: Invoice[] } } = $props();

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Eye, EyeOff, ShieldCheck } from 'lucide-svelte';
+	import { Eye, EyeOff, ShieldCheck } from '@lucide/svelte';
 	let { form } = $props();
 	let loading = $state(false);
 	let visible = $state(false);

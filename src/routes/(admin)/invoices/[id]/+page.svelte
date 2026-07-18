@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowLeft, CalendarClock, FileText, IndianRupee, Printer, CheckCircle2, Ban, Send } from 'lucide-svelte';
+	import { ArrowLeft, CalendarClock, FileText, IndianRupee, Printer, CheckCircle2, Ban, Send } from '@lucide/svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import { formatDate, formatDateTime, money } from '$lib/data';
+	import { whatsappNumber } from '$lib/phone';
 	import type { ActivityLog, Customer, Invoice, Order, StudioSettings } from '$lib/types';
 	let { data }: { data: { invoice: Invoice; order: Order | null; customer: Customer | null; settings: StudioSettings; activity: ActivityLog[] } } = $props();
 	let status = $state(untrack(() => data.invoice.status || 'draft')); let busy = $state(false); let error = $state('');
@@ -14,7 +15,7 @@
 	const paid = $derived(hasBillingSnapshot ? data.invoice.paid : data.order?.paid || 0);
 	const balance = $derived(hasBillingSnapshot ? data.invoice.balance : data.order?.priceSet === false ? 0 : Math.max(0, total - paid));
 	const title = $derived(data.invoice.kind === 'advance' ? 'Advance receipt' : data.invoice.kind === 'payment' ? 'Payment receipt' : data.invoice.kind === 'partial' ? 'Partial work invoice' : 'Tax invoice');
-	const whatsappUrl = $derived(data.order?.mobile ? `https://wa.me/${data.order.mobile.replace(/\D/g,'')}?text=${encodeURIComponent(data.invoice.message)}` : '');
+	const whatsappUrl = $derived(data.order?.mobile ? `https://wa.me/${whatsappNumber(data.order.mobile)}?text=${encodeURIComponent(data.invoice.message)}` : '');
 	async function updateStatus(next: 'draft' | 'sent' | 'paid' | 'cancelled') {
 		busy = true; error = '';
 		const response = await fetch(`/api/invoices/${data.invoice.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: next }) });

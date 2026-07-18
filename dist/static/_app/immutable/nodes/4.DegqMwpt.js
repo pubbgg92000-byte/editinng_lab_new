@@ -1,1 +1,0 @@
-import{ft as e}from"../chunks/DK_zmAFv.js";import{r as t}from"../chunks/BuFlayix.js";function n(e,n){throw new t(e,n.toString())}var r=e({load:()=>i}),i=()=>n(307,`/dashboard`);export{r as universal};

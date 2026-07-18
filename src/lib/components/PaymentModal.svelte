@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CheckCircle2, IndianRupee } from 'lucide-svelte';
+	import { CheckCircle2, IndianRupee } from '@lucide/svelte';
 	import Modal from './Modal.svelte';
 	import { money } from '$lib/data';
 	import type { OrderStatus } from '$lib/types';

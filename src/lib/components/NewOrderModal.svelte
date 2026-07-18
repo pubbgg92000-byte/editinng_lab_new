@@ -2,8 +2,9 @@
 	import Modal from './Modal.svelte';
 	import NewCustomerModal from './NewCustomerModal.svelte';
 	import { customerStore } from '$lib/stores/app';
-	import { ChevronDown, Plus, Star, Trash2, X } from 'lucide-svelte';
+	import { ChevronDown, Plus, Star, Trash2, X } from '@lucide/svelte';
 	import type { Customer, Order } from '$lib/types';
+	import { indianMobileError, normalizeIndianMobile } from '$lib/phone';
 
 	type EventOption = { name: string; custom: boolean };
 	type TaskDraft = { key: string; name: string; billableAmount?: number };
@@ -90,6 +91,9 @@
 
 	async function save() {
 		if (!selectedCustomer) { error = 'Choose or create a customer.'; return; }
+		const phoneError = indianMobileError(mobile, true);
+		if (phoneError) { error = phoneError; return; }
+		mobile = normalizeIndianMobile(mobile);
 		for (const [index, draft] of drafts.entries()) {
 			if (!draft.event.trim() || draft.event === 'Other' || !draft.project.trim()) { error = `Add the event and project name for order ${index + 1}.`; return; }
 			if (draft.amount !== undefined && draft.advance !== undefined && draft.advance > draft.amount) { error = `Advance cannot be greater than the total for order ${index + 1}.`; return; }
@@ -118,7 +122,7 @@
 	<p class="sheet-note">Choose the customer once, then add one or more projects. Each project becomes a separate order.</p>
 	<div class="form-grid customer-fields">
 		<div class="field"><label for="order-studio">Studio name *</label><div class="customer-select"><div class="select-control"><select id="order-studio" bind:value={customerId}><option value="">Choose customer</option>{#each $customerStore as item}<option value={item.id}>{item.business}</option>{/each}</select><span class="select-chevron" aria-hidden="true"><ChevronDown size={15}/></span></div><button class="secondary" type="button" onclick={() => (showCustomer = true)}>New</button></div></div>
-		<div class="field"><label for="order-mobile">Mobile number</label><input id="order-mobile" bind:value={mobile} inputmode="tel" placeholder="Customer mobile number" /></div>
+		<div class="field"><label for="order-mobile">10-digit mobile number *</label><input id="order-mobile" bind:value={mobile} inputmode="tel" autocomplete="tel" placeholder="98765 43210" /></div>
 	</div>
 
 	<div class="orders-stack">

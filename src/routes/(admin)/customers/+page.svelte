@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import { Search, Check, Edit3, Copy, RefreshCw, Archive, RotateCcw, Eye, ExternalLink, FolderKanban, Mail, MapPin, ReceiptIndianRupee } from 'lucide-svelte';
+	import { Search, Check, Edit3, Copy, RefreshCw, Archive, RotateCcw, Eye, ExternalLink, FolderKanban, Mail, MapPin, ReceiptIndianRupee } from '@lucide/svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import NewCustomerModal from '$lib/components/NewCustomerModal.svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import { money } from '$lib/data';
+	import { whatsappNumber } from '$lib/phone';
 	import { customerStore } from '$lib/stores/app';
 	import type { Customer, Order } from '$lib/types';
 
@@ -39,7 +40,7 @@
 	function edit(customer: Customer) { detailsOpen = false; editingCustomer = customer; showNewCustomer = true; }
 	function editSelectedCustomer() { if (selectedCustomer) edit(selectedCustomer); }
 	function customerPortalUrl(token: string) {
-		const url = new URL(`/customer/${token}`, location.origin);
+		const url = new URL(`/portal/${data.tenantSlug}/customer/${token}`, location.origin);
 		if (['localhost', '127.0.0.1', '::1'].includes(url.hostname)) url.protocol = 'http:';
 		return url.toString();
 	}
@@ -67,7 +68,7 @@
 <div class="card table-wrap">
 	<table class="data-table customer-table">
 		<thead><tr><th>Customer</th><th>Phone</th><th>Projects</th><th>Pending</th><th class="actions-heading">Actions</th></tr></thead>
-		<tbody>{#each filtered as customer}<tr class:archived={customer.archived}><td><button class="customer-name-button" onclick={()=>openCustomer(customer)} aria-label={`Open ${customer.business} details`}><strong>{customer.business}</strong><small>{customer.name} · {customer.id}</small></button></td><td>{customer.phone}</td><td>{customer.projects}</td><td class:clear={customer.pending===0}>{customer.pending ? money(customer.pending) : 'All clear'}</td><td class="actions-cell"><div class="row-actions"><div class="action-cluster"><button class="view" onclick={()=>openCustomer(customer)} aria-label="View customer details" title="View details"><Eye size={14}/></button>{#if customer.archived}<button class="restore" onclick={()=>restoreCustomer(customer)} aria-label="Restore customer" title="Restore customer"><RotateCcw size={14}/></button>{:else}<button onclick={()=>edit(customer)} aria-label="Edit customer" title="Edit customer"><Edit3 size={14}/></button><button onclick={()=>copyLink(customer)} disabled={!customer.token} aria-label="Copy private link" title={customer.token ? 'Copy private link' : 'Private link unavailable'}><Copy size={14}/></button><button onclick={()=>regenerate(customer)} aria-label="Regenerate private link" title="Regenerate private link"><RefreshCw size={14}/></button>{#if customer.phone}<a class="whatsapp" href={'https://wa.me/'+customer.phone.replace(/\D/g,'')} target="_blank" rel="noreferrer" aria-label="WhatsApp customer" title="Open WhatsApp"><WhatsAppIcon size={15}/></a>{/if}{#if customer.token}<a class="portal-action" href={'/customer/'+customer.token} target="_blank" rel="noreferrer" aria-label="Open customer portal" title="Open customer portal"><ExternalLink size={14}/></a>{/if}{/if}</div>{#if !customer.archived}<button class="danger" onclick={()=>archiveCustomer(customer)} aria-label="Archive customer" title="Archive customer"><Archive size={14}/></button>{/if}</div></td></tr>{/each}</tbody>
+		<tbody>{#each filtered as customer}<tr class:archived={customer.archived}><td><button class="customer-name-button" onclick={()=>openCustomer(customer)} aria-label={`Open ${customer.business} details`}><strong>{customer.business}</strong><small>{customer.name} · {customer.id}</small></button></td><td>{customer.phone}</td><td>{customer.projects}</td><td class:clear={customer.pending===0}>{customer.pending ? money(customer.pending) : 'All clear'}</td><td class="actions-cell"><div class="row-actions"><div class="action-cluster"><button class="view" onclick={()=>openCustomer(customer)} aria-label="View customer details" title="View details"><Eye size={14}/></button>{#if customer.archived}<button class="restore" onclick={()=>restoreCustomer(customer)} aria-label="Restore customer" title="Restore customer"><RotateCcw size={14}/></button>{:else}<button onclick={()=>edit(customer)} aria-label="Edit customer" title="Edit customer"><Edit3 size={14}/></button><button onclick={()=>copyLink(customer)} disabled={!customer.token} aria-label="Copy private link" title={customer.token ? 'Copy private link' : 'Private link unavailable'}><Copy size={14}/></button><button onclick={()=>regenerate(customer)} aria-label="Regenerate private link" title="Regenerate private link"><RefreshCw size={14}/></button>{#if customer.phone}<a class="whatsapp" href={'https://wa.me/'+whatsappNumber(customer.phone)} target="_blank" rel="noreferrer" aria-label="WhatsApp customer" title="Open WhatsApp"><WhatsAppIcon size={15}/></a>{/if}{#if customer.token}<a class="portal-action" href={`/portal/${data.tenantSlug}/customer/${customer.token}`} target="_blank" rel="noreferrer" aria-label="Open customer portal" title="Open customer portal"><ExternalLink size={14}/></a>{/if}{/if}</div>{#if !customer.archived}<button class="danger" onclick={()=>archiveCustomer(customer)} aria-label="Archive customer" title="Archive customer"><Archive size={14}/></button>{/if}</div></td></tr>{/each}</tbody>
 	</table>
 </div>
 

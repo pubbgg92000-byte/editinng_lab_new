@@ -1,5 +1,6 @@
 export type OrderStatus = 'Historical' | 'Received' | 'Assigned' | 'Editing' | 'Waiting Review' | 'Revision' | 'Ready Delivery' | 'Delivered' | 'Stopped' | 'Completed';
 export type TaskStatus = 'Not started' | 'Files downloaded' | 'In progress' | 'Waiting for clarification' | 'Ready for review' | 'Revision required' | 'Completed';
+export type TaskBillingMode = 'manual' | 'duration';
 export type EditorAvailability = 'available' | 'busy' | 'inactive';
 export type ThemeMode = 'light' | 'dark';
 export type ThemePalette = 'graphite-aqua' | 'ice-cyan' | 'forest-gold' | 'lime-cream' | 'meadow-amber' | 'coral-teal' | 'sky-sorbet' | 'nordic-stone' | 'midnight-violet' | 'obsidian-blue' | 'heritage-sage' | 'merlot-copper' | 'citrus-evergreen' | 'graphite-coral';
@@ -64,6 +65,10 @@ export interface Task {
 	notes?: string;
 	billableAmount?: number;
 	invoicedAmount?: number;
+	billingMode?: TaskBillingMode;
+	hourlyRate?: number;
+	videoDurationMinutes?: number;
+	device?: string;
 	archived?: boolean;
 }
 

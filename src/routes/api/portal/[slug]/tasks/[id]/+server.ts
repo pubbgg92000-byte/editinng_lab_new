@@ -4,6 +4,7 @@ import { readyDatabase } from '$lib/server/db';
 import { findEditorByToken, updateTask } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
 import { taskLinkError } from '$lib/server/validation';
+import { parseVideoDurationMinutes } from '$lib/duration';
 
 export const PATCH = async ({ params, request }) => {
 	const tenant = await findTenantBySlug(params.slug);
@@ -11,6 +12,11 @@ export const PATCH = async ({ params, request }) => {
 	const input = await request.json();
 	const linkError = taskLinkError(input);
 	if (linkError) return json({ error: `${linkError} Upload files externally and paste the link here.` }, { status: 400 });
+	if (input.videoDuration !== undefined) {
+		const minutes = parseVideoDurationMinutes(input.videoDuration);
+		if (!Number.isFinite(minutes) || minutes < 0) return json({ error: 'Enter duration like 30 min, 1.5 hr, or 1:30.' }, { status: 400 });
+		input.videoDurationMinutes = minutes;
+	}
 	const database = await readyDatabase(tenant);
 	const editor = input.token ? await findEditorByToken(database, String(input.token)) : null;
 	if (!editor) return json({ error: 'Unauthorized' }, { status: 401 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CircleCheckBig, Link2, PackageCheck, MessageCircle, IndianRupee } from 'lucide-svelte';
+	import { CircleCheckBig, Link2, PackageCheck, MessageCircle, IndianRupee } from '@lucide/svelte';
 	import Modal from './Modal.svelte';
 	import { money } from '$lib/data';
 	import type { Order } from '$lib/types';

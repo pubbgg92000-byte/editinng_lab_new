@@ -3,6 +3,7 @@ import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
 import { addEventOption, createCustomer, createOrder, createTask, defaultEventOptions, getOrder, listCustomers, listOrdersPage } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
+import { indianMobileError, normalizeIndianMobile } from '$lib/phone';
 
 export const GET = async ({ cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
@@ -23,6 +24,9 @@ export const POST = async ({ request, cookies, locals }) => {
 	const orderInputs: Record<string, any>[] = Array.isArray(input.orders) ? input.orders : [input];
 	if (!orderInputs.length || orderInputs.length > 20) return json({ error: 'Create between 1 and 20 orders at a time.' }, { status: 400 });
 	if (!String(input.customer || '').trim() || orderInputs.some((item) => !String(item.event || '').trim() || !String(item.project || '').trim())) return json({ error: 'Studio name, event and project name are required for every order.' }, { status: 400 });
+	const mobileError = indianMobileError(input.mobile, true);
+	if (mobileError) return json({ error: mobileError }, { status: 400 });
+	input.mobile = normalizeIndianMobile(input.mobile);
 	for (const item of orderInputs) {
 		const priceSet = item.amount !== null && item.amount !== undefined && item.amount !== '';
 		const advanceSet = item.advance !== null && item.advance !== undefined && item.advance !== '';
@@ -36,11 +40,14 @@ export const POST = async ({ request, cookies, locals }) => {
 	let createdCustomer = null;
 	if (input.createCustomer) {
 		const business = String(input.customer).trim();
-		const phone = String(input.mobile || '').trim();
+		const phone = normalizeIndianMobile(input.mobile);
 		if (!phone) return json({ error: 'Mobile number is required when adding a customer.' }, { status: 400 });
-		const existing = (await listCustomers(database)).find((customer) => customer.business.toLowerCase() === business.toLowerCase() && customer.phone === phone);
-		createdCustomer = existing || await createCustomer(database, { name: String(input.customerName || business).trim(), business, phone, email: String(input.customerEmail || '').trim() });
+		const existing = (await listCustomers(database)).find((customer) => normalizeIndianMobile(customer.phone) === phone);
+		try { createdCustomer = existing || await createCustomer(database, { name: String(input.customerName || business).trim(), business, phone, email: String(input.customerEmail || '').trim() }); }
+		catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to add customer.' }, { status: 400 }); }
 		customerId = createdCustomer.id;
+		input.customer = createdCustomer.business;
+		input.mobile = createdCustomer.phone;
 	}
 	const createdOrders = [];
 	for (const item of orderInputs) {
@@ -48,7 +55,9 @@ export const POST = async ({ request, cookies, locals }) => {
 		const advanceSet = item.advance !== null && item.advance !== undefined && item.advance !== '';
 		const event = String(item.event).trim();
 		if (!defaultEventOptions.some((option) => option.toLowerCase() === event.toLowerCase())) await addEventOption(database, event);
-		const order = await createOrder(database, { customerId, customer: String(input.customer).trim(), mobile: String(input.mobile || '').trim(), workType: event, project: String(item.project).trim(), receiving: String(item.receiving ?? input.receiving ?? '').trim(), duration: String(item.duration ?? input.duration ?? '').trim(), price: priceSet ? Math.max(0, Number(item.amount)) : 0, paid: advanceSet ? Math.max(0, Number(item.advance)) : 0, priceSet, advanceSet, source: String(item.source ?? input.source ?? '').trim(), remarks: String(item.remarks ?? input.remarks ?? '').trim(), due: String(item.due || '').trim(), important: Boolean(item.important ?? input.important) });
+		let order;
+		try { order = await createOrder(database, { customerId, customer: String(input.customer).trim(), mobile: String(input.mobile || '').trim(), workType: event, project: String(item.project).trim(), receiving: String(item.receiving ?? input.receiving ?? '').trim(), duration: String(item.duration ?? input.duration ?? '').trim(), price: priceSet ? Math.max(0, Number(item.amount)) : 0, paid: advanceSet ? Math.max(0, Number(item.advance)) : 0, priceSet, advanceSet, source: String(item.source ?? input.source ?? '').trim(), remarks: String(item.remarks ?? input.remarks ?? '').trim(), due: String(item.due || '').trim(), important: Boolean(item.important ?? input.important) }); }
+		catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to create order.' }, { status: 400 }); }
 		const initialTasks = Array.isArray(item.tasks) ? item.tasks : [];
 		for (const task of initialTasks) {
 			if (!String(task.name || '').trim()) continue;

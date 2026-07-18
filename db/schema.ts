@@ -1,8 +1,10 @@
 export const schemaStatements = [
 	`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, business TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', gst TEXT NOT NULL DEFAULT '', portal_token_hash TEXT, portal_token_cipher TEXT, projects INTEGER NOT NULL DEFAULT 0, pending REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,
+	`ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_normalized TEXT`,
 	`CREATE TABLE IF NOT EXISTS editors (id TEXT PRIMARY KEY, code TEXT, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', specialty TEXT NOT NULL DEFAULT '', availability TEXT NOT NULL DEFAULT 'available', portal_token_hash TEXT, portal_token_cipher TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,
 	`ALTER TABLE editors ADD COLUMN IF NOT EXISTS code TEXT`,
+	`ALTER TABLE editors ADD COLUMN IF NOT EXISTS phone_normalized TEXT`,
 	`CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL UNIQUE, customer_id TEXT, customer_name TEXT NOT NULL, mobile TEXT NOT NULL DEFAULT '', event TEXT NOT NULL, project TEXT NOT NULL, receiving TEXT NOT NULL DEFAULT '', duration TEXT NOT NULL DEFAULT '', amount REAL NOT NULL DEFAULT 0, advance REAL NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT '', remarks TEXT NOT NULL DEFAULT '', due_date TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Received', progress INTEGER NOT NULL DEFAULT 0, historical INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS amount_set INTEGER NOT NULL DEFAULT 1`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS advance_set INTEGER NOT NULL DEFAULT 1`,
@@ -14,6 +16,10 @@ export const schemaStatements = [
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_notified_at TEXT`,
 	`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, editor_id TEXT, title TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', due_date TEXT NOT NULL DEFAULT '', text_link TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Not started', progress INTEGER NOT NULL DEFAULT 0, output_link TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT, FOREIGN KEY(order_id) REFERENCES orders(id), FOREIGN KEY(editor_id) REFERENCES editors(id))`,
 	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS billable_amount REAL NOT NULL DEFAULT 0`,
+	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS billing_mode TEXT NOT NULL DEFAULT 'manual'`,
+	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS hourly_rate REAL NOT NULL DEFAULT 0`,
+	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS video_duration_minutes INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS device TEXT NOT NULL DEFAULT ''`,
 	`UPDATE orders
 	 SET status = 'Received'
 	 WHERE status = 'Assigned'
@@ -70,6 +76,24 @@ export const schemaStatements = [
 	 FROM editors
 	 ON CONFLICT(name) DO UPDATE SET value = GREATEST(counters.value, excluded.value)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS editors_code_unique_idx ON editors(code) WHERE code IS NOT NULL`,
+	`WITH ranked AS (
+		SELECT id, RIGHT(regexp_replace(phone, '\\D', '', 'g'), 10) AS normalized,
+			ROW_NUMBER() OVER (PARTITION BY RIGHT(regexp_replace(phone, '\\D', '', 'g'), 10) ORDER BY created_at, id) AS position
+		FROM customers
+		WHERE length(regexp_replace(phone, '\\D', '', 'g')) IN (10, 12)
+	)
+	UPDATE customers SET phone_normalized = ranked.normalized
+	FROM ranked WHERE customers.id = ranked.id AND ranked.position = 1 AND customers.phone_normalized IS NULL`,
+	`WITH ranked AS (
+		SELECT id, RIGHT(regexp_replace(phone, '\\D', '', 'g'), 10) AS normalized,
+			ROW_NUMBER() OVER (PARTITION BY RIGHT(regexp_replace(phone, '\\D', '', 'g'), 10) ORDER BY created_at, id) AS position
+		FROM editors
+		WHERE length(regexp_replace(phone, '\\D', '', 'g')) IN (10, 12)
+	)
+	UPDATE editors SET phone_normalized = ranked.normalized
+	FROM ranked WHERE editors.id = ranked.id AND ranked.position = 1 AND editors.phone_normalized IS NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS customers_phone_normalized_unique_idx ON customers(phone_normalized) WHERE phone_normalized IS NOT NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS editors_phone_normalized_unique_idx ON editors(phone_normalized) WHERE phone_normalized IS NOT NULL`,
 	`CREATE TABLE IF NOT EXISTS maintenance_runs (name TEXT PRIMARY KEY, last_run_at TEXT NOT NULL, details TEXT NOT NULL DEFAULT '')`,
 	`CREATE INDEX IF NOT EXISTS tasks_order_idx ON tasks(order_id)`,
 	`CREATE INDEX IF NOT EXISTS tasks_editor_idx ON tasks(editor_id)`,

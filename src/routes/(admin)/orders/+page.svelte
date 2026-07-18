@@ -6,7 +6,7 @@
 	import DeliveryModal from '$lib/components/DeliveryModal.svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import { formatDate, money } from '$lib/data';
-	import { Search, SlidersHorizontal, Check, ArrowUpRight, ArrowLeft, X, Star, ChevronLeft, ChevronRight, Archive, RotateCcw, Trash2, ClipboardList, Clock3, PackageCheck, CircleCheckBig } from 'lucide-svelte';
+	import { Search, SlidersHorizontal, Check, ArrowUpRight, ArrowLeft, X, Star, ChevronLeft, ChevronRight, Archive, RotateCcw, Trash2, ClipboardList, Clock3, PackageCheck, CircleCheckBig } from '@lucide/svelte';
 	import type { Order } from '$lib/types';
 
 	let { data } = $props();

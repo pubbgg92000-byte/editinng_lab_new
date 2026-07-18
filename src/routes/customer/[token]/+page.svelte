@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ArrowUpRight, Check, Circle, Clock3, Download, FileText } from 'lucide-svelte';
+	import { ArrowUpRight, Check, Circle, Clock3, Download, FileText } from '@lucide/svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import PortalHeader from '$lib/components/PortalHeader.svelte';
 	import { formatDate, money } from '$lib/data';

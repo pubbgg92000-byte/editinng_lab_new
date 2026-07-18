@@ -3,6 +3,7 @@ import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
 import { getSettings, updateSettings } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
+import { indianMobileError, normalizeIndianMobile } from '$lib/phone';
 
 export const GET = async ({ locals }) => json({ settings: await getSettings(await readyDatabase(locals.tenant)) });
 
@@ -14,6 +15,11 @@ export const PATCH = async ({ request, cookies, locals }) => {
 	const safeInput = Object.fromEntries(Object.entries(input).filter(([key]) => allowed.has(key)));
 	const logoUrl = String(safeInput.logoUrl || '').trim();
 	if (logoUrl && !logoUrl.startsWith('https://') && !logoUrl.startsWith('/')) return json({ error: 'Logo URL must use HTTPS.' }, { status: 400 });
+	if (safeInput.phone !== undefined && String(safeInput.phone || '').trim()) {
+		const phoneError = indianMobileError(safeInput.phone);
+		if (phoneError) return json({ error: phoneError }, { status: 400 });
+		safeInput.phone = normalizeIndianMobile(safeInput.phone);
+	}
 	const settings = await updateSettings(database, safeInput);
 	await flushSheetSync(database, locals.tenant!);
 	return json({ ok: true, settings });

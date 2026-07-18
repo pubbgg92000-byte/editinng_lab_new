@@ -1,12 +1,13 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 async function files(directory) {
 	const entries = await readdir(directory, { withFileTypes: true });
 	return (await Promise.all(entries.map((entry) => entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)]))).flat();
 }
 
-const routeFiles = (await files(new URL('../src/routes', import.meta.url).pathname)).filter((file) => file.endsWith('.ts'));
+const routeFiles = (await files(fileURLToPath(new URL('../src/routes', import.meta.url)))).filter((file) => file.endsWith('.ts'));
 const failures = [];
 for (const file of routeFiles) {
 	const source = await readFile(file, 'utf8');

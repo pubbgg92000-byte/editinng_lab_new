@@ -3,7 +3,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { themePalettes, applyTheme } from '$lib/theme';
-	import { Sheet, Check, ChevronDown, Download, RefreshCw, UploadCloud, Pencil, MessageSquareText, Database } from 'lucide-svelte';
+	import { Sheet, Check, ChevronDown, Download, RefreshCw, UploadCloud, Pencil, MessageSquareText, Database } from '@lucide/svelte';
 	import type { StudioSettings, ThemePalette } from '$lib/types';
 	import { formatDateTime } from '$lib/data';
 

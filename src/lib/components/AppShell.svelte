@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { sidebarOpen } from '$lib/stores/app';
 	import type { ActivityLog, Customer, DatabaseStorageUsage, Editor, Order, StudioSettings } from '$lib/types';
-	import { LayoutDashboard, Users, ClipboardList, UserRound, ReceiptText, Sheet, Settings, Menu, Search, Bell, Command, X, ArrowUpRight, LogOut, Mail, Phone, Database } from 'lucide-svelte';
+	import { LayoutDashboard, Users, ClipboardList, UserRound, ReceiptText, Sheet, Settings, Menu, Search, Bell, Command, X, ArrowUpRight, LogOut, Mail, Phone, Database } from '@lucide/svelte';
 	type Notification = ActivityLog & { path: string };
 	let { children, settings, customers = [], editors = [], orders = [], notifications = [], storage, sheetSync = { pending: 0, attempts: 0, lastError: '', lastAttemptAt: '' } }: { children: import('svelte').Snippet; settings: StudioSettings; customers?: Customer[]; editors?: Editor[]; orders?: Order[]; notifications?: Notification[]; storage?: DatabaseStorageUsage; sheetSync?: { pending: number; attempts: number; lastError: string; lastAttemptAt: string } } = $props();
 	const nav = [

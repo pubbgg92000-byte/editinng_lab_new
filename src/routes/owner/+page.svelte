@@ -1,7 +1,7 @@
 	<script lang="ts">
 		import { enhance } from '$app/forms';
 		import type { SubmitFunction } from '@sveltejs/kit';
-		import { CheckCircle2, Database, KeyRound, LogOut, Plus, RefreshCw, ShieldCheck, Sheet, TriangleAlert } from 'lucide-svelte';
+		import { CheckCircle2, Database, KeyRound, LogOut, Plus, RefreshCw, ShieldCheck, Sheet, TriangleAlert } from '@lucide/svelte';
 		let { data, form } = $props();
 		let creating = $state(false);
 		let pendingAction = $state('');
