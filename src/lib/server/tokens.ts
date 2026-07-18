@@ -16,16 +16,19 @@ export function createPortalToken() {
 }
 
 export async function hashPortalToken(token: string) {
+	// The hash authenticates a portal link without storing its usable token in plain text.
 	return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token))));
 }
 
 export async function sealPortalToken(token: string) {
+	// The encrypted copy lets an admin retrieve and share the same portal link later.
 	const iv = crypto.getRandomValues(new Uint8Array(12));
 	const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await encryptionKey(), encoder.encode(token)));
 	return `${base64url(iv)}.${base64url(encrypted)}`;
 }
 
 export async function openPortalToken(value?: string | null) {
+	// An old cipher becomes unreadable after SESSION_SECRET changes; the portal can be regenerated safely.
 	if (!value) return '';
 	const [iv, encrypted] = value.split('.');
 	if (!iv || !encrypted) return '';

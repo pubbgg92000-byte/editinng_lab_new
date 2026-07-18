@@ -24,6 +24,7 @@ export async function recordActivity(database: AppDatabase, actor: string, actio
 }
 
 export async function queueSheetSync(database: AppDatabase, entityType: string, entityId: string, payload: unknown, operation = 'upsert') {
+	// Database writes succeed first; this outbox is flushed to Google Sheets afterward.
 	const timestamp = now();
 	await database.prepare('INSERT INTO sheet_sync_outbox (id, entity_type, entity_id, operation, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id('SYNC'), entityType, entityId, operation, JSON.stringify(payload), timestamp, timestamp).run();
 }
@@ -38,6 +39,7 @@ function editorFrom(row: Row): Editor {
 }
 
 function taskFrom(row: Row): Task {
+	// Central task mapping keeps admin, editor portal, and invoices on the same billing data.
 	return { id: row.id, orderId: row.order_id, name: row.title, assignee: row.editor_name || 'Unassigned', editorId: row.editor_id || undefined, editorCode: row.editor_code || undefined, status: row.status, progress: Number(row.progress), due: row.due_date, instructions: row.instructions, textLink: row.text_link, imageUrl: row.image_url, outputLink: row.output_link, notes: row.notes, billableAmount: Number(row.billable_amount || 0), invoicedAmount: Number(row.invoiced_amount || 0), billingMode: row.billing_mode === 'duration' ? 'duration' : 'manual', hourlyRate: Number(row.hourly_rate || 0), videoDurationMinutes: Number(row.video_duration_minutes || 0), device: String(row.device || ''), archived: Boolean(row.archived_at) };
 }
 
@@ -425,6 +427,7 @@ export async function createTask(database: AppDatabase, orderId: string, input: 
 	const billingMode = input.billingMode === 'duration' ? 'duration' : 'manual';
 	const hourlyRate = billingMode === 'duration' ? Math.max(0, Number(input.hourlyRate || 0)) : 0;
 	const videoDurationMinutes = billingMode === 'duration' ? Math.max(0, Math.round(Number(input.videoDurationMinutes || 0))) : 0;
+	// Duration billing is calculated; manual billing uses the entered task amount.
 	const billableAmount = billingMode === 'duration' ? durationBillableAmount(hourlyRate, videoDurationMinutes) : Math.max(0, Number(input.billableAmount || 0));
 	const task: Task = { id: id('TSK'), orderId, name: String(input.name || '').trim(), assignee: '', editorId: input.editorId, status: 'Not started', progress: 0, due: input.due || '', instructions: input.instructions || '', textLink: input.textLink || '', imageUrl: input.imageUrl || '', outputLink: '', notes: '', billableAmount, invoicedAmount: 0, billingMode, hourlyRate, videoDurationMinutes, device: String(input.device || '').trim() };
 	await database.prepare('INSERT INTO tasks (id, order_id, editor_id, title, instructions, due_date, text_link, image_url, status, progress, billable_amount, billing_mode, hourly_rate, video_duration_minutes, device, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)').bind(task.id, orderId, task.editorId || null, task.name, task.instructions, task.due, task.textLink, task.imageUrl, task.status, task.billableAmount, task.billingMode, task.hourlyRate, task.videoDurationMinutes, task.device, timestamp, timestamp).run();

@@ -5,6 +5,7 @@ import { getAuthSession, SESSION_COOKIE } from '$lib/server/auth';
 const protectedPrefixes = ['/dashboard', '/customers', '/orders', '/editors', '/invoices', '/settings', '/api'];
 
 export const handle: Handle = async ({ event, resolve }) => {
+	// Load one control session, then enforce owner and client route boundaries centrally.
 	const session = await getAuthSession(event.cookies.get(SESSION_COOKIE)).catch(() => null);
 	event.locals.session = session;
 	event.locals.account = session?.account || null;

@@ -6,6 +6,7 @@ import type { Tenant } from '$lib/types';
 const timestamp = () => new Date().toISOString();
 
 export async function resetDemoTenant(tenant: Tenant) {
+	// Destructive by design, but the guard prevents this seed reset from touching a real client.
 	if (!tenant.isDemo) throw new Error('Only demo tenants can be reset.');
 	const database = await readyDatabase(tenant);
 	await database.prepare(`TRUNCATE TABLE invoice_task_items, invoices, payments, tasks, orders, customers, editors, custom_event_options, activity_logs, sheet_sync_outbox, counters, maintenance_runs, settings RESTART IDENTITY CASCADE`).run();

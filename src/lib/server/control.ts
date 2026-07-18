@@ -10,6 +10,8 @@ const SESSION_DAYS = 30;
 const PASSWORD_ITERATIONS = 310_000;
 let controlReady: Promise<AppDatabase> | null = null;
 
+// The control database holds the master owner, client accounts, and tenant connections.
+
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 const base64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -24,6 +26,7 @@ function controlUrl() {
 }
 
 async function encryptionKey() {
+	// Connection strings must be recoverable, so they are encrypted; login passwords are hashed below.
 	const source = env.CONFIG_ENCRYPTION_KEY || env.SESSION_SECRET || (dev ? 'studioflow-local-control-encryption-key' : '');
 	if (source.length < 24) throw new Error('CONFIG_ENCRYPTION_KEY must contain at least 24 characters.');
 	const key = await crypto.subtle.digest('SHA-256', encoder.encode(source));
@@ -102,6 +105,7 @@ export async function readyControlDatabase() {
 type TenantRow = Record<string, any>;
 
 async function tenantFromRow(row?: TenantRow | null): Promise<Tenant | undefined> {
+	// Decrypt the tenant connection only on the server where database access is needed.
 	if (!row?.tenant_id && !row?.id) return undefined;
 	const prefix = row.tenant_id ? 'tenant_' : '';
 	const value = (name: string) => row[`${prefix}${name}`];
@@ -187,11 +191,24 @@ export async function destroyAuthSession(rawToken?: string) {
 }
 
 export async function listTenantSummaries() {
+	// Show safe connection metadata in master control, never the Neon password or full URL.
 	const database = await readyControlDatabase();
 	const result = await database.prepare(`SELECT t.*, a.email AS admin_email,
 		(SELECT COUNT(*) FROM control_sessions s WHERE s.account_id = a.id AND s.expires_at > ?) AS active_sessions
 		FROM control_tenants t LEFT JOIN control_accounts a ON a.tenant_id = t.id ORDER BY t.created_at`).bind(now()).all<TenantRow>();
-	return Promise.all((result.results || []).map(async (row) => ({ ...(await tenantFromRow(row))!, adminEmail: row.admin_email || '', activeSessions: Number(row.active_sessions || 0), databaseUrl: undefined })));
+	return Promise.all((result.results || []).map(async (row) => {
+		const tenant = (await tenantFromRow(row))!;
+		let databaseHost = 'Stored securely';
+		let databaseName = 'Protected';
+		let databaseRole = 'Protected';
+		try {
+			const connection = new URL(tenant.databaseUrl);
+			databaseHost = connection.hostname || databaseHost;
+			databaseName = decodeURIComponent(connection.pathname.replace(/^\//, '')) || databaseName;
+			databaseRole = decodeURIComponent(connection.username) || databaseRole;
+		} catch { /* Keep protected labels for malformed legacy URLs. */ }
+		return { ...tenant, adminEmail: row.admin_email || '', activeSessions: Number(row.active_sessions || 0), databaseUrl: undefined, databaseHost, databaseName, databaseRole };
+	}));
 }
 
 export interface NewTenantInput {

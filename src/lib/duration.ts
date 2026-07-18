@@ -1,4 +1,5 @@
 export function parseVideoDurationMinutes(value: unknown) {
+	// Accept editor-friendly values such as 1:30, 1.5 hr, or 30 min and store minutes.
 	const input = String(value || '').trim().toLowerCase().replace(',', '.');
 	if (!input) return 0;
 
@@ -25,6 +26,7 @@ export function formatVideoDuration(minutesInput: unknown) {
 }
 
 export function durationBillableAmount(rateInput: unknown, minutesInput: unknown) {
+	// Duration bill = hourly rate × video minutes ÷ 60, rounded to paise.
 	const rate = Math.max(0, Number(rateInput) || 0);
 	const minutes = Math.max(0, Number(minutesInput) || 0);
 	return Math.round(rate * minutes / 60 * 100) / 100;

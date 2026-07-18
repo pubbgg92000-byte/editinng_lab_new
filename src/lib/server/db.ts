@@ -11,6 +11,7 @@ const initializing = new Map<string, Promise<void>>();
 const brandInitialized = new Set<string>();
 
 const placeholders = (query: string) => {
+	// Repository queries use ? placeholders; Neon/Postgres expects $1, $2, and so on.
 	let index = 0;
 	return query.replaceAll('?', () => `$${++index}`);
 };
@@ -87,6 +88,7 @@ export function databaseFrom(): AppDatabase {
 }
 
 export async function ensureDatabase(database: AppDatabase, cacheKey: string | AppDatabase = database) {
+	// Apply idempotent schema upgrades once for each tenant connection during this process.
 	const key = typeof cacheKey === 'string' ? cacheKey : `database:${String(cacheKey)}`;
 	if (initialized.has(key)) return;
 	const pending = initializing.get(key);
@@ -142,6 +144,7 @@ export async function inspectTenantDatabase(databaseUrl: string) {
 }
 
 export async function readyDatabase(tenant?: Tenant | null) {
+	// Resolve all application data through the tenant attached to the authenticated request.
 	const databaseUrl = tenant?.databaseUrl || (env.CONTROL_DATABASE_URL ? '' : env.DATABASE_URL || '');
 	if (!databaseUrl) throw new Error('No tenant database is available for this request.');
 	const database = databaseFromUrl(databaseUrl);
