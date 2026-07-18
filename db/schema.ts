@@ -44,6 +44,8 @@ export const schemaStatements = [
 	`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS balance REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'`,
 	`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sent_at TEXT`,
+	`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS billing_mode TEXT NOT NULL DEFAULT 'manual'`,
+	`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS discount_mode TEXT NOT NULL DEFAULT 'amount'`,
 	`UPDATE invoices
 	 SET payment_id = NULL
 	 WHERE payment_id IS NOT NULL

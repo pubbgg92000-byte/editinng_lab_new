@@ -46,11 +46,11 @@ function dateParts(value: string | Date, withTime = false) {
 	if (Number.isNaN(date.getTime())) return text;
 	const parts = new Intl.DateTimeFormat('en-GB', {
 		day: '2-digit', month: 'short', year: 'numeric',
-		...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
+		...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: true } : {}),
 		timeZone: dateOnly ? 'UTC' : 'Asia/Kolkata'
 	}).formatToParts(date);
 	const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || '';
-	return `${part('day')}-${part('month')}-${part('year')}${withTime ? `, ${part('hour')}:${part('minute')}` : ''}`;
+	return `${part('day')}-${part('month')}-${part('year')}${withTime ? `, ${part('hour')}:${part('minute')} ${part('dayPeriod').toUpperCase()}` : ''}`;
 }
 
 export const formatDate = (value?: string | Date) => value ? dateParts(value) : '';

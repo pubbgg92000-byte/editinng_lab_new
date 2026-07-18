@@ -46,7 +46,7 @@
 		const mode = themePalettes.find((theme) => theme.id === palette)?.mode ?? 'light';
 		settings.themePalette = palette;
 		settings.themeDefaultMode = mode;
-		applyTheme({ palette, mode });
+		applyTheme({ palette, mode }, true, data.themeScope);
 	}
 
 	async function save() {

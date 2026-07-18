@@ -105,6 +105,8 @@ export interface Invoice {
 	taskItems?: InvoiceTaskItem[];
 	status?: 'draft' | 'sent' | 'paid' | 'cancelled';
 	sentAt?: string;
+	billingMode?: 'manual' | 'duration';
+	discountMode?: 'percent' | 'amount';
 }
 
 export interface ActivityLog {
@@ -150,6 +152,8 @@ export interface Order {
 	deliveryMethod?: 'digital' | 'offline' | '';
 	deliveredAt?: string;
 	customerNotifiedAt?: string;
+	createdAt?: string;
+	updatedAt?: string;
 }
 
 export interface StudioSettings {

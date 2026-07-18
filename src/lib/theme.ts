@@ -18,12 +18,13 @@ export const themePalettes: { id: ThemePalette; name: string; mode: ThemeMode; c
 	{ id: 'graphite-coral', name: 'Graphite Coral', mode: 'dark', colors: ['#EAEAEA', '#FF2E63', '#252A34', '#08D9D6'], recommended: true }
 ];
 
-const paletteKey = 'studioflow_palette';
-const modeKey = 'studioflow_theme';
+const storageKey = (name: 'palette' | 'theme', scope: string) =>
+	`studioflow_${name}:${encodeURIComponent(scope || 'public')}`;
 
-export function getStoredTheme(defaultPalette: ThemePalette = 'graphite-aqua', defaultMode: ThemeMode = 'light'): ThemeSelection {
+export function getStoredTheme(defaultPalette: ThemePalette = 'graphite-aqua', defaultMode: ThemeMode = 'light', scope = 'public'): ThemeSelection {
 	if (typeof localStorage === 'undefined') return { palette: defaultPalette, mode: defaultMode };
-	const storedPalette = localStorage.getItem(paletteKey);
+	// Browser preferences are tenant-scoped so previewing one studio never recolors another.
+	const storedPalette = localStorage.getItem(storageKey('palette', scope));
 	const theme = themePalettes.find((item) => item.id === storedPalette) ?? themePalettes.find((item) => item.id === defaultPalette) ?? themePalettes[0];
 	return { palette: theme.id, mode: theme.mode };
 }
@@ -34,14 +35,14 @@ export function currentTheme(): ThemeSelection {
 	return { palette: theme.id, mode: theme.mode };
 }
 
-export function applyTheme(selection: ThemeSelection, remember = true) {
+export function applyTheme(selection: ThemeSelection, remember = true, scope = 'public') {
 	if (typeof document === 'undefined') return;
 	const theme = themePalettes.find((item) => item.id === selection.palette) ?? themePalettes[0];
 	document.documentElement.dataset.palette = theme.id;
 	document.documentElement.dataset.theme = theme.mode;
 	document.documentElement.style.colorScheme = theme.mode;
 	if (remember) {
-		localStorage.setItem(paletteKey, theme.id);
-		localStorage.setItem(modeKey, theme.mode);
+		localStorage.setItem(storageKey('palette', scope), theme.id);
+		localStorage.setItem(storageKey('theme', scope), theme.mode);
 	}
 }

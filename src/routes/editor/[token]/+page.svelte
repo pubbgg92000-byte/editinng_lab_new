@@ -38,7 +38,7 @@
 		const response = await fetch(`/api/portal/${data.tenantSlug}/tasks/${selected.id}`, {
 			method: 'PATCH',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ status, progress, outputLink, notes, videoDuration: selected.billingMode === 'duration' ? videoDuration : undefined, token: data.token })
+			body: JSON.stringify({ status, progress, outputLink, notes, videoDuration, token: data.token })
 		});
 		const result = await response.json();
 		saving = false;
@@ -76,7 +76,7 @@
 		<div class="task-layout">
 			<section class="card details">
 				<h2>Work details</h2>
-				<dl><div><dt>Task</dt><dd>{selected.name}</dd></div><div><dt>Due date</dt><dd>{selected.due ? formatDate(selected.due) : 'Not set'}</dd></div><div><dt>Event</dt><dd>{selected.workType || '—'}</dd></div><div><dt>Assigned device</dt><dd>{selected.device || 'Not specified'}</dd></div><div><dt>Billing method</dt><dd>{selected.billingMode === 'duration' ? `${money(selected.hourlyRate || 0)} per video hour` : 'Amount set by admin'}</dd></div>{#if selected.billingMode === 'duration'}<div><dt>Recorded duration</dt><dd>{formatVideoDuration(selected.videoDurationMinutes) || 'Not submitted'}</dd></div>{/if}</dl>
+				<dl><div><dt>Task</dt><dd>{selected.name}</dd></div><div><dt>Due date</dt><dd>{selected.due ? formatDate(selected.due) : 'Not set'}</dd></div><div><dt>Event</dt><dd>{selected.workType || '—'}</dd></div><div><dt>Assigned device</dt><dd>{selected.device || 'Not specified'}</dd></div><div><dt>Billing method</dt><dd>{selected.billingMode === 'duration' ? `${money(selected.hourlyRate || 0)} per video hour` : 'Final choice by admin'}</dd></div><div><dt>Recorded duration</dt><dd>{formatVideoDuration(selected.videoDurationMinutes) || 'Not submitted'}</dd></div></dl>
 				<div class="instructions"><span>Instructions</span><p>{selected.instructions || 'Follow the project brief and notify the admin if anything is missing.'}</p></div>
 				<div class="references">
 					{#if selected.textLink}<a href={selected.textLink} target="_blank" rel="noreferrer"><LinkIcon size={14}/> Open reference <ArrowUpRight size={12}/></a>{/if}
@@ -88,7 +88,7 @@
 				<h2>Update your work</h2>
 				<div class="field"><label for="task-status">Status</label><select id="task-status" bind:value={status}><option>Not started</option><option>Files downloaded</option><option>In progress</option><option>Waiting for clarification</option><option>Ready for review</option></select></div>
 				<div class="field"><label for="task-progress">Progress <b>{progress}%</b></label><input id="task-progress" class="range" type="range" min="0" max="100" step="10" bind:value={progress}/></div>
-				{#if selected.billingMode === 'duration'}<div class="field duration-field"><label for="video-duration">Final video duration *</label><div class="with-icon"><Clock3 size={14}/><input id="video-duration" bind:value={videoDuration} placeholder="30 min, 1.5 hr, or 1:30"/></div><small>This remains editable. The task amount is calculated from the hourly rate.</small></div>{/if}
+				<div class="field duration-field"><label for="video-duration">Final video duration <span>Optional</span></label><div class="with-icon"><Clock3 size={14}/><input id="video-duration" bind:value={videoDuration} placeholder="30 min, 1.5 hr, or 1:30"/></div><small>You can add or correct this anytime. The admin chooses whether the invoice uses duration or a manual total.</small></div>
 				<div class="field"><label for="task-output">External output link</label><div class="with-icon"><FileUp size={14}/><input id="task-output" type="url" inputmode="url" bind:value={outputLink} placeholder="Paste a Drive or delivery link"/></div></div>
 				<div class="field"><label for="task-notes">Notes for admin</label><textarea id="task-notes" bind:value={notes} placeholder="Add an update, question, or missing-file report..."></textarea></div>
 				{#if error}<p class="error">{error}</p>{/if}

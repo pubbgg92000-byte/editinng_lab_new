@@ -31,7 +31,7 @@ export function editorAssignmentMessage(settings: StudioSettings, editor: Editor
 	});
 }
 
-export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, order: Order, customerToken = '', origin?: string, receipt?: { kind?: 'advance' | 'payment' | 'final'; amount?: number }, tenantSlug = '') {
+export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, order: Order, customerToken = '', origin?: string, receipt?: { kind?: 'advance' | 'payment' | 'final'; amount?: number; invoiceUrl?: string }, tenantSlug = '') {
 	const publicUrl = applicationUrl(origin);
 	const portalLink = customerToken ? (tenantSlug ? `${publicUrl}/portal/${tenantSlug}/customer/${customerToken}` : `${publicUrl}/customer/${customerToken}`) : '';
 	const netTotal = Math.max(0, order.price - order.discount);
@@ -62,6 +62,7 @@ export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, 
 		const discountPercent = order.price > 0 ? order.discount / order.price * 100 : 0;
 		additions.push(`Subtotal: ${money(order.price)}\nDiscount (${discountPercent.toFixed(discountPercent % 1 ? 2 : 0)}%): ${money(order.discount)}\nTotal after discount: ${money(netTotal)}`);
 	}
+	if (receipt?.invoiceUrl) additions.push(`Open invoice / print PDF:\n${receipt.invoiceUrl}`);
 	if (additions.length) message = `${message.trimEnd()}\n\n${additions.join('\n')}`;
 	if (portalLink && !message.includes(portalLink)) message = `${message.trimEnd()}\n\nTrack your work status:\n${portalLink}`;
 	return message;

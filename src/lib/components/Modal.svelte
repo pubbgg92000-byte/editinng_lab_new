@@ -10,6 +10,9 @@
 	let nextModalId = 0;
 	let modalLayers: ModalLayer[] = [];
 	let originalBodyOverflow = '';
+	let originalBodyPosition = '';
+	let originalBodyTop = '';
+	let lockedScrollY = 0;
 
 	const focusableSelector = [
 		'button:not([disabled]):not([tabindex="-1"])',
@@ -63,8 +66,14 @@
 
 	function registerLayer(layer: ModalLayer) {
 		if (!modalLayers.length) {
+			lockedScrollY = window.scrollY;
 			originalBodyOverflow = document.body.style.overflow;
+			originalBodyPosition = document.body.style.position;
+			originalBodyTop = document.body.style.top;
 			document.body.style.overflow = 'hidden';
+			document.body.style.position = 'fixed';
+			document.body.style.top = `-${lockedScrollY}px`;
+			document.body.style.width = '100%';
 			window.addEventListener('keydown', handleKeydown, true);
 		}
 		modalLayers = [...modalLayers, layer];
@@ -79,6 +88,10 @@
 		syncLayers();
 		if (!modalLayers.length) {
 			document.body.style.overflow = originalBodyOverflow;
+			document.body.style.position = originalBodyPosition;
+			document.body.style.top = originalBodyTop;
+			document.body.style.width = '';
+			window.scrollTo(0, lockedScrollY);
 			window.removeEventListener('keydown', handleKeydown, true);
 		}
 		if (!wasTop) return;

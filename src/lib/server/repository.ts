@@ -50,7 +50,7 @@ function paymentFrom(row: Row): Payment {
 function orderFrom(row: Row, orderTasks: Task[] = [], orderPayments: Payment[] = []): Order {
 	const initialAdvance = Number(row.advance);
 	const paid = initialAdvance + orderPayments.reduce((sum, payment) => sum + payment.amount, 0);
-	return { id: row.id, serial: Number(row.serial), customerId: row.customer_id || undefined, customer: row.customer_name, mobile: row.mobile, workType: row.event, project: row.project, receiving: row.receiving, duration: row.duration, price: Number(row.amount), discount: Number(row.discount || 0), paid, initialAdvance, priceSet: Boolean(row.amount_set), advanceSet: Boolean(row.advance_set), source: row.source, remarks: row.remarks, due: row.due_date, status: row.status, progress: Number(row.progress), files: 0, fileLink: '', color: '#00ADB5', tasks: orderTasks, payments: orderPayments, important: Boolean(row.important), historical: Boolean(row.historical), archived: Boolean(row.archived_at), deliveryMethod: row.delivery_method || '', deliveredAt: row.delivered_at || '', customerNotifiedAt: row.customer_notified_at || '' };
+	return { id: row.id, serial: Number(row.serial), customerId: row.customer_id || undefined, customer: row.customer_name, mobile: row.mobile, workType: row.event, project: row.project, receiving: row.receiving, duration: row.duration, price: Number(row.amount), discount: Number(row.discount || 0), paid, initialAdvance, priceSet: Boolean(row.amount_set), advanceSet: Boolean(row.advance_set), source: row.source, remarks: row.remarks, due: row.due_date, status: row.status, progress: Number(row.progress), files: 0, fileLink: '', color: '#00ADB5', tasks: orderTasks, payments: orderPayments, important: Boolean(row.important), historical: Boolean(row.historical), archived: Boolean(row.archived_at), deliveryMethod: row.delivery_method || '', deliveredAt: row.delivered_at || '', customerNotifiedAt: row.customer_notified_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
 }
 
 export async function getSettings(database: AppDatabase): Promise<StudioSettings> {
@@ -152,6 +152,11 @@ export async function listEditors(database: AppDatabase, includeInactive = false
 		editor.token = await openPortalToken(source?.portal_token_cipher);
 	}
 	return editors;
+}
+
+export async function listDeviceOptions(database: AppDatabase) {
+	const deviceRows = await rows(database, "SELECT DISTINCT TRIM(device) AS device FROM tasks WHERE TRIM(COALESCE(device, '')) <> '' ORDER BY TRIM(device)");
+	return deviceRows.map((row) => String(row.device)).filter(Boolean);
 }
 
 export async function createEditor(database: AppDatabase, input: Partial<Editor>) {
@@ -426,7 +431,7 @@ export async function createTask(database: AppDatabase, orderId: string, input: 
 	if (input.editorId && !String(input.device || '').trim()) throw new Error('Enter the device given to the editor, such as HD-1.');
 	const billingMode = input.billingMode === 'duration' ? 'duration' : 'manual';
 	const hourlyRate = billingMode === 'duration' ? Math.max(0, Number(input.hourlyRate || 0)) : 0;
-	const videoDurationMinutes = billingMode === 'duration' ? Math.max(0, Math.round(Number(input.videoDurationMinutes || 0))) : 0;
+	const videoDurationMinutes = Math.max(0, Math.round(Number(input.videoDurationMinutes || 0)));
 	// Duration billing is calculated; manual billing uses the entered task amount.
 	const billableAmount = billingMode === 'duration' ? durationBillableAmount(hourlyRate, videoDurationMinutes) : Math.max(0, Number(input.billableAmount || 0));
 	const task: Task = { id: id('TSK'), orderId, name: String(input.name || '').trim(), assignee: '', editorId: input.editorId, status: 'Not started', progress: 0, due: input.due || '', instructions: input.instructions || '', textLink: input.textLink || '', imageUrl: input.imageUrl || '', outputLink: '', notes: '', billableAmount, invoicedAmount: 0, billingMode, hourlyRate, videoDurationMinutes, device: String(input.device || '').trim() };
@@ -446,12 +451,12 @@ export async function updateTask(database: AppDatabase, taskId: string, input: P
 	const progress = Math.max(0, Math.min(100, Number(input.progress ?? existing.progress)));
 	const billingMode = editorId ? (existing.billing_mode === 'duration' ? 'duration' : 'manual') : input.billingMode === 'duration' ? 'duration' : input.billingMode === 'manual' ? 'manual' : existing.billing_mode === 'duration' ? 'duration' : 'manual';
 	const hourlyRate = billingMode === 'duration' ? Math.max(0, Number(editorId ? existing.hourly_rate : input.hourlyRate ?? existing.hourly_rate ?? 0)) : 0;
-	const videoDurationMinutes = billingMode === 'duration' ? Math.max(0, Math.round(Number(input.videoDurationMinutes ?? existing.video_duration_minutes ?? 0))) : 0;
+	// Editors may report duration for any task; the admin decides later whether it is billed.
+	const videoDurationMinutes = Math.max(0, Math.round(Number(input.videoDurationMinutes ?? existing.video_duration_minutes ?? 0)));
 	const billableAmount = billingMode === 'duration' ? durationBillableAmount(hourlyRate, videoDurationMinutes) : Math.max(0, Number(input.billableAmount ?? existing.billable_amount ?? 0));
 	const nextEditorId = editorId ? existing.editor_id : input.editorId ?? existing.editor_id;
 	const device = editorId ? existing.device : input.device ?? existing.device ?? '';
 	if (nextEditorId && !String(device).trim()) throw new Error('Enter the device given to the editor, such as HD-1.');
-	if (editorId && status === 'Ready for review' && billingMode === 'duration' && videoDurationMinutes <= 0) throw new Error('Enter the final video duration before sending this task for review.');
 	const invoicedAmount = Number((await database.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM invoice_task_items WHERE task_id = ?').bind(taskId).first<{ total: number | string }>())?.total || 0);
 	if (billableAmount + 0.009 < invoicedAmount) throw new Error('Task value cannot be lower than the amount already invoiced.');
 	await database.prepare('UPDATE tasks SET editor_id = ?, title = ?, instructions = ?, due_date = ?, text_link = ?, image_url = ?, status = ?, progress = ?, output_link = ?, notes = ?, billable_amount = ?, billing_mode = ?, hourly_rate = ?, video_duration_minutes = ?, device = ?, updated_at = ? WHERE id = ?').bind(nextEditorId, input.name ?? existing.title, input.instructions ?? existing.instructions, input.due ?? existing.due_date, input.textLink ?? existing.text_link, input.imageUrl ?? existing.image_url, status, progress, input.outputLink ?? existing.output_link, input.notes ?? existing.notes, billableAmount, billingMode, hourlyRate, videoDurationMinutes, device, now(), taskId).run();
@@ -528,7 +533,7 @@ export async function recordPayment(database: AppDatabase, orderId: string, inpu
 	return payment;
 }
 
-export async function recordInvoice(database: AppDatabase, orderId: string, messageInput: string | ((number: string) => string), snapshot: Partial<Invoice> = {}) {
+export async function recordInvoice(database: AppDatabase, orderId: string, messageInput: string | ((number: string, invoiceId: string) => string), snapshot: Partial<Invoice> = {}) {
 	if (snapshot.paymentId) {
 		const existing = await database.prepare('SELECT id FROM invoices WHERE payment_id = ? LIMIT 1').bind(snapshot.paymentId).first<{ id: string }>();
 		if (existing?.id) return (await getInvoice(database, existing.id))!;
@@ -536,9 +541,10 @@ export async function recordInvoice(database: AppDatabase, orderId: string, mess
 	const year = new Date().getFullYear();
 	const counter = await database.prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 RETURNING value').bind(`invoice_${year}`).first<{ value: number }>();
 	const number = `INV-${year}-${String(Number(counter?.value || 1)).padStart(4, '0')}`;
-	const message = typeof messageInput === 'function' ? messageInput(number) : messageInput;
-	const invoice: Invoice = { id: id('INV'), number, orderId, message, openedAt: now(), kind: snapshot.kind || 'final', paymentId: snapshot.paymentId, amountReceived: Number(snapshot.amountReceived || 0), subtotal: Number(snapshot.subtotal || 0), discount: Number(snapshot.discount || 0), total: Number(snapshot.total || 0), paid: Number(snapshot.paid || 0), balance: Number(snapshot.balance || 0), taskItems: snapshot.taskItems || [], status: snapshot.status || 'draft', sentAt: snapshot.sentAt };
-	await database.prepare('INSERT INTO invoices (id, number, order_id, message_snapshot, opened_at, kind, payment_id, amount_received, subtotal, discount, total, paid, balance, status, sent_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(invoice.id, invoice.number, orderId, invoice.message, invoice.openedAt, invoice.kind, invoice.paymentId || null, invoice.amountReceived, invoice.subtotal, invoice.discount, invoice.total, invoice.paid, invoice.balance, invoice.status, invoice.sentAt || null, invoice.openedAt).run();
+	const invoiceId = id('INV');
+	const message = typeof messageInput === 'function' ? messageInput(number, invoiceId) : messageInput;
+	const invoice: Invoice = { id: invoiceId, number, orderId, message, openedAt: now(), kind: snapshot.kind || 'final', paymentId: snapshot.paymentId, amountReceived: Number(snapshot.amountReceived || 0), subtotal: Number(snapshot.subtotal || 0), discount: Number(snapshot.discount || 0), total: Number(snapshot.total || 0), paid: Number(snapshot.paid || 0), balance: Number(snapshot.balance || 0), taskItems: snapshot.taskItems || [], status: snapshot.status || 'draft', sentAt: snapshot.sentAt, billingMode: snapshot.billingMode === 'duration' ? 'duration' : 'manual', discountMode: snapshot.discountMode === 'percent' ? 'percent' : 'amount' };
+	await database.prepare('INSERT INTO invoices (id, number, order_id, message_snapshot, opened_at, kind, payment_id, amount_received, subtotal, discount, total, paid, balance, status, sent_at, billing_mode, discount_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(invoice.id, invoice.number, orderId, invoice.message, invoice.openedAt, invoice.kind, invoice.paymentId || null, invoice.amountReceived, invoice.subtotal, invoice.discount, invoice.total, invoice.paid, invoice.balance, invoice.status, invoice.sentAt || null, invoice.billingMode, invoice.discountMode, invoice.openedAt).run();
 	if (invoice.taskItems?.length) await database.batch(invoice.taskItems.map((item) => database.prepare('INSERT INTO invoice_task_items (invoice_id, task_id, task_name, amount) VALUES (?, ?, ?, ?)').bind(invoice.id, item.taskId, item.name, item.amount)));
 	await activity(database, 'admin', invoice.kind === 'advance' ? 'Advance invoice generated' : invoice.kind === 'payment' ? 'Payment invoice generated' : invoice.kind === 'partial' ? 'Partial work invoice generated' : 'Invoice generated', 'invoice', invoice.id, `${number}${invoice.kind === 'partial' ? ` · ${invoice.taskItems?.length || 0} task(s)` : ''}`);
 	await queueSheetSync(database, 'Invoices', invoice.id, invoice);
@@ -548,7 +554,7 @@ export async function recordInvoice(database: AppDatabase, orderId: string, mess
 export async function listInvoices(database: AppDatabase) {
 	const invoiceRows = await rows(database, 'SELECT * FROM invoices ORDER BY created_at DESC');
 	const itemRows = await rows(database, 'SELECT * FROM invoice_task_items ORDER BY invoice_id, task_name');
-	return invoiceRows.map((row): Invoice => ({ id: row.id, number: row.number, orderId: row.order_id, message: row.message_snapshot, openedAt: row.opened_at, kind: row.kind === 'advance' ? 'advance' : row.kind === 'payment' ? 'payment' : row.kind === 'partial' ? 'partial' : 'final', paymentId: row.payment_id || undefined, amountReceived: Number(row.amount_received || 0), subtotal: Number(row.subtotal || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), paid: Number(row.paid || 0), balance: Number(row.balance || 0), status: ['sent','paid','cancelled'].includes(row.status) ? row.status : 'draft', sentAt: row.sent_at || undefined, taskItems: itemRows.filter((item) => item.invoice_id === row.id).map((item) => ({ taskId: String(item.task_id), name: String(item.task_name), amount: Number(item.amount || 0) })) }));
+	return invoiceRows.map((row): Invoice => ({ id: row.id, number: row.number, orderId: row.order_id, message: row.message_snapshot, openedAt: row.opened_at, kind: row.kind === 'advance' ? 'advance' : row.kind === 'payment' ? 'payment' : row.kind === 'partial' ? 'partial' : 'final', paymentId: row.payment_id || undefined, amountReceived: Number(row.amount_received || 0), subtotal: Number(row.subtotal || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), paid: Number(row.paid || 0), balance: Number(row.balance || 0), status: ['sent','paid','cancelled'].includes(row.status) ? row.status : 'draft', sentAt: row.sent_at || undefined, billingMode: row.billing_mode === 'duration' ? 'duration' : 'manual', discountMode: row.discount_mode === 'percent' ? 'percent' : 'amount', taskItems: itemRows.filter((item) => item.invoice_id === row.id).map((item) => ({ taskId: String(item.task_id), name: String(item.task_name), amount: Number(item.amount || 0) })) }));
 }
 
 export async function updateInvoiceStatus(database: AppDatabase, invoiceId: string, status: NonNullable<Invoice['status']>) {

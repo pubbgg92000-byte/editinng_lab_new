@@ -23,6 +23,12 @@
 	let profileWrap = $state<HTMLDivElement>();
 	let query = $state('');
 	let searchInput = $state<HTMLInputElement>();
+	$effect(() => {
+		if (!$sidebarOpen && !searchOpen) return;
+		const overflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => { document.body.style.overflow = overflow; };
+	});
 	const searchResults = $derived([
 		...nav.map((item) => ({ title: item.label, subtitle: 'Workspace', href: item.href, type: 'Page' })),
 		...workflowPages,

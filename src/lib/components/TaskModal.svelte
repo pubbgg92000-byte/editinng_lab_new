@@ -4,7 +4,7 @@
 	import { durationBillableAmount, formatVideoDuration, parseVideoDurationMinutes } from '$lib/duration';
 	import type { Editor, Task, TaskBillingMode } from '$lib/types';
 
-	let { open = $bindable(), orderId, editors = $bindable(), task = null, onsaved = () => {} }: { open:boolean; orderId:string; editors:Editor[]; task?:Task|null; onsaved?:()=>void } = $props();
+	let { open = $bindable(), orderId, editors = $bindable(), devices = $bindable(), task = null, onsaved = () => {} }: { open:boolean; orderId:string; editors:Editor[]; devices:string[]; task?:Task|null; onsaved?:()=>void } = $props();
 	let titles = $state('');
 	let editorId = $state('');
 	let due = $state('');
@@ -19,6 +19,7 @@
 	let error = $state('');
 	let saving = $state(false);
 	let showEditor = $state(false);
+	let addingDevice = $state(false);
 	const calculatedAmount = $derived(durationBillableAmount(hourlyRate, parseVideoDurationMinutes(videoDuration)));
 
 	$effect(() => {
@@ -30,6 +31,7 @@
 		textLink = task?.textLink || '';
 		imageUrl = task?.imageUrl || '';
 		device = task?.device || '';
+		addingDevice = Boolean(task?.device && !devices.includes(task.device));
 		billingMode = task?.billingMode || 'manual';
 		billableAmount = task?.billableAmount || undefined;
 		hourlyRate = task?.hourlyRate || undefined;
@@ -63,6 +65,7 @@
 		const result = await response.json();
 		saving = false;
 		if (!response.ok) { error = result.error || 'Unable to save task'; return; }
+		if (device.trim() && !devices.includes(device.trim())) devices = [...devices, device.trim()].sort((a, b) => a.localeCompare(b));
 		open = false;
 		onsaved();
 	}
@@ -75,8 +78,8 @@
 	<div class="form-grid task-fields">
 		<div class="field"><label for="task-editor">Editor *</label><div class="editor-select"><select id="task-editor" bind:value={editorId}><option value="">Choose editor</option>{#each editors.filter((editor) => editor.availability !== 'inactive') as editor}<option value={editor.id}>{editor.name} · {editor.activeTasks} active</option>{/each}</select><button class="secondary" onclick={() => showEditor = true}>New</button></div></div>
 		<div class="field"><label for="task-due">Due date</label><input id="task-due" type="date" bind:value={due}/></div>
-		<div class="field"><label for="task-device">Device given to editor *</label><input id="task-device" bind:value={device} placeholder="e.g. HD-1, HD-2, SSD-3"/></div>
-		<div class="field"><label for="billing-mode">How should this work be billed?</label><select id="billing-mode" bind:value={billingMode}><option value="manual">Set task value manually</option><option value="duration">Calculate from video duration</option></select></div>
+		<div class="field"><label for="task-device">Device given to editor *</label><div class="device-select">{#if addingDevice}<input id="task-device" bind:value={device} placeholder="e.g. HD-1, HD-2, SSD-3"/>{:else}<select id="task-device" bind:value={device}><option value="">Choose device</option>{#each devices as option}<option value={option}>{option}</option>{/each}</select>{/if}<button class="secondary" type="button" onclick={() => { addingDevice = !addingDevice; if (addingDevice) device = ''; }}>{addingDevice ? 'Use list' : 'Add new device'}</button></div><small>New devices are saved to the reusable list when this task is assigned.</small></div>
+		<div class="field"><label for="billing-mode">Default task billing</label><select id="billing-mode" bind:value={billingMode}><option value="manual">Manual task value</option><option value="duration">Rate × editor video duration</option></select><small>The admin can still choose manual or duration billing when creating the final invoice.</small></div>
 	</div>
 
 	{#if billingMode === 'manual'}
@@ -98,6 +101,6 @@
 <EditorModal bind:open={showEditor} onsaved={editorSaved}/>
 
 <style>
-	.task-fields,.section{margin-top:18px}.editor-select{display:grid;grid-template-columns:1fr auto;gap:7px}.media-note,.value-note,.invoiced-note,.field small{margin:8px 0 0;color:var(--muted);font-size:8px}.value-note b{color:var(--text)}.invoiced-note{display:block}.error{color:#ef4444;font-size:10px;margin-top:12px}.duration-panel{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.calculated{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid var(--line);font-size:10px}.calculated strong{font-size:16px;color:var(--purple)}
+	.task-fields,.section{margin-top:18px}.editor-select,.device-select{display:grid;grid-template-columns:1fr auto;gap:7px}.device-select button{white-space:nowrap}.media-note,.value-note,.invoiced-note,.field small{margin:8px 0 0;color:var(--muted);font-size:8px}.value-note b{color:var(--text)}.invoiced-note{display:block}.error{color:#ef4444;font-size:10px;margin-top:12px}.duration-panel{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.calculated{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid var(--line);font-size:10px}.calculated strong{font-size:16px;color:var(--purple)}
 	@media(max-width:620px){.duration-panel{grid-template-columns:1fr}}
 </style>
