@@ -1,3 +1,4 @@
+// Builds the current customer-ready WhatsApp message and records notification history.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

@@ -1,3 +1,4 @@
+// Tenant Neon/Postgres adapter that initializes each studio schema and exposes prepared queries.
 import { env } from '$env/dynamic/private';
 import { neon, type FullQueryResults, type NeonQueryFunction } from '@neondatabase/serverless';
 import { schemaStatements } from '../../../db/schema';
@@ -5,6 +6,10 @@ import { defaultAssignmentTemplate, defaultInvoiceTemplate } from '$lib/messageT
 import { runScheduledMaintenance } from './maintenance';
 import type { Tenant } from '$lib/types';
 
+/**
+ * Tenant database adapter: provides repository.ts a small prepared-statement API
+ * over Neon/Postgres and safely initializes every client schema once.
+ */
 const databases = new Map<string, AppDatabase>();
 const initialized = new Set<string>();
 const initializing = new Map<string, Promise<void>>();
@@ -83,6 +88,7 @@ export function databaseFromUrl(databaseUrl: string): AppDatabase {
 }
 
 export function databaseFrom(): AppDatabase {
+	// Development-only legacy connection; normal requests use readyDatabase(tenant).
 	if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not configured. Use tenant-aware database access in production.');
 	return databaseFromUrl(env.DATABASE_URL);
 }
@@ -127,6 +133,7 @@ export function clearDatabaseInitialization(cacheKey: string) {
 }
 
 export async function inspectTenantDatabase(databaseUrl: string) {
+	// Read-only compatibility check used before the owner attaches a Neon database.
 	const database = databaseFromUrl(databaseUrl);
 	await database.prepare('SELECT 1').first();
 	const exists = Boolean(await database.prepare("SELECT to_regclass('public.settings') AS table_name").first('table_name'));
@@ -144,6 +151,7 @@ export async function inspectTenantDatabase(databaseUrl: string) {
 }
 
 export async function readyDatabase(tenant?: Tenant | null) {
+	// Tenant identity comes from the authenticated server session, never form input.
 	// Resolve all application data through the tenant attached to the authenticated request.
 	const databaseUrl = tenant?.databaseUrl || (env.CONTROL_DATABASE_URL ? '' : env.DATABASE_URL || '');
 	if (!databaseUrl) throw new Error('No tenant database is available for this request.');

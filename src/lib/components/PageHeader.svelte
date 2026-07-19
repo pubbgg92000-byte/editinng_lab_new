@@ -1,3 +1,4 @@
+<!-- Reusable admin page title, eyebrow text, and primary action button. -->
 <script lang="ts">
 	let { title, eyebrow, action = '', onclick = undefined }: { title: string; eyebrow?: string; action?: string; onclick?: () => void } = $props();
 </script>

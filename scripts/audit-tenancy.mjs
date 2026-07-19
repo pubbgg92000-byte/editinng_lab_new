@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Release guard: server routes must obtain tenant databases from authenticated locals.
 async function files(directory) {
 	const entries = await readdir(directory, { withFileTypes: true });
 	return (await Promise.all(entries.map((entry) => entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)]))).flat();

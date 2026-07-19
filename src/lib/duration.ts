@@ -1,3 +1,4 @@
+// Convert editor-friendly duration text into integer minutes before billing.
 export function parseVideoDurationMinutes(value: unknown) {
 	// Accept editor-friendly values such as 1:30, 1.5 hr, or 30 min and store minutes.
 	const input = String(value || '').trim().toLowerCase().replace(',', '.');

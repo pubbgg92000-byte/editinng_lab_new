@@ -1,3 +1,4 @@
+<!-- Customer directory: edit/archive/restore, related orders, portal links, maps, and WhatsApp. -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";

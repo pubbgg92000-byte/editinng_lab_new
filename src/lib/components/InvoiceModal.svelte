@@ -1,3 +1,4 @@
+<!-- Chooses final/partial invoice billing mode, discount type, and billable tasks. -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import { durationBillableAmount, formatVideoDuration } from '$lib/duration';

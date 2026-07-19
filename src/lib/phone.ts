@@ -1,3 +1,4 @@
+// Forms, APIs, duplicate checks, invoices, and WhatsApp all share this phone rule.
 export function normalizeIndianMobile(value: unknown) {
 	// Store one consistent 10-digit Indian number; an entered +91 prefix is removed.
 	let digits = String(value || '').replace(/\D/g, '');

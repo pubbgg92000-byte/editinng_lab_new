@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 
+/** Private portals use a random URL token, a database hash, and an encrypted admin copy. */
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const base64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');

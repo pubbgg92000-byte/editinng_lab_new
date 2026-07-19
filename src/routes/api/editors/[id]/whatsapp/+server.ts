@@ -1,3 +1,4 @@
+// Builds a current editor assignment WhatsApp link for tasks on one order.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

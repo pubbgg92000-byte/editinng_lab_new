@@ -1,3 +1,4 @@
+// Revokes the current session server-side before returning to client login.
 import { redirect } from '@sveltejs/kit';
 import { destroyAuthSession, SESSION_COOKIE } from '$lib/server/auth';
 

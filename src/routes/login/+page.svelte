@@ -1,3 +1,4 @@
+<!-- Client-admin login with stable email/password state and password visibility. -->
 <script lang="ts">
 	import PortalHeader from '$lib/components/PortalHeader.svelte';
 	import { enhance } from '$app/forms';

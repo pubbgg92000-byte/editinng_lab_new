@@ -1,3 +1,4 @@
+// Resolves a tenant-scoped editor portal and returns only safe assigned work fields.
 import { error } from '@sveltejs/kit';
 import { findTenantBySlug } from '$lib/server/control';
 import { loadEditorPortal } from '$lib/server/portals';

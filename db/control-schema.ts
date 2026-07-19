@@ -1,3 +1,4 @@
+// Master database only: tenants, accounts, sessions, rate limits, and owner audit logs.
 export const controlSchemaStatements = [
 	`CREATE TABLE IF NOT EXISTS control_tenants (
 		id TEXT PRIMARY KEY,

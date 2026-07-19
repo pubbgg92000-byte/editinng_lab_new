@@ -1,3 +1,4 @@
+// Order collection API: list/create with customer linkage and initial billing validation.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

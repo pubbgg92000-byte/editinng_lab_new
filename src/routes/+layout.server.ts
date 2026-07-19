@@ -1,3 +1,4 @@
+// Root loader supplies tenant branding and a tenant-scoped theme to every page and portal.
 import { readyDatabase } from '$lib/server/db';
 import { getSettings } from '$lib/server/repository';
 import { env } from '$env/dynamic/public';

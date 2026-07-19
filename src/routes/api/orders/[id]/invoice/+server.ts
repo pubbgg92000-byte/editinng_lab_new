@@ -7,6 +7,7 @@ import { flushSheetSync } from '$lib/server/googleSheets';
 import { money } from '$lib/data';
 import { durationBillableAmount } from '$lib/duration';
 
+// Final billing decision: manual subtotal or task duration, plus amount/percent discount.
 export const POST = async ({ params, request, cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);

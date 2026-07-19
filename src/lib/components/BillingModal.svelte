@@ -1,3 +1,4 @@
+<!-- Sets or adjusts an order subtotal and discount before invoice generation. -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import { money } from '$lib/data';

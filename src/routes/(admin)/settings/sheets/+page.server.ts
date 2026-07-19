@@ -1,3 +1,4 @@
+// Builds the safe in-app Sheets browser and links record IDs back to admin pages.
 import { readSheetValues } from '$lib/server/googleSheets';
 
 

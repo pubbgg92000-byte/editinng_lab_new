@@ -1,3 +1,4 @@
+/* Global theme tokens, shared admin/portal styles, tables, forms, scrollbars, and responsive rules. */
 @import 'tailwindcss';
 
 .storage-warning{margin:12px 24px 0;border:1px solid #eab30855;border-radius:11px;background:#eab30812;color:#d6a800;padding:10px 12px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px}.storage-warning.warning{border-color:#f9731666;background:#f9731612;color:#f97316}.storage-warning.critical{border-color:#ef444477;background:#ef444414;color:#ef4444}.storage-warning span{display:flex;flex-direction:column;gap:2px}.storage-warning strong{font-size:10px}.storage-warning small{font-size:8px;color:var(--muted)}

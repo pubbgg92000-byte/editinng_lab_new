@@ -1,9 +1,15 @@
+// Master control plane for owner accounts, tenant connections, encrypted secrets, and sessions.
 import { dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
 import { controlSchemaStatements } from '../../../db/control-schema';
 import { databaseFromUrl } from './db';
 import type { Account, AuthSession, Tenant, TenantStatus } from '$lib/types';
 
+/**
+ * MASTER CONTROL PLANE
+ * Holds owner/client accounts and encrypted tenant connections only. A studio's
+ * customers, orders, editors, and invoices always stay in its tenant database.
+ */
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const SESSION_DAYS = 30;
@@ -46,6 +52,7 @@ export async function decryptSecret(value: string) {
 	return decoder.decode(clear);
 }
 
+// ---------- Password hashing and first-time owner/legacy setup ----------
 export async function hashPassword(password: string) {
 	if (password.length < 10) throw new Error('Passwords must contain at least 10 characters.');
 	const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -104,6 +111,7 @@ export async function readyControlDatabase() {
 
 type TenantRow = Record<string, any>;
 
+// ---------- Convert protected control rows into server-only tenant context ----------
 async function tenantFromRow(row?: TenantRow | null): Promise<Tenant | undefined> {
 	// Decrypt the tenant connection only on the server where database access is needed.
 	if (!row?.tenant_id && !row?.id) return undefined;
@@ -139,6 +147,7 @@ export async function findLegacyTenant() {
 	return tenantFromRow(await database.prepare('SELECT * FROM control_tenants WHERE is_legacy = 1 LIMIT 1').first<TenantRow>());
 }
 
+// ---------- Login rate limiting and revocable 30-day sessions ----------
 export async function authenticate(email: string, password: string, address: string) {
 	const database = await readyControlDatabase();
 	const normalized = email.trim().toLowerCase();
@@ -190,6 +199,7 @@ export async function destroyAuthSession(rawToken?: string) {
 	await database.prepare('DELETE FROM control_sessions WHERE token_hash = ?').bind(await digest(rawToken)).run();
 }
 
+// ---------- Owner-panel client lifecycle and connection management ----------
 export async function listTenantSummaries() {
 	// Show safe connection metadata in master control, never the Neon password or full URL.
 	const database = await readyControlDatabase();

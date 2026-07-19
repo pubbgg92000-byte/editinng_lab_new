@@ -1,9 +1,11 @@
+// WhatsApp URL/message builder using the latest tenant, contact, order, task, and invoice data.
 import { env } from '$env/dynamic/private';
 import type { Customer, Editor, Invoice, Order, StudioSettings, Task } from '$lib/types';
 import { whatsappNumber } from '$lib/phone';
 import { money } from '$lib/data';
 import { fillTemplate } from '$lib/messageTemplates';
 
+/** Build encoded wa.me links from current tenant/customer/order data and saved templates. */
 export const normalizePhone = (phone: string) => whatsappNumber(phone);
 export const whatsappUrl = (phone: string, message: string) => `https://wa.me/${normalizePhone(phone)}?text=${encodeURIComponent(message)}`;
 

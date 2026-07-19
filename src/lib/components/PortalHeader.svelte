@@ -1,3 +1,4 @@
+<!-- Shared branded header for private customer and editor portals. -->
 <script lang="ts">
 	import type { StudioSettings } from '$lib/types';
 	let { label = '', settings = { studioName: 'StudioFlow', logoUrl: '' } }: { label?: string; settings?: Pick<StudioSettings, 'studioName' | 'logoUrl'> } = $props();

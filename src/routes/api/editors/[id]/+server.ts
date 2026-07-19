@@ -1,3 +1,4 @@
+// Editor record API: edit, archive, restore, permanent delete, and portal-token rotation.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

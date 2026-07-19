@@ -1,9 +1,11 @@
+// Safe token-based data loaders for public customer and editor portals.
 import { error } from '@sveltejs/kit';
 import { readyDatabase } from './db';
 import { hashPortalToken } from './tokens';
 import { findEditorByToken, getCustomer, getSettings, listInvoices, listOrdersForCustomer, tasksForEditor } from './repository';
 import type { Tenant } from '$lib/types';
 
+// Public portal loaders resolve a private token only inside the requested tenant.
 export async function loadCustomerPortal(tenant: Tenant, token: string) {
 	if (tenant.status !== 'active') error(404, 'This portal is unavailable.');
 	const database = await readyDatabase(tenant);
@@ -23,6 +25,7 @@ export async function loadEditorPortal(tenant: Tenant, token: string) {
 	const database = await readyDatabase(tenant);
 	const editor = await findEditorByToken(database, token);
 	if (!editor) error(404, 'This private editor link is invalid or has been regenerated.');
+	// Never expose internal billing rates or settlement flags to an editor portal.
 	const tasks = (await tasksForEditor(database, editor.id)).map(({ billingMode: _billingMode, hourlyRate: _hourlyRate, billableAmount: _billableAmount, invoicedAmount: _invoicedAmount, editorSettlement: _editorSettlement, ...task }) => task);
 	return { editor, tasks, token, settings: await getSettings(database), tenantSlug: tenant.slug };
 }

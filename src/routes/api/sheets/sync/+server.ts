@@ -1,3 +1,4 @@
+// Flushes the pending database outbox into a refreshed tenant workbook snapshot.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

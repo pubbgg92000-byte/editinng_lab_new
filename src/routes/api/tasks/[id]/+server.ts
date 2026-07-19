@@ -1,3 +1,4 @@
+// Admin task API: edit work/billing/device fields and archive or restore the task.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

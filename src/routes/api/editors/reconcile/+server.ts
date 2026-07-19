@@ -1,3 +1,4 @@
+// Compares active database editors with the Editors Sheet and archives missing entries.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

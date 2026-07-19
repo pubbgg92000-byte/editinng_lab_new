@@ -1,3 +1,4 @@
+// Records an advance/payment and can generate its matching receipt invoice.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

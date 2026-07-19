@@ -1,3 +1,4 @@
+<!-- Public editor portal: assigned work, source links, progress, duration, output, and notes. -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { ArrowUpRight, CalendarDays, Check, ChevronLeft, Clock3, FileUp, FolderOpen, HardDrive, Image, Link as LinkIcon } from '@lucide/svelte';

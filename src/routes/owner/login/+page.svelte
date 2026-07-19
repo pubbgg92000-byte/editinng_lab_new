@@ -1,3 +1,4 @@
+<!-- Separate master-owner login; normal client accounts use /login. -->
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { Check, Eye, EyeOff, KeyRound, LoaderCircle, ShieldCheck } from '@lucide/svelte';

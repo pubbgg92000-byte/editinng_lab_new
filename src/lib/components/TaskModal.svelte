@@ -1,3 +1,4 @@
+<!-- Creates/edits task editor, device, files, due date, billing, and settlement. -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import EditorModal from './EditorModal.svelte';

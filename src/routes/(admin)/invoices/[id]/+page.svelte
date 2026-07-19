@@ -1,3 +1,4 @@
+<!-- Printable invoice, status control, historical message, and current WhatsApp send. -->
 <script lang="ts">
   import { untrack } from "svelte";
   import {

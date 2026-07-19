@@ -1,3 +1,4 @@
+<!-- Public customer portal: current orders, progress, billing, receipts, and delivery links. -->
 <script lang="ts">
   import { untrack } from "svelte";
   import {

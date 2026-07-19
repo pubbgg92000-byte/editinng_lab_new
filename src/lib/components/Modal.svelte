@@ -1,3 +1,4 @@
+<!-- Shared accessible dialog shell with escape, backdrop, focus, and scroll locking. -->
 <script module lang="ts">
 	type ModalLayer = {
 		id: number;

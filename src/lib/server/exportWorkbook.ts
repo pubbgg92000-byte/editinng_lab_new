@@ -2,6 +2,7 @@ import ExcelJS, { type Cell, type Worksheet } from 'exceljs';
 import type { ActivityLog, Customer, Editor, Invoice, Order, StudioSettings } from '$lib/types';
 import { editorCode, orderCode } from '$lib/identifiers';
 
+// Builds the downloadable styled .xlsx backup/report; it does not modify Google Sheets.
 type ColumnDefinition = {
 	header: string;
 	key: string;

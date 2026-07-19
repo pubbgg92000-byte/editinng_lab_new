@@ -1,5 +1,6 @@
 import type { ThemeMode, ThemePalette } from '$lib/types';
 
+// Browser theme preferences are scoped by tenant slug, never shared across clients.
 export interface ThemeSelection { palette: ThemePalette; mode: ThemeMode }
 export const themePalettes: { id: ThemePalette; name: string; mode: ThemeMode; colors: string[]; recommended?: boolean }[] = [
 	{ id: 'graphite-aqua', name: 'Graphite Aqua', mode: 'light', colors: ['#222831', '#393E46', '#00ADB5', '#EEEEEE'] },

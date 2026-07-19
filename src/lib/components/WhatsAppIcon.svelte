@@ -1,3 +1,4 @@
+<!-- Small reusable WhatsApp brand icon with configurable size. -->
 <script lang="ts">
 	let { size = 16 }: { size?: number } = $props();
 </script>

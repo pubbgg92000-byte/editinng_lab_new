@@ -1,3 +1,4 @@
+<!-- Full-column mobile/desktop view of the tenant's Sheets and database records. -->
 <script lang="ts">
 	import { ArrowLeft, ArrowUpRight, RefreshCw, Sheet, CircleAlert, ExternalLink } from '@lucide/svelte';
 	let { data } = $props();

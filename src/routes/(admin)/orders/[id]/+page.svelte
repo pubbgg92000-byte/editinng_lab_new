@@ -1,3 +1,4 @@
+<!-- Order workspace: sticky identity, tasks, billing, delivery, customer history, and activity. -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import {

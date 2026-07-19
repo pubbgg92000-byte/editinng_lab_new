@@ -1,3 +1,4 @@
+<!-- Private customer invoice/receipt viewer with print/PDF support. -->
 <script lang="ts">
   import { onMount } from "svelte";
   import { FileText, Printer } from "@lucide/svelte";

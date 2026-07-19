@@ -1,3 +1,4 @@
+<!-- Per-client studio profile, prefixes, templates, export, and tenant-scoped appearance. -->
 <script lang="ts">
   import { untrack } from "svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";

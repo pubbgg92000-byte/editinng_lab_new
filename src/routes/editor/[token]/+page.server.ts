@@ -1,3 +1,4 @@
+// Resolves the legacy editor token only against the registered legacy tenant.
 import { error } from '@sveltejs/kit';
 import { findLegacyTenant } from '$lib/server/control';
 import { loadEditorPortal } from '$lib/server/portals';

@@ -1,3 +1,4 @@
+// Loads shared client-shell search data, notifications, theme, and storage status.
 import { readyDatabase } from '$lib/server/db';
 import { getSettings, listCustomers, listEditors, listNotifications, listOrderSearchIndex, syncQueueStatus } from '$lib/server/repository';
 import { getDatabaseStorageUsage } from '$lib/server/maintenance';

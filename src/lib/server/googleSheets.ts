@@ -3,6 +3,11 @@ import { archiveEditor, createCustomer, getSettings, listActivity, listCustomers
 import type { Tenant } from '$lib/types';
 import { editorCode, orderCode } from '$lib/identifiers';
 
+/**
+ * GOOGLE SHEETS MIRROR
+ * Neon is the source of truth. This module authenticates the shared service
+ * account and rebuilds each tenant workbook from current Neon records.
+ */
 let cachedToken: { value: string; expiresAt: number } | null = null;
 const encoder = new TextEncoder();
 const cleanEnvironmentValue = (value?: string) => {
@@ -51,6 +56,7 @@ async function googleFetch(tenant: Pick<Tenant, 'googleSheetId'>, path: string, 
 const tabNames = ['Orders', 'Customers', 'Editors', 'Tasks', 'Payments', 'Invoices', 'Activity Logs', 'Settings'];
 
 export async function ensureWorkbookTabs(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	// Create the standard tabs once when a new client workbook is connected.
 	if (!configured(tenant)) return false;
 	const metadata = await (await googleFetch(tenant, '?fields=sheets.properties.title')).json() as { sheets?: { properties: { title: string } }[] };
 	const existing = new Set((metadata.sheets || []).map((sheet) => sheet.properties.title));
@@ -160,6 +166,7 @@ async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'
 }
 
 async function writeWorkbookSnapshot(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	// Full snapshots avoid duplicate rows and row-order drift after retrying failures.
 	const [orders, customers, editors, invoices, activityLogs, settings] = await Promise.all([
 		listOrders(database, true, true),
 		listCustomers(database, true),
@@ -198,6 +205,7 @@ async function writeWorkbookSnapshot(database: AppDatabase, tenant: Pick<Tenant,
 }
 
 export async function flushSheetSync(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	// If Google is unavailable, outbox rows remain pending for the next retry.
 	if (!configured(tenant)) return { configured: false, processed: 0, failed: 0 };
 	const items = await pendingSyncItems(database);
 	try {
@@ -219,6 +227,7 @@ export async function flushSheetSync(database: AppDatabase, tenant: Pick<Tenant,
 }
 
 export async function importHistoricalOrders(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+	// Import is limited to old/historical orders; live operations stay Neon-first.
 	if (!configured(tenant)) throw new Error('Google Sheets service account is not configured.');
 	await ensureWorkbookTabs(tenant);
 	const sheet = ordersTab(tenant);

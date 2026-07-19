@@ -1,3 +1,4 @@
+<!-- Searchable invoice/receipt register with totals and Excel export entry. -->
 <script lang="ts">
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { formatDateTime, money } from '$lib/data';

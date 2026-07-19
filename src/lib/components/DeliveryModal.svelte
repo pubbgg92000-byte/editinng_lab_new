@@ -1,3 +1,4 @@
+<!-- Confirms delivery method/date and completes the customer handover workflow. -->
 <script lang="ts">
 	import { CircleCheckBig, Link2, PackageCheck, MessageCircle, IndianRupee } from '@lucide/svelte';
 	import Modal from './Modal.svelte';

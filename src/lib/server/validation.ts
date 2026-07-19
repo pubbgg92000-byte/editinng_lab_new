@@ -1,3 +1,4 @@
+// Shared server rules reject unsafe protocols, oversized URLs, and embedded credentials.
 export function externalUrlError(value: unknown, label: string) {
 	if (value === undefined || value === null || String(value).trim() === '') return '';
 	const raw = String(value).trim();

@@ -1,3 +1,4 @@
+// Loads the complete order workspace: tasks, editors, customer, invoices, and activity.
 import { error } from '@sveltejs/kit';
 import { readyDatabase } from '$lib/server/db';
 import { getOrder, listCustomers, listDeviceOptions, listEditors, listOrderActivity, listOrdersForCustomer } from '$lib/server/repository';

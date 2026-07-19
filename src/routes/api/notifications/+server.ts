@@ -1,3 +1,4 @@
+// Lists or marks read the editor-to-admin task update notification inbox.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

@@ -1,3 +1,4 @@
+// Loads a filtered/paginated order register and workflow filter counts.
 import { readyDatabase } from '$lib/server/db';
 import { countArchivedOrders, getOrderQueueCounts, listOrderEvents, listOrdersPage } from '$lib/server/repository';
 

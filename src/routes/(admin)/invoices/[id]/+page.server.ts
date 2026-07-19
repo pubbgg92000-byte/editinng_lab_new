@@ -1,3 +1,4 @@
+// Loads one invoice snapshot plus current customer, order, settings, and activity.
 import { error } from '@sveltejs/kit';
 import { readyDatabase } from '$lib/server/db';
 import { getInvoice, getOrder, getSettings, listActivity, listCustomers } from '$lib/server/repository';

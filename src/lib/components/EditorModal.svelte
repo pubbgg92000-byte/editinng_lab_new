@@ -1,3 +1,4 @@
+<!-- Creates or edits an editor profile, phone, specialty, availability, and map link. -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import type { Editor, EditorAvailability } from '$lib/types';

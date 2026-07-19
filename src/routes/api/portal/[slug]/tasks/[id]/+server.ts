@@ -6,6 +6,7 @@ import { flushSheetSync } from '$lib/server/googleSheets';
 import { taskLinkError } from '$lib/server/validation';
 import { parseVideoDurationMinutes } from '$lib/duration';
 
+// Editor portal writes are limited to the editor's own assigned task and safe fields.
 export const PATCH = async ({ params, request }) => {
 	const tenant = await findTenantBySlug(params.slug);
 	if (!tenant || tenant.status !== 'active') return json({ error: 'Portal unavailable.' }, { status: 404 });

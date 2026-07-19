@@ -1,3 +1,4 @@
+// Authenticates only the master owner and creates the protected session cookie.
 import { fail, redirect } from '@sveltejs/kit';
 import { authenticate, createAuthSession, SESSION_COOKIE } from '$lib/server/auth';
 

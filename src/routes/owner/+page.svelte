@@ -1,4 +1,5 @@
-	<script lang="ts">
+<!-- Master owner panel: onboard clients, protect credentials, test connections, and reset demos. -->
+<script lang="ts">
 		import { enhance } from '$app/forms';
 		import type { SubmitFunction } from '@sveltejs/kit';
 		import { CheckCircle2, Database, Eye, EyeOff, KeyRound, LogOut, Pencil, Plus, RefreshCw, ShieldCheck, Sheet, TriangleAlert, X } from '@lucide/svelte';

@@ -1,3 +1,4 @@
+// Generates a styled Excel workbook download from the current tenant database.
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
 import { getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders } from '$lib/server/repository';

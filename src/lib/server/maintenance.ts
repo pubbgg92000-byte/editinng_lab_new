@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import type { DatabaseStorageUsage, StorageWarningLevel } from '$lib/types';
 
+// Once-per-day retention cleanup and tenant database storage warnings.
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_JOB = 'data_retention';
 const SYNC_RETENTION_DAYS = 30;

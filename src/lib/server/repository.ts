@@ -1,9 +1,15 @@
+// Central tenant business-data layer for customers, editors, orders, tasks, billing, and history.
 import type { ActivityLog, Customer, Editor, EditorAvailability, Invoice, Order, Payment, StudioSettings, Task, TaskStatus } from '$lib/types';
 import { createPortalToken, hashPortalToken, openPortalToken, sealPortalToken } from './tokens';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate, legacyAssignmentTemplate, legacyInvoiceTemplate } from '$lib/messageTemplates';
 import { durationBillableAmount } from '$lib/duration';
 import { indianMobileError, normalizeIndianMobile } from '$lib/phone';
 
+/**
+ * TENANT BUSINESS REPOSITORY
+ * All operational reads/writes pass here. Important writes also create activity
+ * history and a durable Google Sheets outbox item.
+ */
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
@@ -53,6 +59,7 @@ function orderFrom(row: Row, orderTasks: Task[] = [], orderPayments: Payment[] =
 	return { id: row.id, serial: Number(row.serial), customerId: row.customer_id || undefined, customer: row.customer_name, mobile: row.mobile, workType: row.event, project: row.project, receiving: row.receiving, duration: row.duration, price: Number(row.amount), discount: Number(row.discount || 0), paid, initialAdvance, priceSet: Boolean(row.amount_set), advanceSet: Boolean(row.advance_set), source: row.source, remarks: row.remarks, due: row.due_date, status: row.status, progress: Number(row.progress), files: 0, fileLink: '', color: '#00ADB5', tasks: orderTasks, payments: orderPayments, important: Boolean(row.important), historical: Boolean(row.historical), archived: Boolean(row.archived_at), deliveryMethod: row.delivery_method || '', deliveredAt: row.delivered_at || '', customerNotifiedAt: row.customer_notified_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
 }
 
+// ---------- Studio profile, prefixes, WhatsApp templates, and tenant theme ----------
 export async function getSettings(database: AppDatabase): Promise<StudioSettings> {
 	const values = Object.fromEntries((await rows(database, 'SELECT key, value FROM settings')).map((row) => [row.key, row.value]));
 	const savedAssignmentTemplate = String(values.assignmentTemplate || '');
@@ -72,6 +79,7 @@ export async function updateSettings(database: AppDatabase, input: Partial<Studi
 	return settings;
 }
 
+// ---------- Customers: unique phone, edit propagation, archive, and portal token ----------
 export async function listCustomers(database: AppDatabase, includeArchived = false) {
 	const customerRows = await rows(database, `SELECT c.*,
 		(SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS projects,
@@ -108,6 +116,7 @@ export async function createCustomer(database: AppDatabase, input: Partial<Custo
 }
 
 export async function updateCustomer(database: AppDatabase, customerId: string, input: Partial<Customer>) {
+	// Keep every linked order's customer studio and phone snapshot current.
 	const existing = await database.prepare('SELECT * FROM customers WHERE id = ? AND archived_at IS NULL').bind(customerId).first<Row>();
 	if (!existing) return null;
 	const phoneError = indianMobileError(input.phone ?? existing.phone, true);
@@ -157,6 +166,7 @@ export async function restoreCustomer(database: AppDatabase, customerId: string)
 	return customer;
 }
 
+// ---------- Editors: availability, device history, archive, and portal token ----------
 export async function listEditors(database: AppDatabase, includeInactive = false) {
 	const editorRows = await rows(database, `SELECT e.*, COUNT(CASE WHEN t.archived_at IS NULL AND t.status != 'Completed' THEN 1 END) AS active_tasks FROM editors e LEFT JOIN tasks t ON t.editor_id = e.id ${includeInactive ? '' : 'WHERE e.archived_at IS NULL'} GROUP BY e.id ORDER BY e.name`);
 	const editors = editorRows.map(editorFrom);
@@ -249,6 +259,7 @@ export async function findEditorByToken(database: AppDatabase, token: string) {
 }
 
 async function hydrateOrders(database: AppDatabase, orderRows: Row[]) {
+	// Fetch tasks/payments in two queries, then attach them to each order in memory.
 	if (!orderRows.length) return [];
 	const orderIds = orderRows.map((row) => row.id);
 	const placeholders = orderIds.map(() => '?').join(', ');
@@ -275,6 +286,7 @@ export async function getOrder(database: AppDatabase, orderId: string) {
 	return order ? (await hydrateOrders(database, [order]))[0] : null;
 }
 
+// ---------- Paginated admin order list, filters, dashboard totals, and search ----------
 export interface OrderPageOptions {
 	page?: number;
 	pageSize?: number;
@@ -330,6 +342,7 @@ export async function listOrderEvents(database: AppDatabase) {
 	return (await rows(database, "SELECT DISTINCT event FROM orders WHERE event != '' ORDER BY event")).map((row) => String(row.event));
 }
 
+// ---------- Custom event names such as Wedding, Reception, or Birthday ----------
 export const defaultEventOptions = ['Wedding', 'Birthday', 'Half Saree', 'House Opening', 'Engagement', 'Reception'];
 
 export async function listEventOptions(database: AppDatabase) {
@@ -369,6 +382,7 @@ export async function getDashboardData(database: AppDatabase) {
 	};
 }
 
+// ---------- Orders: customer snapshot, billing totals, notification, and archive ----------
 export async function createOrder(database: AppDatabase, input: Partial<Order>) {
 	const timestamp = now();
 	const linkedCustomer = input.customerId ? await database.prepare('SELECT business, phone FROM customers WHERE id = ?').bind(input.customerId).first<Row>() : null;
@@ -448,6 +462,7 @@ export async function permanentlyDeleteOrder(database: AppDatabase, orderId: str
 	return { id: orderId, project: String(existing.project || '') };
 }
 
+// ---------- Tasks: editor assignment, device, Drive links, duration, and progress ----------
 export async function createTask(database: AppDatabase, orderId: string, input: Partial<Task>) {
 	const timestamp = now();
 	if (input.editorId && !String(input.device || '').trim()) throw new Error('Enter the device given to the editor, such as HD-1.');
@@ -519,6 +534,7 @@ export async function tasksForEditor(database: AppDatabase, editorId: string) {
 }
 
 export async function updateOrderSummary(database: AppDatabase, orderId: string) {
+	// Recalculate the order's status/progress from every active task after task changes.
 	const order = await database.prepare('SELECT historical, status FROM orders WHERE id = ?').bind(orderId).first<{ historical: number; status: Order['status'] }>();
 	if (!order) return;
 	if (order.historical) {
@@ -543,6 +559,7 @@ export async function updateOrderSummary(database: AppDatabase, orderId: string)
 	await queueSheetSync(database, 'Orders', orderId, updated);
 }
 
+// ---------- Billing: payment ledger and immutable invoice amount snapshots ----------
 export async function recordPayment(database: AppDatabase, orderId: string, input: Partial<Payment>) {
 	const order = await getOrder(database, orderId);
 	if (!order) throw new Error('Order not found.');
@@ -597,6 +614,7 @@ export async function getInvoice(database: AppDatabase, invoiceId: string) {
 	return (await listInvoices(database)).find((invoice) => invoice.id === invoiceId) || null;
 }
 
+// ---------- Audit trail and editor-to-admin notification inbox ----------
 export async function listActivity(database: AppDatabase, entityType?: string, entityId?: string) {
 	const activityRows = entityType && entityId ? await rows(database, 'SELECT * FROM activity_logs WHERE entity_type = ? AND entity_id = ? ORDER BY created_at DESC', [entityType, entityId]) : await rows(database, 'SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 100');
 	return activityRows.map((row): ActivityLog => ({ id: row.id, actor: row.actor, action: row.action, entityType: row.entity_type, entityId: row.entity_id, details: row.details, createdAt: row.created_at }));
@@ -628,6 +646,7 @@ export async function listOrderActivity(database: AppDatabase, orderId: string) 
 	return activityRows.map((row): ActivityLog => ({ id: row.id, actor: row.actor, action: row.action, entityType: row.entity_type, entityId: row.entity_id, details: row.details, createdAt: row.created_at }));
 }
 
+// ---------- Durable Sheets outbox; failed writes stay available for retry ----------
 export async function syncQueueStatus(database: AppDatabase) {
 	const status = await database.prepare(`SELECT
 		COUNT(*) AS pending,

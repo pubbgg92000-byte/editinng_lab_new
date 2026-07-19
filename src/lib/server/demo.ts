@@ -3,6 +3,7 @@ import { createPortalToken, hashPortalToken, sealPortalToken } from './tokens';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate } from '$lib/messageTemplates';
 import type { Tenant } from '$lib/types';
 
+// Resettable fictional workspace. The isDemo guard is the critical safety boundary.
 const timestamp = () => new Date().toISOString();
 
 export async function resetDemoTenant(tenant: Tenant) {

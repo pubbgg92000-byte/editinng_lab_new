@@ -1,3 +1,4 @@
+<!-- Records an advance/payment and optionally opens its generated receipt. -->
 <script lang="ts">
 	import { CheckCircle2, IndianRupee } from '@lucide/svelte';
 	import Modal from './Modal.svelte';

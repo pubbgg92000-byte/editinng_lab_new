@@ -1,3 +1,4 @@
+<!-- Compatibility layout for the legacy unscoped customer portal route. -->
 <script lang="ts">
 	import { ArrowLeft } from '@lucide/svelte';
 	let { children } = $props();

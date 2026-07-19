@@ -1,3 +1,4 @@
+<!-- Editor directory: availability, assigned tasks, portal links, devices, and archive lifecycle. -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";

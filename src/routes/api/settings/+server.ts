@@ -1,3 +1,4 @@
+// Reads/updates only the approved per-tenant studio setting keys.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

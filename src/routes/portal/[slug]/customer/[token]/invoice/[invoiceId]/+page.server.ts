@@ -1,3 +1,4 @@
+// Exposes an invoice only when it belongs to this customer token and tenant.
 import { error } from '@sveltejs/kit';
 import { findTenantBySlug } from '$lib/server/control';
 import { readyDatabase } from '$lib/server/db';

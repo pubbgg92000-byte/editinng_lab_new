@@ -1,3 +1,4 @@
+// Loads active/archived customers with their orders and invoices for related views.
 import { readyDatabase } from '$lib/server/db';
 import { listCustomers, listInvoices, listOrders } from '$lib/server/repository';
 export const load = async ({ locals }) => {

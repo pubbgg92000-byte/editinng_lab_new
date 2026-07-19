@@ -1,3 +1,4 @@
+<!-- Creates or edits customer identity, studio, phone, address, GST, and map link. -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import type { Customer } from '$lib/types';

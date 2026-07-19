@@ -1,3 +1,4 @@
+<!-- Global document title, favicon, tenant theme, and page rendering wrapper. -->
 <script lang="ts">
 	import './layout.css';
 	import { onMount } from 'svelte';

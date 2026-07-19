@@ -1,3 +1,4 @@
+<!-- Production overview: workflow totals and the most relevant active orders. -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { ClipboardList, Clock3, PackageCheck, CircleCheckBig, ArrowUpRight, Check, Star, UserRound } from '@lucide/svelte';

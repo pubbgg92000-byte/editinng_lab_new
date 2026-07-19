@@ -1,3 +1,4 @@
+// Shared contracts used by repositories, APIs, pages, modals, portals, and exports.
 export type OrderStatus = 'Historical' | 'Received' | 'Assigned' | 'Editing' | 'Waiting Review' | 'Revision' | 'Ready Delivery' | 'Delivered' | 'Stopped' | 'Completed';
 export type TaskStatus = 'Not started' | 'Files downloaded' | 'In progress' | 'Waiting for clarification' | 'Ready for review' | 'Revision required' | 'Completed';
 export type TaskBillingMode = 'manual' | 'duration';

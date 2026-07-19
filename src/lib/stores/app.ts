@@ -2,6 +2,7 @@ import { writable } from 'svelte/store';
 import { customers as initialCustomers, editors as initialEditors, orders as initialOrders } from '$lib/data';
 import type { Customer, Editor, Order, TaskStatus } from '$lib/types';
 
+// In-browser copies keep lists/search responsive; Neon remains the permanent source.
 export const orderStore = writable<Order[]>(structuredClone(initialOrders));
 export const customerStore = writable<Customer[]>(structuredClone(initialCustomers));
 export const editorStore = writable<Editor[]>(structuredClone(initialEditors));

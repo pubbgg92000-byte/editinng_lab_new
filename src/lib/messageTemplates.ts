@@ -1,3 +1,7 @@
+/**
+ * Default WhatsApp messages and supported {{placeholders}}.
+ * Each studio can edit its saved copy from Settings without changing code.
+ */
 export const legacyAssignmentTemplate = `Hello {{editor_name}},
 
 {{studio_name}} assigned you work for {{project}} ({{customer}}).

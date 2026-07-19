@@ -1,3 +1,4 @@
+// Builds a fresh invoice WhatsApp message from current contact data and snapshot money.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

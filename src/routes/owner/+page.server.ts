@@ -1,3 +1,4 @@
+// Owner actions for onboarding, connections, credentials, status, demo reset, and password.
 import { fail, redirect } from '@sveltejs/kit';
 import { assertConnectionsAvailable, changeOwnerPassword, createTenant, getTenantById, listTenantSummaries, setTenantConnectionResult, setTenantStatus, updateTenantConnection, updateTenantCredentials } from '$lib/server/control';
 import { databaseFromUrl, ensureDatabase, inspectTenantDatabase, readyDatabase } from '$lib/server/db';

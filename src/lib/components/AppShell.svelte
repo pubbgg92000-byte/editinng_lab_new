@@ -1,3 +1,4 @@
+<!-- Authenticated client shell: navigation, search, notifications, profile, and mobile menu. -->
 <script lang="ts">
   import { page } from "$app/state";
   import { onMount, untrack } from "svelte";

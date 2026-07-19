@@ -1,3 +1,4 @@
+// Changes invoice lifecycle status and mirrors the result to Google Sheets.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

@@ -1,3 +1,4 @@
+// Resolves the legacy customer token only against the registered legacy tenant.
 import { error } from '@sveltejs/kit';
 import { findLegacyTenant } from '$lib/server/control';
 import { loadCustomerPortal } from '$lib/server/portals';

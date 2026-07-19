@@ -1,3 +1,4 @@
+<!-- Paginated order register with workflow filters, WhatsApp, and archive views. -->
 <script lang="ts">
   import { untrack } from "svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";

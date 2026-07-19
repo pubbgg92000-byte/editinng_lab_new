@@ -2,6 +2,10 @@ import type { Handle } from '@sveltejs/kit';
 import { error, redirect } from '@sveltejs/kit';
 import { getAuthSession, SESSION_COOKIE } from '$lib/server/auth';
 
+/**
+ * Global request gate: separates owner, client-admin, API, and public portal access
+ * before a page runs, and rejects cross-site form/API mutations.
+ */
 const protectedPrefixes = ['/dashboard', '/customers', '/orders', '/editors', '/invoices', '/settings', '/api'];
 
 export const handle: Handle = async ({ event, resolve }) => {

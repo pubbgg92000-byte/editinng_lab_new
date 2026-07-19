@@ -1,3 +1,4 @@
+// Editor collection API: list/create with phone, availability, map-link, and duplicate checks.
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';

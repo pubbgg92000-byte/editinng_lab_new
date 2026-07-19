@@ -1,3 +1,4 @@
+// Per-client database: operations, portal tokens, activity, and the Sheets outbox.
 export const schemaStatements = [
 	`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, business TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', gst TEXT NOT NULL DEFAULT '', portal_token_hash TEXT, portal_token_cipher TEXT, projects INTEGER NOT NULL DEFAULT 0, pending REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,

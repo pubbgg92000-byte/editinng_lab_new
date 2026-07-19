@@ -1,3 +1,4 @@
+// Resolves a tenant-scoped customer portal and rejects invalid/archived tokens.
 import { error } from '@sveltejs/kit';
 import { findTenantBySlug } from '$lib/server/control';
 import { loadCustomerPortal } from '$lib/server/portals';

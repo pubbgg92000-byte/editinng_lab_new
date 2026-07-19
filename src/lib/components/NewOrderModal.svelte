@@ -1,3 +1,4 @@
+<!-- Creates an order connected to a customer and optional initial billing values. -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import NewCustomerModal from './NewCustomerModal.svelte';

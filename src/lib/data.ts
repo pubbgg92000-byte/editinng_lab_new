@@ -1,3 +1,4 @@
+// Preview-only sample records plus shared Indian currency/date display helpers used by the UI.
 import type { Customer, Editor, Order } from './types';
 
 export const customers: Customer[] = [
