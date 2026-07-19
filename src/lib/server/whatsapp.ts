@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import type { Editor, Order, StudioSettings, Task } from '$lib/types';
+import type { Customer, Editor, Invoice, Order, StudioSettings, Task } from '$lib/types';
 import { whatsappNumber } from '$lib/phone';
 import { money } from '$lib/data';
 import { fillTemplate } from '$lib/messageTemplates';
@@ -66,6 +66,41 @@ export function invoiceMessage(settings: StudioSettings, invoiceNumber: string, 
 	if (additions.length) message = `${message.trimEnd()}\n\n${additions.join('\n')}`;
 	if (portalLink && !message.includes(portalLink)) message = `${message.trimEnd()}\n\nTrack your work status:\n${portalLink}`;
 	return message;
+}
+
+// Build outgoing invoice text when Send is clicked. Customer/order identity stays
+// current, while the money values remain the immutable invoice billing snapshot.
+export function currentInvoiceMessage(settings: StudioSettings, invoice: Invoice, order: Order, customer?: Customer | null, origin?: string, tenantSlug = '') {
+	const publicUrl = applicationUrl(origin);
+	const customerToken = customer?.archived ? '' : customer?.token || '';
+	const portalLink = customerToken ? (tenantSlug ? `${publicUrl}/portal/${tenantSlug}/customer/${customerToken}` : `${publicUrl}/customer/${customerToken}`) : '';
+	const invoiceLink = portalLink ? `${portalLink}/invoice/${invoice.id}` : '';
+	const hasSnapshot = Boolean(invoice.subtotal || invoice.total || invoice.discount || invoice.amountReceived || invoice.paid || invoice.balance);
+	const snapshotOrder: Order = hasSnapshot
+		? { ...order, price: invoice.subtotal, discount: invoice.discount, paid: invoice.paid, priceSet: true }
+		: order;
+	if (invoice.kind !== 'partial') {
+		return invoiceMessage(settings, invoice.number, snapshotOrder, customerToken, origin, {
+			kind: invoice.kind,
+			amount: invoice.amountReceived,
+			invoiceUrl: invoiceLink
+		}, tenantSlug);
+	}
+	return [
+		settings.studioName,
+		`Partial work invoice: ${invoice.number}`,
+		'',
+		`Customer studio: ${customer?.business || order.customer}`,
+		`Project: ${order.project}`,
+		'',
+		'Completed work billed:',
+		...(invoice.taskItems || []).map((item, index) => `${index + 1}. ${item.name} — ${money(item.amount)}`),
+		'',
+		`Partial invoice amount: ${money(invoice.total)}`,
+		invoiceLink ? `Open invoice / print PDF:\n${invoiceLink}` : portalLink ? `View invoices and receipts:\n${portalLink}` : '',
+		settings.paymentNote,
+		settings.invoiceFooter
+	].filter(Boolean).join('\n');
 }
 
 export function customerReadyMessage(settings: StudioSettings, order: Order, customerToken = '', origin?: string, tenantSlug = '') {

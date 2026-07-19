@@ -13,7 +13,6 @@
   import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
   import { formatDate, formatDateTime, money } from "$lib/data";
   import { orderCode } from "$lib/identifiers";
-  import { whatsappNumber } from "$lib/phone";
   import type {
     ActivityLog,
     Customer,
@@ -82,11 +81,6 @@
   const customerMobile = $derived(
     data.customer?.phone || data.order?.mobile || "",
   );
-  const whatsappUrl = $derived(
-    customerMobile
-      ? `https://wa.me/${whatsappNumber(customerMobile)}?text=${encodeURIComponent(data.invoice.message)}`
-      : "",
-  );
   async function updateStatus(next: "draft" | "sent" | "paid" | "cancelled") {
     busy = true;
     error = "";
@@ -105,11 +99,20 @@
     return true;
   }
   async function sendWhatsApp() {
-    if (!whatsappUrl) return;
+    if (!customerMobile) return;
     const tab = window.open("about:blank", "_blank");
-    await updateStatus("sent");
-    if (tab) tab.location.href = whatsappUrl;
-    else window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+    const response = await fetch(`/api/invoices/${data.invoice.id}/whatsapp`, {
+      method: "POST",
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      if (tab) tab.close();
+      error = result.error || "Unable to prepare the WhatsApp message.";
+      return;
+    }
+    status = "sent";
+    if (tab) tab.location.href = result.url;
+    else window.open(result.url, "_blank", "noopener,noreferrer");
   }
 </script>
 
@@ -118,7 +121,7 @@
   <div class="actions">
     <button class="secondary" onclick={() => window.print()}
       ><Printer size={15} /> Print / save PDF</button
-    >{#if whatsappUrl}<button class="primary whatsapp" onclick={sendWhatsApp}
+    >{#if customerMobile}<button class="primary whatsapp" onclick={sendWhatsApp}
         ><WhatsAppIcon size={16} /> Send in WhatsApp</button
       >{/if}
   </div>

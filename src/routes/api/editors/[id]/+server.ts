@@ -9,6 +9,7 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
 	const input = await request.json();
+	if (input.name !== undefined && !String(input.name).trim()) return json({ error: 'Editor name is required.' }, { status: 400 });
 	if (input.phone !== undefined) {
 		const phoneError = indianMobileError(input.phone, true);
 		if (phoneError) return json({ error: phoneError }, { status: 400 });
@@ -39,7 +40,8 @@ export const POST = async ({ params, request, cookies, locals }) => {
 		return json({ ok: true, deleted, sync });
 	}
 	if (input.action !== 'regenerate-token') return json({ error: 'Unknown action' }, { status: 400 });
-	return json({ ok: true, token: await regenerateEditorToken(database, params.id) });
+	const token = await regenerateEditorToken(database, params.id);
+	return token ? json({ ok: true, token }) : json({ error: 'Editor not found' }, { status: 404 });
 };
 
 export const DELETE = async ({ params, cookies, locals }) => {

@@ -89,9 +89,19 @@
         body: JSON.stringify({ action: "regenerate-token" }),
       });
       const result = await response.json();
-      if (!response.ok) return;
+      if (!response.ok) {
+        message = result.error || "Unable to create the editor portal link";
+        return;
+      }
       token = result.token;
-      editor.token = token;
+      editors = editors.map((item) =>
+        item.id === editor.id ? { ...item, token } : item,
+      );
+      if (detailEditor?.id === editor.id)
+        detailEditor = { ...detailEditor, token };
+      editorStore.update((items) =>
+        items.map((item) => (item.id === editor.id ? { ...item, token } : item)),
+      );
     }
     await navigator.clipboard.writeText(
       `${location.origin}/portal/${data.tenantSlug}/editor/${token}`,

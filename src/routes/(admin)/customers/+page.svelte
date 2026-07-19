@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { invalidateAll } from "$app/navigation";
   import {
     Search,
     Check,
@@ -115,6 +116,14 @@
         : [customer, ...items],
     );
     if (selectedCustomer?.id === customer.id) selectedCustomer = customer;
+    // Customer identity is copied onto orders for fast Sheets/search views.
+    // Keep the open screen in sync immediately, then refresh shared layout data.
+    orders = orders.map((order) =>
+      order.customerId === customer.id
+        ? { ...order, customer: customer.business, mobile: customer.phone }
+        : order,
+    );
+    void invalidateAll();
     toast = synced
       ? "Customer saved and synced to Google Sheets"
       : "Customer saved; Sheet sync is pending or not configured";
@@ -161,26 +170,24 @@
     );
   }
   function previewMap(url: string | undefined) { if (!url) return; mapTarget = url; mapOpen = true; }
-  function sendInvoiceInWhatsApp(
+  async function sendInvoiceInWhatsApp(
     customer: Customer | null,
     invoice: Invoice,
-    order: Order,
+    _order: Order,
   ) {
-    if (!customer?.phone || !customer.token) return;
-    const invoiceUrl = `${location.origin}/portal/${data.tenantSlug}/customer/${customer.token}/invoice/${invoice.id}`;
-    const message = [
-      `Invoice ${invoice.number}`,
-      customer.business,
-      order.project,
-      `Editing: ${order.status} (${order.progress}%)`,
-      `Amount due: ${money(invoice.balance)}`,
-      `Open invoice / save PDF: ${invoiceUrl}`,
-    ].join("\n");
-    window.open(
-      `https://wa.me/${whatsappNumber(customer.phone)}?text=${encodeURIComponent(message)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    if (!customer?.phone) return;
+    const tab = window.open("about:blank", "_blank");
+    const response = await fetch(`/api/invoices/${invoice.id}/whatsapp`, {
+      method: "POST",
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      if (tab) tab.close();
+      toast = result.error || "Unable to prepare the WhatsApp message";
+      return;
+    }
+    if (tab) tab.location.href = result.url;
+    else window.open(result.url, "_blank", "noopener,noreferrer");
   }
   async function regenerate(customer: Customer) {
     if (
@@ -196,6 +203,11 @@
     });
     const result = await response.json();
     if (response.ok) {
+      customers = customers.map((item) =>
+        item.id === customer.id ? { ...item, token: result.token } : item,
+      );
+      if (selectedCustomer?.id === customer.id)
+        selectedCustomer = { ...selectedCustomer, token: result.token };
       customerStore.update((items) =>
         items.map((item) =>
           item.id === customer.id ? { ...item, token: result.token } : item,
@@ -222,6 +234,8 @@
     customerStore.update((items) =>
       items.filter((item) => item.id !== customer.id),
     );
+    detailsOpen = false;
+    selectedCustomer = null;
     toast = "Customer archived";
   }
   async function restoreCustomer(customer: Customer) {

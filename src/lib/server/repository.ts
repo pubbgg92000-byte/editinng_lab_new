@@ -189,7 +189,7 @@ export async function createEditor(database: AppDatabase, input: Partial<Editor>
 }
 
 export async function updateEditor(database: AppDatabase, editorId: string, input: Partial<Editor>) {
-	const existing = await database.prepare('SELECT * FROM editors WHERE id = ?').bind(editorId).first<Row>();
+	const existing = await database.prepare('SELECT * FROM editors WHERE id = ? AND archived_at IS NULL').bind(editorId).first<Row>();
 	if (!existing) return null;
 	const phoneError = indianMobileError(input.phone ?? existing.phone, true);
 	if (phoneError) throw new Error(phoneError);
@@ -237,7 +237,8 @@ export async function permanentlyDeleteEditor(database: AppDatabase, editorId: s
 
 export async function regenerateEditorToken(database: AppDatabase, editorId: string) {
 	const token = createPortalToken();
-	await database.prepare('UPDATE editors SET portal_token_hash = ?, portal_token_cipher = ?, updated_at = ? WHERE id = ?').bind(await hashPortalToken(token), await sealPortalToken(token), now(), editorId).run();
+	const result = await database.prepare('UPDATE editors SET portal_token_hash = ?, portal_token_cipher = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL').bind(await hashPortalToken(token), await sealPortalToken(token), now(), editorId).run();
+	if (!result.meta?.changes) return null;
 	await activity(database, 'admin', 'Editor portal link regenerated', 'editor', editorId);
 	return token;
 }
@@ -513,7 +514,7 @@ export async function restoreTask(database: AppDatabase, taskId: string) {
 }
 
 export async function tasksForEditor(database: AppDatabase, editorId: string) {
-	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, o.project, o.customer_name, o.event, o.serial, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 ORDER BY t.due_date, t.created_at`, [editorId]);
+	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, o.project, o.customer_name, o.event, o.serial, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 AND o.archived_at IS NULL ORDER BY t.due_date, t.created_at`, [editorId]);
 	return taskRows.map((row) => ({ ...taskFrom(row), project: row.project, customer: row.customer_name, workType: row.event, serial: row.serial }));
 }
 
@@ -587,7 +588,9 @@ export async function updateInvoiceStatus(database: AppDatabase, invoiceId: stri
 	const sentAt = status === 'sent' ? invoice.sentAt || now() : invoice.sentAt || null;
 	await database.prepare('UPDATE invoices SET status = ?, sent_at = ? WHERE id = ?').bind(status, sentAt, invoiceId).run();
 	await activity(database, 'admin', `Invoice ${status}`, 'invoice', invoiceId, invoice.number);
-	return getInvoice(database, invoiceId);
+	const updated = await getInvoice(database, invoiceId);
+	await queueSheetSync(database, 'Invoices', invoiceId, updated);
+	return updated;
 }
 
 export async function getInvoice(database: AppDatabase, invoiceId: string) {

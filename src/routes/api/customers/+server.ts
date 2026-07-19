@@ -13,7 +13,7 @@ export const GET = async ({ cookies, locals }) => {
 export const POST = async ({ request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const input = await request.json();
-	if (!String(input.name || '').trim() || !String(input.phone || '').trim()) return json({ error: 'Customer name and phone number are required.' }, { status: 400 });
+	if (!String(input.name || '').trim() || !String(input.business || input.name || '').trim() || !String(input.phone || '').trim()) return json({ error: 'Customer name, studio name, and phone number are required.' }, { status: 400 });
 	const phoneError = indianMobileError(input.phone, true);
 	if (phoneError) return json({ error: phoneError }, { status: 400 });
 	if (String(input.locationUrl || '').trim() && !/^https:\/\//i.test(String(input.locationUrl).trim())) return json({ error: 'Google Maps location must be an HTTPS link.' }, { status: 400 });

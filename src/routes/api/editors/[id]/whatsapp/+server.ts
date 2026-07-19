@@ -10,17 +10,16 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 	const input = await request.json();
 	const database = await readyDatabase(locals.tenant);
 	let editor = (await listEditors(database, true)).find((item) => item.id === params.id);
-	if (!editor) return json({ error: 'Editor not found' }, { status: 404 });
+	if (!editor || editor.archived) return json({ error: 'Active editor not found' }, { status: 404 });
 	if (!editor.phone) return json({ error: 'Add the editor WhatsApp number first.' }, { status: 400 });
-	if (!editor.token) {
-		editor.token = await regenerateEditorToken(database, editor.id);
-	}
+	const token = editor.token || await regenerateEditorToken(database, editor.id);
+	if (!token) return json({ error: 'Unable to create the editor portal link.' }, { status: 409 });
 	const order = await getOrder(database, String(input.orderId || ''));
 	if (!order) return json({ error: 'Order not found' }, { status: 404 });
 	const tasks = order.tasks.filter((task) => !task.archived && task.editorId === editor!.id);
 	if (!tasks.length) return json({ error: 'Assign at least one task to this editor first.' }, { status: 400 });
-	const message = editorAssignmentMessage(await getSettings(database), editor, order, tasks, editor.token, url.origin, locals.tenant!.slug);
+	const message = editorAssignmentMessage(await getSettings(database), editor, order, tasks, token, url.origin, locals.tenant!.slug);
 	await recordActivity(database, 'admin', 'Editor assignment opened in WhatsApp', 'order', order.id, `${editor.name} · ${tasks.length} task(s)`);
 	await flushSheetSync(database, locals.tenant!);
-	return json({ ok: true, url: whatsappUrl(editor.phone, message), token: editor.token });
+	return json({ ok: true, url: whatsappUrl(editor.phone, message), token });
 };

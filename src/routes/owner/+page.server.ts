@@ -8,6 +8,7 @@ import type { Tenant, TenantStatus } from '$lib/types';
 
 const field = (form: FormData, name: string) => String(form.get(name) || '').trim();
 const message = (cause: unknown) => cause instanceof Error ? cause.message : 'The operation failed.';
+const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
 export const load = async ({ locals }) => ({ account: locals.account, tenants: await listTenantSummaries() });
 
@@ -22,6 +23,7 @@ export const actions = {
 			isDemo: form.get('isDemo') === 'on', status: 'draft' as TenantStatus
 		};
 		if (!input.internalName || !input.studioName || !input.email || !input.databaseUrl || !input.googleSheetId) return fail(400, { action: 'create', error: 'Client name, studio name, login email, Neon URL, and Sheet ID are required.' });
+		if (!validEmail(input.email)) return fail(400, { action: 'create', error: 'Enter a valid client login email address.' });
 		if (input.password !== passwordConfirm) return fail(400, { action: 'create', error: 'The first password and confirmation do not match.' });
 		if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.slug)) return fail(400, { action: 'create', error: 'Slug may contain lowercase letters, numbers, and single hyphens.' });
 		if (!input.databaseUrl.startsWith('postgres')) return fail(400, { action: 'create', error: 'Enter a valid PostgreSQL/Neon connection URL.' });
@@ -98,9 +100,11 @@ export const actions = {
 	credentials: async ({ request, locals }) => {
 		const form = await request.formData();
 		const password = field(form, 'password');
+		const email = field(form, 'email').toLowerCase();
+		if (!validEmail(email)) return fail(400, { action: 'credentials', error: 'Enter a valid client login email address.' });
 		if (password !== field(form, 'passwordConfirm')) return fail(400, { action: 'credentials', error: 'The new password and confirmation do not match.' });
 		try {
-			await updateTenantCredentials(field(form, 'tenantId'), field(form, 'email'), password, locals.account!.id);
+			await updateTenantCredentials(field(form, 'tenantId'), email, password, locals.account!.id);
 			return { action: 'credentials', success: 'Client login saved. Existing client sessions were signed out.' };
 		} catch (cause) { return fail(400, { action: 'credentials', error: message(cause) }); }
 	},
