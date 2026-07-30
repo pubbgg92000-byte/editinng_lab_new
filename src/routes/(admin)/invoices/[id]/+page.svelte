@@ -10,16 +10,19 @@
     CheckCircle2,
     Ban,
     Send,
+    LoaderCircle,
   } from "@lucide/svelte";
   import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
   import { formatDate, formatDateTime, money } from "$lib/data";
   import { orderCode } from "$lib/identifiers";
+  import { notifyAction } from "$lib/stores/actionFeedback";
   import type {
     ActivityLog,
     Customer,
     Invoice,
     Order,
     StudioSettings,
+    TenantConfiguration,
   } from "$lib/types";
   let {
     data,
@@ -30,11 +33,16 @@
       customer: Customer | null;
       settings: StudioSettings;
       activity: ActivityLog[];
+      configuration: TenantConfiguration;
     };
   } = $props();
   let status = $state(untrack(() => data.invoice.status || "draft"));
+  let savedStatus = $state(untrack(() => data.invoice.status || "draft"));
   let busy = $state(false);
+  let sending = $state(false);
   let error = $state("");
+  const invoiceTemplates = $derived(Object.values(data.configuration.moduleConfiguration["communications.whatsapp"].templates).filter((template) => template.enabled && template.context === "invoice" && template.scenario === (data.invoice.kind === "partial" ? "partial-invoice" : "invoice")));
+  let selectedTemplateId = $state(untrack(() => data.configuration.moduleConfiguration["communications.whatsapp"].defaultTemplateIds[data.invoice.kind === "partial" ? "partial-invoice" : "invoice"] || invoiceTemplates[0]?.id || ""));
   const hasBillingSnapshot = $derived(
     Boolean(
       data.invoice.subtotal ||
@@ -93,27 +101,42 @@
     const result = await response.json();
     busy = false;
     if (!response.ok) {
+      status = savedStatus;
       error = result.error || "Unable to update invoice status.";
       return false;
     }
     status = next;
+    savedStatus = next;
+    notifyAction(`Invoice status changed to ${next}.`);
     return true;
   }
   async function sendWhatsApp() {
     if (!customerMobile) return;
     const tab = window.open("about:blank", "_blank");
-    const response = await fetch(`/api/invoices/${data.invoice.id}/whatsapp`, {
-      method: "POST",
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      if (tab) tab.close();
-      error = result.error || "Unable to prepare the WhatsApp message.";
-      return;
+    sending = true;
+    error = "";
+    try {
+      const response = await fetch(`/api/invoices/${data.invoice.id}/whatsapp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ templateId: selectedTemplateId }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        tab?.close();
+        error = result.error || "Unable to prepare the WhatsApp message.";
+        return;
+      }
+      status = "sent";
+      savedStatus = "sent";
+      if (tab) tab.location.href = result.url;
+      else window.open(result.url, "_blank", "noopener,noreferrer");
+    } catch {
+      tab?.close();
+      error = "Unable to prepare the WhatsApp message.";
+    } finally {
+      sending = false;
     }
-    status = "sent";
-    if (tab) tab.location.href = result.url;
-    else window.open(result.url, "_blank", "noopener,noreferrer");
   }
 </script>
 
@@ -122,15 +145,15 @@
   <div class="actions">
     <button class="secondary" onclick={() => window.print()}
       ><Printer size={15} /> Print / save PDF</button
-    >{#if customerMobile}<button class="primary whatsapp" onclick={sendWhatsApp}
-        ><WhatsAppIcon size={16} /> Send in WhatsApp</button
-      >{/if}
+    >{#if customerMobile}<div class="whatsapp-choice"><select bind:value={selectedTemplateId} disabled={sending} aria-label="Invoice WhatsApp template">{#each invoiceTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select><button class="primary whatsapp" disabled={sending} aria-busy={sending} onclick={sendWhatsApp}
+        >{#if sending}<LoaderCircle class="button-spinner" size={16}/>{:else}<WhatsAppIcon size={16}/>{/if}{sending ? "Preparing…" : "Open in WhatsApp"}</button
+      ></div>{/if}
   </div>
 </div>
 <div class="invoice-heading no-print">
   <span><FileText size={20} /></span>
   <div>
-    <p>Customer studio</p>
+    <p>Customer</p>
     <h1>{data.customer?.business || data.order?.customer || "Customer studio"}</h1>
     <small>{data.invoice.number} · {data.order?.project || "Order"} · Generated {formatDateTime(data.invoice.openedAt)}</small>
   </div>
@@ -166,7 +189,7 @@
   </div>
   <div class="bill-grid">
     <div>
-      <small>Customer studio</small><strong
+      <small>Customer</small><strong
         >{data.customer?.business ||
           data.order?.customer ||
           "Customer studio"}</strong
@@ -196,7 +219,7 @@
             ></tr
           >{/each}{:else}<tr
           ><td
-            >{data.order?.project || "Editing services"}<small
+            >{data.order?.project || "Services"}<small
               >{data.order?.workType || ""}{#if data.order?.tasks?.length}
                 · {data.order.tasks
                   .filter((task) => !task.archived)
@@ -271,6 +294,7 @@
           >Cancelled</option
         ></select
       >
+      {#if busy}<div class="status-saving" role="status"><LoaderCircle size={13}/> Saving status…</div>{/if}
       <div class="status-help">
         {#if status === "paid"}<CheckCircle2 size={14} /> Payment complete{:else if status === "cancelled"}<Ban
             size={14}
@@ -317,6 +341,8 @@
     align-items: center;
     gap: 7px;
   }
+  .whatsapp-choice{display:flex;align-items:center;gap:6px}.whatsapp-choice select{width:auto;min-width:150px;height:36px}:global(.button-spinner),.status-saving :global(svg){animation:invoice-spin .75s linear infinite}.status-saving{display:flex;align-items:center;gap:6px;margin-top:7px;color:var(--purple);font-size:8px;font-weight:700}@keyframes invoice-spin{to{transform:rotate(360deg)}}
+  @media(max-width:650px){.detail-top{align-items:flex-start;flex-direction:column;gap:12px}.actions,.whatsapp-choice{width:100%;flex-wrap:wrap}.whatsapp-choice select,.whatsapp-choice button{flex:1;min-width:0}}
   .invoice-heading {
     display: flex;
     align-items: center;

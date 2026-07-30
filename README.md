@@ -1,16 +1,26 @@
-# StudioFlow Editing Lab
+# NexaDesk Multi-Niche Platform
 
-StudioFlow is a multi-client production and billing system for video-editing studios. One SvelteKit application serves:
+NexaDesk is a flag-driven, multi-client operations and billing platform. One SvelteKit application and one canonical customer → order → task → staff → billing workflow can be configured for editing studios, garages, salons, shops, contractors, hospitality-lite businesses, and other service niches.
 
 - the master owner control panel;
-- a separate admin workspace for every editing studio;
-- private editor work portals;
+- a separate configurable admin workspace for every tenant;
+- optional private staff work portals;
 - private customer status, invoice, receipt, and delivery portals;
 - Neon database storage and a readable Google Sheets mirror.
 
 Production: <https://editing-lab-new.vercel.app>
 
 The application is hosted on **Vercel**. Neon hosts PostgreSQL databases. Cloudflare hosting, Workers, Pages, Wrangler, and OpenAI Sites are not used.
+
+### Production metadata and shared-link previews
+
+- Canonical production origin: `https://editing-lab-new.vercel.app`
+- Share image: `https://editing-lab-new.vercel.app/nexadesk-social.png` (`1200 × 630`, PNG)
+- Standard pages use the NexaDesk product title, operations-focused description, and large social preview.
+- Customer portal links show the tenant name and **Secure customer portal** without exposing the customer's identity in link previews.
+- Staff portal links use the tenant's configured staff terminology, such as Technician, Stylist, or Team Member, without exposing the worker's identity.
+- Portal pages remain `noindex,nofollow`; secure token URLs are intended for direct sharing, not search-engine discovery.
+- `PUBLIC_APP_URL` must remain set to the production origin so WhatsApp links, canonical URLs, and preview images are absolute.
 
 ## Read this first
 
@@ -36,6 +46,43 @@ flowchart LR
 ```
 
 The signed-in session selects the tenant on the server. Browser forms and API requests cannot submit a database or tenant selector.
+
+## Capability and niche architecture
+
+Capabilities are registered once in `src/lib/capabilities.ts`. Access is resolved centrally:
+
+```text
+registered capability
+  ∩ owner allowance from the control database
+  ∩ client preference from the tenant database
+  ∩ satisfied dependencies
+  = effective capability
+```
+
+The owner allowance is authoritative: a client API request cannot grant itself a feature. Disabling a feature hides its routes and UI without deleting its settings or records. Re-enabling it restores the preserved data.
+
+The built-in packages are Editing Studio, Garage / Vehicle Service, Salon / Spa, Small Shop / Basic Orders, Contractor / Project Services, Hospitality / Pub Lite, and General Service Business. Each package is a versioned snapshot containing:
+
+- default allowed and enabled capabilities;
+- business terminology and canonical-status display labels;
+- default custom fields, categories, templates, and module settings;
+- India-first regional defaults.
+
+The owner Package Builder can create or version reusable packages, customize terminology and default fields, assign a snapshot to a tenant, and override individual tenant allowances. Updating a package does not change a live tenant until the owner applies the new version.
+
+Core security, customers, orders, database isolation, route names, and canonical workflow statuses remain stable. `/orders` stays the internal route even when the interface calls it Appointments, Job Cards, Jobs, or Service Orders.
+
+### Registered capabilities
+
+`work.tasks`, `work.staff`, `work.staffPortal`, `work.assignedAssets`, `workflow.delivery`, `billing.payments`, `billing.invoices`, `billing.partialInvoices`, `billing.duration`, `portal.customer`, `communications.whatsapp`, `integrations.googleSheets`, `reports.excelExport`, `customFields`, and `branding.whiteLabel`.
+
+Every new optional module must register its capability and dependencies, add its tenant migration and retention behavior, enforce its server routes, declare its UI/report/message surfaces, and add enabled/disabled and tenant-isolation tests.
+
+### Custom fields
+
+Customers, orders, tasks, and staff records store tenant-defined values in `custom_values JSONB`. Supported fields are text, long text, number, date, date/time, select, checkbox, and HTTPS URL. Visibility is independently controlled for admin screens, customer portals, staff portals, WhatsApp templates, Google Sheets, and Excel.
+
+Keys are stable identities. Deactivating or omitting a definition keeps it inactive and preserves historical values. WhatsApp placeholders use namespaced keys such as `{{customer.vehicle_number}}`, `{{order.appointment_at}}`, and `{{task.service_type}}`.
 
 ## Technology used
 
@@ -182,7 +229,7 @@ Standard tabs:
 - Activity Logs
 - Settings
 
-Important database writes create an outbox record. After the database succeeds, StudioFlow flushes a fresh workbook snapshot. If Google is temporarily unavailable, the outbox remains pending and can retry later.
+Important database writes create an outbox record. After the database succeeds, NexaDesk flushes a fresh workbook snapshot. If Google is temporarily unavailable, the outbox remains pending and can retry later.
 
 Do not manually create live operational records only in Sheets. The supported import is for historical orders, and editor reconciliation can archive database editors removed from the Editors Sheet.
 
@@ -204,7 +251,8 @@ scripts/
   audit-tenancy.mjs       Release check for tenant-safe server routes
 
 src/hooks.server.ts       Global authentication, roles, tenant gate, CSRF check
-src/lib/types.ts          Shared customer/editor/order/task/invoice types
+src/lib/types.ts          Shared records, capability, package and profile contracts
+src/lib/capabilities.ts   Typed registry, packages, resolution and validation
 src/lib/phone.ts          10-digit Indian phone normalization/validation
 src/lib/duration.ts       Duration parsing and duration-billing formula
 src/lib/identifiers.ts    Order/editor prefixes and readable numbers
@@ -212,6 +260,8 @@ src/lib/messageTemplates.ts Default editor/customer WhatsApp templates
 src/lib/theme.ts          Tenant-scoped palette selection
 
 src/lib/server/control.ts Master accounts, tenants, encryption, passwords, sessions
+src/lib/server/configuration.ts Owner allowances + tenant preference resolution
+src/lib/server/capabilityRoutes.ts Direct page/API capability requirements
 src/lib/server/db.ts      Neon adapter and tenant schema initialization
 src/lib/server/repository.ts All tenant business reads/writes and propagation
 src/lib/server/googleSheets.ts Sheet authentication, formatting, sync, import
@@ -404,7 +454,7 @@ Sign in at `/owner/login`. Once the master login works, remove `OWNER_BOOTSTRAP_
 6. Enter internal name, URL slug, studio name/logo, client login, Neon URL, Sheet ID, and Orders tab.
 7. Enable demo only for a fictional resettable workspace.
 8. Confirm password twice.
-9. StudioFlow validates duplicate connections, database compatibility, and Sheet access.
+9. NexaDesk validates duplicate connections, database compatibility, and Sheet access.
 10. Give the client only the normal `/login` URL and their client-admin credentials.
 
 Never give a client the owner login, service-account JSON, Neon URL, encryption key, or another client's Sheet.
@@ -453,6 +503,7 @@ When adding a field, update every layer in this order:
 ```sh
 npm run dev               # local live server
 npm run check             # TypeScript + Svelte diagnostics
+npm run test:capabilities # capability, dependency, package and route audit
 npm run test:tenancy      # tenant-boundary static audit
 npm run build             # production Vercel build
 npm run control:migrate   # initialize/update control schema
@@ -464,6 +515,7 @@ Release checklist:
 
 ```sh
 npm run check
+npm run test:capabilities
 npm run test:tenancy
 npm run build
 git diff --check

@@ -27,8 +27,12 @@
     CircleCheckBig,
   } from "@lucide/svelte";
   import type { Order } from "$lib/types";
+  import { labelFor, statusFor } from "$lib/capabilities";
+  import { flashAction } from "$lib/stores/actionFeedback";
 
   let { data } = $props();
+  const orderLabel = $derived(labelFor(data.configuration?.profile, "order"));
+  const customerLabel = $derived(labelFor(data.configuration?.profile, "customer"));
   const initialData = untrack(() => data);
   let showNew = $state(false);
   let orders = $state<Order[]>(initialData.orders);
@@ -47,25 +51,25 @@
   let deliveryOpen = $state(false);
   const queueTitle = $derived(
     archived
-      ? "Archived orders"
+      ? `Archived ${labelFor(data.configuration?.profile, "order", true).toLowerCase()}`
       : statusFilter === "Waiting Review"
-        ? "Review queue"
+        ? `${statusFor(data.configuration?.profile, "Waiting Review").label} queue`
         : statusFilter === "Ready Delivery"
-          ? "Ready for delivery"
+          ? statusFor(data.configuration?.profile, "Ready Delivery").label
           : statusFilter === "Delivered"
-            ? "Delivered orders"
-            : "Orders",
+            ? `${statusFor(data.configuration?.profile, "Delivered").label} ${labelFor(data.configuration?.profile, "order", true).toLowerCase()}`
+            : labelFor(data.configuration?.profile, "order", true),
   );
   const queueEyebrow = $derived(
     archived
       ? "Restore or permanently remove"
       : statusFilter === "Waiting Review"
-        ? "Review editor output and request changes"
+        ? "Review submitted work and manage revisions"
         : statusFilter === "Ready Delivery"
-          ? "Notify customer → collect balance → deliver"
+          ? "Customer notification, balance collection and delivery"
           : statusFilter === "Delivered"
-            ? "All completed customer deliveries"
-            : "Customer → editor → delivery",
+            ? "Completed customer deliveries and handover history"
+            : "Manage every stage from intake through delivery",
   );
 
   $effect(() => {
@@ -114,7 +118,6 @@
   function delivered(updated: Order) {
     orders = orders.filter((item) => item.id !== updated.id);
     deliveryOpen = false;
-    toast = "Delivery recorded with a permanent audit trail.";
   }
 
   async function changeArchive(
@@ -152,6 +155,7 @@
       toast = result.error || "Unable to update order";
       return;
     }
+    flashAction(action === "archive" ? "Order archived." : action === "restore" ? "Order restored." : "Order permanently deleted.");
     location.reload();
   }
 
@@ -177,12 +181,12 @@
 <PageHeader
   eyebrow={queueEyebrow}
   title={queueTitle}
-  action="New order"
+  action={`New ${orderLabel.toLowerCase()}`}
   onclick={() => (showNew = true)}
 />
 {#if !archived}<nav class="queue-tabs" aria-label="Order workflow queues">
     <a class:active={!statusFilter} href="/orders"
-      ><ClipboardList size={14} /><span>All orders</span><strong
+      ><ClipboardList size={14} /><span>All {labelFor(data.configuration?.profile, "order", true).toLowerCase()}</span><strong
         >{data.queueCounts.all}</strong
       ></a
     ><a
@@ -247,12 +251,12 @@
           bind:value={statusFilter}
           ><option value="">All statuses</option
           >{#each ["Historical", "Received", "Assigned", "Editing", "Waiting Review", "Revision", "Ready Delivery", "Delivered", "Stopped", "Completed"] as status}<option
-              >{status}</option
+              value={status}>{statusFor(data.configuration?.profile, status).label}</option
             >{/each}</select
         >
       </div>
       <div class="field">
-        <label for="event-filter">Event</label><select
+        <label for="event-filter">{labelFor(data.configuration?.profile, "category")}</label><select
           id="event-filter"
           name="event"
           bind:value={eventFilter}
@@ -272,7 +276,7 @@
   <table class="data-table order-table">
     <thead
       ><tr
-        ><th style="width:34px"></th><th>Customer studio</th><th>Order</th><th
+        ><th style="width:34px"></th><th>{customerLabel}</th><th>{orderLabel}</th><th
           >Event</th
         ><th>Due date</th><th>Status</th><th>Amount</th><th>Balance</th><th
         ></th></tr
@@ -337,8 +341,10 @@
                   >{#if order.priceSet !== false && Math.max(0, order.price - order.discount - order.paid) === 0}<button
                       class="deliver"
                       title="Confirm delivery"
+                      aria-label={`Confirm delivery for ${order.project}`}
+                      style="border-color:#16a34a;background:#dcfce7;color:#15803d;box-shadow:0 6px 16px #16a34a2e"
                       onclick={() => openDelivery(order)}
-                      ><CircleCheckBig size={14} /></button
+                      ><PackageCheck size={16} strokeWidth={2.5} /></button
                     >{/if}{/if}<button
                   class="archive"
                   disabled={busy === order.id}
@@ -556,6 +562,22 @@
   }
   .row-actions .delete {
     color: #ef4444;
+  }
+  .row-actions .deliver {
+    border-color: #16a34a;
+    background: #16a34a;
+    color: #fff;
+    box-shadow: 0 6px 16px #16a34a2e;
+  }
+  .row-actions .deliver :global(svg) {
+    display: block;
+    stroke: currentColor;
+    opacity: 1;
+  }
+  .row-actions .deliver:hover {
+    border-color: #15803d;
+    background: #15803d;
+    color: #fff;
   }
   .row-actions button:hover {
     border-color: currentColor;

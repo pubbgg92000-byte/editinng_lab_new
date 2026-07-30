@@ -1,6 +1,6 @@
-# StudioFlow Vercel Setup
+# NexaDesk Vercel Setup
 
-StudioFlow has one supported hosting target: **Vercel**.
+NexaDesk has one supported hosting target: **Vercel**.
 
 - Production URL: <https://editing-lab-new.vercel.app>
 - Active build configuration: `vite.config.ts`
@@ -31,6 +31,9 @@ Copy the names from `.env.example` into Vercel. Never commit their real values.
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Google Sheets service-account email |
 | `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` | Google service-account private key, including line breaks |
 | `PUBLIC_APP_URL` | `https://editing-lab-new.vercel.app` or the final custom domain |
+
+`PUBLIC_APP_URL` is also used for canonical metadata, WhatsApp portal links, and the
+`/nexadesk-social.png` shared-link preview. Keep it aligned with the active production domain.
 | `DATABASE_STORAGE_LIMIT_MB` | Optional warning threshold; default is `500` |
 
 The legacy `DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `GOOGLE_SHEETS_ID`, and `GOOGLE_SHEETS_ORDERS_TAB` variables are only needed for the one-time Anjana migration described in `README.md`. Remove them after that migration is verified.

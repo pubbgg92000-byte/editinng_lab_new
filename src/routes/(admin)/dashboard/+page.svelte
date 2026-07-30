@@ -6,6 +6,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import NewOrderModal from '$lib/components/NewOrderModal.svelte';
 	import { formatDate } from '$lib/data';
+	import { hasCapability, labelFor } from '$lib/capabilities';
 	import type { Order } from '$lib/types';
 	let { data } = $props();
 	const initialData = untrack(() => data);
@@ -15,6 +16,10 @@
 	const dateLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: '2-digit', month: 'long', timeZone: 'Asia/Kolkata' }).format(currentDate);
 	const hour = Number(new Intl.DateTimeFormat('en-IN', { hour: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).format(currentDate).slice(0, 2));
 	const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+	const orderLabel = $derived(labelFor(data.configuration?.profile, 'order'));
+	const orderPlural = $derived(labelFor(data.configuration?.profile, 'order', true));
+	const workerLabel = $derived(labelFor(data.configuration?.profile, 'staff'));
+	const staffEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, 'work.staff'));
 	const activeOrders = $derived(liveOrders.filter((order) => !['Historical', 'Completed'].includes(order.status)).sort((left, right) => Number(Boolean(right.important)) - Number(Boolean(left.important))));
 
 	let showNewOrder = $state(false);
@@ -26,38 +31,44 @@
 	function saved(order: Order, synced: boolean) {
 		liveOrders = [order, ...liveOrders].slice(0, 20);
 		stats = { ...stats, active: stats.active + 1 };
-		toast = synced ? 'Order created and synced to Sheets' : 'Order created; Sheet sync is pending or not configured';
+		toast = synced ? `${orderLabel} created and synced to Sheets` : `${orderLabel} created; Sheet sync is pending or not configured`;
 		setTimeout(() => (toast = ''), 2600);
 	}
 </script>
 
-<PageHeader eyebrow={dateLabel} title={`${greeting} 👋`} action="New order" onclick={() => (showNewOrder = true)} />
+<PageHeader eyebrow={`${greeting} · ${dateLabel}`} title="Operations overview" action={`New ${orderLabel.toLowerCase()}`} onclick={() => (showNewOrder = true)} />
 
 <section class="stat-grid">
-	<a href="/orders" class="card stat-card active-stat"><div class="stat-top"><span class="stat-icon"><ClipboardList size={19}/></span><small><i></i>Production</small></div><div class="stat-row"><strong>{stats.active}</strong><div><span>Active orders</span><p>Currently moving through production</p></div></div><div class="stat-footer"><span>Open all orders</span><ArrowUpRight size={14}/></div></a>
+	<a href="/orders" class="card stat-card active-stat"><div class="stat-top"><span class="stat-icon"><ClipboardList size={19}/></span><small><i></i>Workflow</small></div><div class="stat-row"><strong>{stats.active}</strong><div><span>Active {orderPlural.toLowerCase()}</span><p>Currently moving through the workflow</p></div></div><div class="stat-footer"><span>Open all {orderPlural.toLowerCase()}</span><ArrowUpRight size={14}/></div></a>
 	<a href="/orders?status=Waiting%20Review" class="card stat-card review-stat"><div class="stat-top"><span class="stat-icon"><Clock3 size={19}/></span><small><i></i>Approval</small></div><div class="stat-row"><strong>{stats.waitingReview}</strong><div><span>Waiting review</span><p>Submitted and awaiting approval</p></div></div><div class="stat-footer"><span>Review submitted work</span><ArrowUpRight size={14}/></div></a>
 	<a href="/orders?status=Ready%20Delivery" class="card stat-card ready-stat"><div class="stat-top"><span class="stat-icon"><PackageCheck size={19}/></span><small><i></i>Delivery</small></div><div class="stat-row"><strong>{stats.readyDelivery}</strong><div><span>Ready to deliver</span><p>Notify customer and collect balance</p></div></div><div class="stat-footer"><span>Open delivery queue</span><ArrowUpRight size={14}/></div></a>
 	<a href="/orders?status=Delivered" class="card stat-card delivered-stat"><div class="stat-top"><span class="stat-icon"><CircleCheckBig size={19}/></span><small><i></i>Completed</small></div><div class="stat-row"><strong>{stats.delivered}</strong><div><span>Delivered</span><p>Completed customer handovers</p></div></div><div class="stat-footer"><span>View delivery history</span><ArrowUpRight size={14}/></div></a>
 </section>
 
 	<section class="card active-orders">
-	<div class="card-header"><h2>Active orders</h2><a href="/orders">View all <ArrowUpRight size={12}/></a></div>
+	<div class="card-header"><h2>Active {orderPlural.toLowerCase()}</h2><a href="/orders">View all <ArrowUpRight size={12}/></a></div>
 	<div class="order-list">
 		{#each activeOrders as order}
 		<a class="order-row" href={'/orders/' + order.id}>
 			<span class="order-mark" style:background={order.color}></span>
-			<div class="order-main"><strong>{#if order.important}<Star class="important-star" size={13} fill="currentColor" aria-label="Important order"/>{/if}{order.project}</strong><small>{order.customer} · {order.workType}</small><small class:unassigned={assignedEditors(order) === 'Not assigned'} class="editor-summary"><UserRound size={11}/> <span>Editor: {assignedEditors(order)}</span></small></div>
+			<div class="order-main"><strong>{#if order.important}<Star class="important-star" size={13} fill="currentColor" aria-label={`Important ${orderLabel.toLowerCase()}`}/>{/if}{order.project}</strong><small>{order.customer} · {order.workType}</small>{#if staffEnabled}<small class:unassigned={assignedEditors(order) === 'Not assigned'} class="editor-summary"><UserRound size={11}/> <span>{workerLabel}: {assignedEditors(order)}</span></small>{/if}</div>
 			<StatusBadge status={order.status}/>
 			<div class="order-progress"><div class="progress-label"><span>Progress</span><b>{order.progress}%</b></div><div class="progress"><span style:width={order.progress + '%'}></span></div></div>
 			<span class="due">{order.due ? `Due ${formatDate(order.due)}` : 'No due date'}</span>
 			<ArrowUpRight size={15}/>
 		</a>
-	{/each}
+		{:else}
+			<div class="empty-orders">
+				<span><ClipboardList size={22}/></span>
+				<div><strong>No active {orderPlural.toLowerCase()}</strong><p>Create your first {orderLabel.toLowerCase()} to start tracking the workflow.</p></div>
+				<button type="button" class="secondary" onclick={() => (showNewOrder = true)}>Create {orderLabel.toLowerCase()}</button>
+			</div>
+		{/each}
 	</div>
 </section>
 
 <NewOrderModal bind:open={showNewOrder} onsaved={saved}/>
-{#if toast}<div class="toast"><Check size={15}/> {toast}</div>{/if}
+{#if toast}<div class="toast" role="status" aria-live="polite"><Check size={15}/> {toast}</div>{/if}
 
 <style>
 	.card-header a { display: flex; gap: 5px; align-items: center; }
@@ -77,10 +88,11 @@
 	.editor-summary{display:flex!important;align-items:center;gap:5px;color:var(--purple)!important}.editor-summary.unassigned{color:var(--muted)!important}.editor-summary :global(svg){flex:0 0 auto}
 	.order-progress b { font-weight: 600; color: var(--theme-text); }
 	.order-row > :global(svg) { color: var(--muted); }
+	.empty-orders{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;padding:28px 20px}.empty-orders>span{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:var(--theme-soft);color:var(--purple)}.empty-orders strong{font-size:12px}.empty-orders p{margin:5px 0 0;color:var(--muted);font-size:10px}.empty-orders button{white-space:nowrap}
 	.toast { position: fixed; right: 24px; bottom: 24px; z-index: 100; display: flex; align-items: center; gap: 9px; border: 1px solid #22c55e40; background: #17231d; color: #8ee3ad; padding: 12px 15px; border-radius: 9px; font-size: 11px; box-shadow: 0 15px 50px #0008; }
 	@media (max-width: 1080px) { .stat-grid{grid-template-columns:repeat(2,1fr)}.order-row { grid-template-columns: 4px minmax(150px, 1fr) 110px 120px 18px; } .due { display: none; } }
 	@media (max-width: 820px) { .stat-grid{grid-template-columns:repeat(2,1fr)}.stat-card{min-height:150px;padding:15px 16px}.stat-row{margin-top:13px} }
-	@media (max-width: 650px) { .stat-grid{gap:10px}.stat-card{min-height:122px;padding:13px}.stat-top small{font-size:7px}.stat-icon{width:32px;height:32px}.stat-row{gap:8px;margin-top:11px}.stat-row strong{font-size:25px}.stat-row span{font-size:10px}.stat-row p,.stat-footer{display:none}.order-row { grid-template-columns: 4px minmax(0,1fr) auto 16px; gap:10px;padding: 15px; } .order-progress { display: none; } .order-row :global(.badge){display:inline-flex;font-size:8px}.editor-summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap} }
+	@media (max-width: 650px) { .stat-grid{gap:10px}.stat-card{min-height:122px;padding:13px}.stat-top small{font-size:7px}.stat-icon{width:32px;height:32px}.stat-row{gap:8px;margin-top:11px}.stat-row strong{font-size:25px}.stat-row span{font-size:10px}.stat-row p,.stat-footer{display:none}.order-row { grid-template-columns: 4px minmax(0,1fr) auto 16px; gap:10px;padding: 15px; } .order-progress { display: none; } .order-row :global(.badge){display:inline-flex;font-size:8px}.editor-summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.empty-orders{grid-template-columns:auto 1fr;padding:22px 15px}.empty-orders button{grid-column:1/-1;width:100%} }
 	@media (max-width: 470px) { .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.active-stat{grid-column:auto}.stat-card{min-height:118px}.stat-row{align-items:flex-end;flex-direction:column;gap:4px}.stat-row strong{align-self:flex-start}.stat-row>div{width:100%} }
 	:global(html[data-theme="dark"]) .stat-card{background:linear-gradient(145deg,color-mix(in srgb,var(--stat-color) 17%,var(--card)),var(--card) 58%,color-mix(in srgb,var(--stat-color) 7%,var(--card)))!important;border-color:color-mix(in srgb,var(--stat-color) 42%,var(--line))!important;box-shadow:0 16px 38px color-mix(in srgb,var(--stat-color) 11%,#000),inset 0 1px color-mix(in srgb,var(--stat-color) 14%,transparent)!important}
 	:global(html[data-theme="dark"]) .stat-icon{background:color-mix(in srgb,var(--stat-color) 23%,var(--card));border:1px solid color-mix(in srgb,var(--stat-color) 38%,transparent);box-shadow:0 8px 22px color-mix(in srgb,var(--stat-color) 14%,transparent)}

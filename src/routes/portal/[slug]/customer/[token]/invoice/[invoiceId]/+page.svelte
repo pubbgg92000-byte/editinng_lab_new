@@ -32,7 +32,7 @@
   /></svelte:head
 >
 <div class="no-print">
-  <PortalHeader label="Private invoice" settings={data.settings} />
+  <PortalHeader label="Private invoice" settings={data.settings} themeScope={data.tenantSlug} />
 </div>
 <main>
   <div class="invoice-toolbar no-print">
@@ -70,7 +70,7 @@
     </div>
     <div class="bill-grid">
       <div>
-        <small>Customer studio</small><strong
+        <small>Customer</small><strong
           >{data.customer.business || data.order.customer}</strong
         >{#if data.customer.name}<p>
             Contact: {data.customer.name}

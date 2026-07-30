@@ -25,7 +25,7 @@ export async function resetDemoTenant(tenant: Tenant) {
 	}));
 
 	await database.batch([
-		database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'studioName'").bind(tenant.studioName || 'StudioFlow Demo Studio', now),
+		database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'studioName'").bind(tenant.studioName || 'NexaDesk Demo Workspace', now),
 		database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'logoUrl'").bind(tenant.logoUrl || '', now),
 		database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'phone'").bind('+91 00000 00000', now),
 		database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'email'").bind('hello@demo.invalid', now),

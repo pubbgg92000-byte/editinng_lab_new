@@ -6,6 +6,8 @@ import { archiveTask, restoreTask, updateTask } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
 import { taskLinkError } from '$lib/server/validation';
 import { parseVideoDurationMinutes } from '$lib/duration';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { hasCapability, validateCustomValues } from '$lib/capabilities';
 
 export const PATCH = async ({ params, request, cookies, locals }) => {
 	const input = await request.json();
@@ -18,6 +20,21 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 	}
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
+	const configuration = await getTenantConfiguration(database, locals.tenant!);
+	if (!hasCapability(configuration.effectiveCapabilities, 'work.staff')) delete input.editorId;
+	if (!hasCapability(configuration.effectiveCapabilities, 'work.assignedAssets')) delete input.device;
+	if (!hasCapability(configuration.effectiveCapabilities, 'billing.duration')) {
+		delete input.billingMode;
+		delete input.hourlyRate;
+		delete input.videoDurationMinutes;
+		delete input.videoDuration;
+	}
+	try {
+		if (input.customFields !== undefined) {
+			if (hasCapability(configuration.effectiveCapabilities, 'customFields')) input.customFields = validateCustomValues(configuration.profile, 'task', input.customFields);
+			else delete input.customFields;
+		}
+	} catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Custom fields are invalid.' }, { status: 400 }); }
 	if (input.billableAmount !== undefined && (!Number.isFinite(Number(input.billableAmount)) || Number(input.billableAmount) < 0)) return json({ error: 'Task value must be zero or a positive number.' }, { status: 400 });
 	if (input.hourlyRate !== undefined && (!Number.isFinite(Number(input.hourlyRate)) || Number(input.hourlyRate) < 0)) return json({ error: 'Hourly rate must be zero or a positive number.' }, { status: 400 });
 	if (input.billingMode && !['manual', 'duration'].includes(input.billingMode)) return json({ error: 'Choose manual billing or duration billing.' }, { status: 400 });

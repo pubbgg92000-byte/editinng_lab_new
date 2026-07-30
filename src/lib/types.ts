@@ -7,6 +7,213 @@ export type EditorAvailability = 'available' | 'busy' | 'inactive';
 export type ThemeMode = 'light' | 'dark';
 export type ThemePalette = 'graphite-aqua' | 'ice-cyan' | 'forest-gold' | 'lime-cream' | 'meadow-amber' | 'coral-teal' | 'sky-sorbet' | 'nordic-stone' | 'midnight-violet' | 'obsidian-blue' | 'heritage-sage' | 'merlot-copper' | 'citrus-evergreen' | 'graphite-coral';
 export type StorageWarningLevel = 'healthy' | 'notice' | 'warning' | 'critical';
+export type CapabilityKey =
+	| 'work.tasks'
+	| 'work.staff'
+	| 'work.staffPortal'
+	| 'work.assignedAssets'
+	| 'workflow.delivery'
+	| 'billing.payments'
+	| 'billing.invoices'
+	| 'billing.partialInvoices'
+	| 'billing.duration'
+	| 'portal.customer'
+	| 'communications.whatsapp'
+	| 'integrations.googleSheets'
+	| 'reports.excelExport'
+	| 'customFields'
+	| 'branding.whiteLabel';
+export type CapabilityValue = boolean | number | string | string[] | Record<string, unknown>;
+export type CapabilityValueType = 'boolean' | 'number' | 'enum' | 'list' | 'object';
+export type CustomFieldEntity = 'customer' | 'order' | 'task' | 'staff';
+export type CustomFieldType = 'text' | 'textarea' | 'number' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url';
+export type CustomFieldValue = string | number | boolean | null;
+export type PortalProgressMode = 'milestones' | 'percentage' | 'both';
+export type CustomerPortalMode = 'status-only' | 'status-billing' | 'full';
+export type StaffPortalMode = 'assignments-only' | 'progress-updates' | 'full';
+export type DeliveryExperience = 'digital' | 'pickup' | 'appointment' | 'fulfilment' | 'handover' | 'completion';
+export type MessageAudience = 'customer' | 'staff';
+export type MessageContext = 'customer' | 'order' | 'assignment' | 'invoice' | 'payment';
+export type MessageScenario =
+	| 'work-assignment'
+	| 'order-received'
+	| 'appointment-reminder'
+	| 'status-update'
+	| 'clarification-request'
+	| 'ready'
+	| 'invoice'
+	| 'partial-invoice'
+	| 'payment-received'
+	| 'completion-follow-up';
+
+export interface PortalMilestone {
+	id: string;
+	label: string;
+	statuses: string[];
+}
+
+export interface CustomerPortalConfiguration {
+	mode: CustomerPortalMode;
+	progressMode: PortalProgressMode;
+	deliveryExperience: DeliveryExperience;
+	sections: {
+		summary: boolean;
+		progress: boolean;
+		tasks: boolean;
+		billing: boolean;
+		payments: boolean;
+		delivery: boolean;
+		documents: boolean;
+		customFields: boolean;
+	};
+	milestones: PortalMilestone[];
+}
+
+export interface StaffPortalConfiguration {
+	mode: StaffPortalMode;
+	progressMode: PortalProgressMode;
+	sections: {
+		instructions: boolean;
+		references: boolean;
+		assets: boolean;
+		customFields: boolean;
+		progress: boolean;
+		output: boolean;
+		notes: boolean;
+		duration: boolean;
+	};
+	allowStatusUpdate: boolean;
+	allowProgressUpdate: boolean;
+	milestones: PortalMilestone[];
+}
+
+export interface WhatsAppTemplate {
+	id: string;
+	name: string;
+	audience: MessageAudience;
+	scenario: MessageScenario;
+	context: MessageContext;
+	enabled: boolean;
+	body: string;
+	source: 'package' | 'custom' | 'legacy';
+}
+
+export interface WhatsAppConfiguration {
+	defaultTemplateIds: Partial<Record<MessageScenario, string>>;
+	templates: Record<string, WhatsAppTemplate>;
+	deletedTemplateIds: string[];
+}
+
+export interface WorkspaceModuleConfiguration {
+	schemaVersion: 1;
+	'portal.customer': CustomerPortalConfiguration;
+	'work.staffPortal': StaffPortalConfiguration;
+	'communications.whatsapp': WhatsAppConfiguration;
+}
+
+export type WorkspaceModuleOverrides = Partial<{
+	schemaVersion: 1;
+	'portal.customer': Partial<CustomerPortalConfiguration>;
+	'work.staffPortal': Partial<StaffPortalConfiguration>;
+	'communications.whatsapp': Partial<WhatsAppConfiguration>;
+}>;
+
+export interface CapabilityDefinition {
+	key: CapabilityKey;
+	label: string;
+	description: string;
+	type: CapabilityValueType;
+	defaultValue: CapabilityValue;
+	version: number;
+	dependencies: CapabilityKey[];
+	conflicts: CapabilityKey[];
+	surfaces: string[];
+}
+
+export type TenantEntitlements = Partial<Record<CapabilityKey, CapabilityValue>>;
+export type TenantPreferences = Partial<Record<CapabilityKey, CapabilityValue>>;
+export type EffectiveCapabilities = Record<CapabilityKey, CapabilityValue>;
+
+export interface TerminologyEntry {
+	singular: string;
+	plural: string;
+}
+
+export interface BusinessTerminology {
+	customer: TerminologyEntry;
+	order: TerminologyEntry;
+	staff: TerminologyEntry;
+	task: TerminologyEntry;
+	category: TerminologyEntry;
+	project: TerminologyEntry;
+	dueDate: TerminologyEntry;
+	delivery: TerminologyEntry;
+	assignedAsset: TerminologyEntry;
+}
+
+export interface StatusPresentation {
+	label: string;
+	tone: 'green' | 'purple' | 'blue' | 'amber' | 'red' | 'gray';
+	visible: boolean;
+}
+
+export interface CustomFieldDefinition {
+	key: string;
+	entity: CustomFieldEntity;
+	label: string;
+	type: CustomFieldType;
+	required: boolean;
+	active: boolean;
+	order: number;
+	options?: string[];
+	visibility: {
+		admin: boolean;
+		customerPortal: boolean;
+		staffPortal: boolean;
+		whatsapp: boolean;
+		sheets: boolean;
+		export: boolean;
+	};
+}
+
+export interface BusinessProfile {
+	schemaVersion: number;
+	presetId: string;
+	presetVersion: number;
+	terminology: BusinessTerminology;
+	statuses: Record<string, StatusPresentation>;
+	customFields: CustomFieldDefinition[];
+	optionLists: Record<string, string[]>;
+	region: {
+		currency: 'INR';
+		locale: 'en-IN';
+		timeZone: 'Asia/Kolkata';
+		phoneCountry: 'IN';
+		taxLabel: 'GSTIN';
+	};
+}
+
+export interface NichePackage {
+	id: string;
+	name: string;
+	version: number;
+	description: string;
+	allowed: TenantEntitlements;
+	enabled: TenantPreferences;
+	profile: BusinessProfile;
+	settingsDefaults: Partial<StudioSettings>;
+	moduleConfiguration: Partial<WorkspaceModuleConfiguration>;
+}
+
+export interface TenantConfiguration {
+	profile: BusinessProfile;
+	allowedCapabilities: TenantEntitlements;
+	preferences: TenantPreferences;
+	effectiveCapabilities: EffectiveCapabilities;
+	packageModuleConfiguration: WorkspaceModuleConfiguration;
+	moduleOverrides: WorkspaceModuleOverrides;
+	moduleConfiguration: WorkspaceModuleConfiguration;
+}
 
 export interface DatabaseStorageUsage {
 	bytes: number;
@@ -34,6 +241,7 @@ export interface Customer {
 	pending: number;
 	token?: string;
 	archived?: boolean;
+	customFields?: Record<string, CustomFieldValue>;
 }
 
 export interface Editor {
@@ -49,6 +257,7 @@ export interface Editor {
 	availability?: EditorAvailability;
 	token?: string;
 	archived?: boolean;
+	customFields?: Record<string, CustomFieldValue>;
 }
 
 export interface Task {
@@ -75,6 +284,7 @@ export interface Task {
 	device?: string;
 	editorSettlement?: EditorSettlement;
 	archived?: boolean;
+	customFields?: Record<string, CustomFieldValue>;
 }
 
 export interface InvoiceTaskItem {
@@ -159,6 +369,7 @@ export interface Order {
 	customerNotifiedAt?: string;
 	createdAt?: string;
 	updatedAt?: string;
+	customFields?: Record<string, CustomFieldValue>;
 }
 
 export interface StudioSettings {

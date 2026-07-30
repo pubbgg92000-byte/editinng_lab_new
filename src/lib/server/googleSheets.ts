@@ -1,6 +1,8 @@
 import { env } from '$env/dynamic/private';
-import { archiveEditor, createCustomer, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResult, pendingSyncItems } from './repository';
-import type { Tenant } from '$lib/types';
+import { archiveEditor, createCustomer, getBusinessProfile, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResult, pendingSyncItems } from './repository';
+import type { BusinessProfile, CustomFieldEntity, EffectiveCapabilities, Tenant } from '$lib/types';
+import { getTenantConfiguration } from './configuration';
+import { hasCapability } from '$lib/capabilities';
 import { editorCode, orderCode } from '$lib/identifiers';
 
 /**
@@ -54,13 +56,21 @@ async function googleFetch(tenant: Pick<Tenant, 'googleSheetId'>, path: string, 
 }
 
 const tabNames = ['Orders', 'Customers', 'Editors', 'Tasks', 'Payments', 'Invoices', 'Activity Logs', 'Settings'];
+export const workbookTabsFor = (capabilities?: EffectiveCapabilities) => tabNames.filter((name) => {
+	if (!capabilities) return true;
+	if (name === 'Editors') return hasCapability(capabilities, 'work.staff');
+	if (name === 'Tasks') return hasCapability(capabilities, 'work.tasks');
+	if (name === 'Payments') return hasCapability(capabilities, 'billing.payments');
+	if (name === 'Invoices') return hasCapability(capabilities, 'billing.invoices');
+	return true;
+});
 
-export async function ensureWorkbookTabs(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+export async function ensureWorkbookTabs(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>, enabledTabs = tabNames) {
 	// Create the standard tabs once when a new client workbook is connected.
 	if (!configured(tenant)) return false;
 	const metadata = await (await googleFetch(tenant, '?fields=sheets.properties.title')).json() as { sheets?: { properties: { title: string } }[] };
 	const existing = new Set((metadata.sheets || []).map((sheet) => sheet.properties.title));
-	const required = [ordersTab(tenant), ...tabNames.filter((name) => name !== 'Orders')];
+	const required = [ordersTab(tenant), ...enabledTabs.filter((name) => name !== 'Orders')];
 	const missing = required.filter((name) => !existing.has(name));
 	if (missing.length) await googleFetch(tenant, ':batchUpdate', { method: 'POST', body: JSON.stringify({ requests: missing.map((title) => ({ addSheet: { properties: { title } } })) }) });
 	return true;
@@ -92,6 +102,29 @@ const definitions: Record<string, { headers: string[]; values: (payload: any) =>
 	Settings: { headers: ['Key', 'Value', 'Record ID'], values: (settings) => ['studio', JSON.stringify(settings), 'studio'] }
 };
 
+const sheetEntity: Record<string, CustomFieldEntity | undefined> = { Orders: 'order', Customers: 'customer', Editors: 'staff', Tasks: 'task' };
+const definitionFor = (sheet: string, profile: BusinessProfile) => {
+	const base = definitions[sheet];
+	const terminology = profile.terminology;
+	const replacements: [RegExp, string][] = [
+		[/Order/g, terminology.order.singular],
+		[/Studio Name/g, terminology.customer.singular],
+		[/Customer/g, terminology.customer.singular],
+		[/Editor/g, terminology.staff.singular],
+		[/Task/g, terminology.task.singular],
+		[/Event/g, terminology.category.singular],
+		[/Project/g, terminology.project.singular],
+		[/Delivery Date/g, terminology.dueDate.singular]
+	];
+	const headers = base.headers.map((header) => replacements.reduce((value, [pattern, replacement]) => value.replace(pattern, replacement), header));
+	const entity = sheetEntity[sheet];
+	const custom = entity ? profile.customFields.filter((field) => field.active && field.entity === entity && field.visibility.sheets) : [];
+	return {
+		headers: [...headers, ...custom.map((field) => field.label)],
+		values: (payload: any) => [...base.values(payload), ...custom.map((field) => payload.customFields?.[field.key] ?? '')]
+	};
+};
+
 const columnName = (count: number) => {
 	let value = count;
 	let name = '';
@@ -103,7 +136,7 @@ const columnName = (count: number) => {
 	return name;
 };
 
-async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>, snapshots: Record<string, any[]>) {
+async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>, snapshots: Record<string, any[]>, profile: BusinessProfile) {
 	const metadata = await (await googleFetch(tenant, '?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))')).json() as { sheets?: { properties: { sheetId: number; title: string; gridProperties?: { rowCount?: number; columnCount?: number } } }[] };
 	const byTitle = new Map((metadata.sheets || []).map((sheet) => [sheet.properties.title, sheet.properties]));
 	const wideColumns: Record<string, number[]> = {
@@ -116,7 +149,8 @@ async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'
 		Settings: [1]
 	};
 	const requests: Record<string, unknown>[] = [];
-	for (const [sheet, definition] of Object.entries(definitions)) {
+	for (const sheet of Object.keys(definitions)) {
+		const definition = definitionFor(sheet, profile);
 		const title = sheet === 'Orders' ? ordersTab(tenant) : sheet;
 		const properties = byTitle.get(title);
 		if (!properties) continue;
@@ -165,30 +199,47 @@ async function formatWorkbook(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'
 	});
 }
 
-async function writeWorkbookSnapshot(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
+async function writeWorkbookSnapshot(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>, capabilities?: EffectiveCapabilities) {
 	// Full snapshots avoid duplicate rows and row-order drift after retrying failures.
-	const [orders, customers, editors, invoices, activityLogs, settings] = await Promise.all([
+	const [orders, customers, editors, invoices, activityLogs, settings, profile] = await Promise.all([
 		listOrders(database, true, true),
 		listCustomers(database, true),
 		listEditors(database, true),
 		listInvoices(database),
 		listActivity(database),
-		getSettings(database)
+		getSettings(database),
+		getBusinessProfile(database)
 	]);
 	const snapshots: Record<string, any[]> = {
-		Orders: [...orders].sort((left, right) => Number(left.serial || 0) - Number(right.serial || 0)).map((order) => ({ ...order, displayCode: orderCode(settings, order.serial) })),
+		Orders: [...orders].sort((left, right) => Number(left.serial || 0) - Number(right.serial || 0)).map((order) => ({
+			...order,
+			displayCode: orderCode(settings, order.serial),
+			tasks: !capabilities || hasCapability(capabilities, 'work.tasks') ? order.tasks : [],
+			paid: !capabilities || hasCapability(capabilities, 'billing.payments') ? order.paid : 0,
+			advanceSet: !capabilities || hasCapability(capabilities, 'billing.payments') ? order.advanceSet : false,
+			payments: !capabilities || hasCapability(capabilities, 'billing.payments') ? order.payments : []
+		})),
 		Customers: customers,
-		Editors: editors.map((editor) => ({ ...editor, code: editorCode(settings, editor.code) })),
-		Tasks: orders.flatMap((order) => order.tasks).map((task) => ({ ...task, editorCode: editorCode(settings, task.editorCode) })),
-		Payments: orders.flatMap((order) => order.payments || []),
-		Invoices: invoices,
 		'Activity Logs': activityLogs,
 		Settings: [settings]
 	};
+	if (!capabilities || hasCapability(capabilities, 'work.staff')) snapshots.Editors = editors.map((editor) => ({ ...editor, code: editorCode(settings, editor.code) }));
+	if (!capabilities || hasCapability(capabilities, 'work.tasks')) snapshots.Tasks = orders.flatMap((order) => order.tasks).map((task) => ({
+		...task,
+		editorCode: !capabilities || hasCapability(capabilities, 'work.staff') ? editorCode(settings, task.editorCode) : '',
+		assignee: !capabilities || hasCapability(capabilities, 'work.staff') ? task.assignee : 'Unassigned',
+		device: !capabilities || hasCapability(capabilities, 'work.assignedAssets') ? task.device : '',
+		billingMode: !capabilities || hasCapability(capabilities, 'billing.duration') ? task.billingMode : 'manual',
+		hourlyRate: !capabilities || hasCapability(capabilities, 'billing.duration') ? task.hourlyRate : 0,
+		videoDurationMinutes: !capabilities || hasCapability(capabilities, 'billing.duration') ? task.videoDurationMinutes : 0
+	}));
+	if (!capabilities || hasCapability(capabilities, 'billing.payments')) snapshots.Payments = orders.flatMap((order) => order.payments || []);
+	if (!capabilities || hasCapability(capabilities, 'billing.invoices')) snapshots.Invoices = invoices;
+	const reportProfile = capabilities && !hasCapability(capabilities, 'customFields') ? { ...profile, customFields: [] } : profile;
 	const data: { range: string; majorDimension: 'ROWS'; values: unknown[][] }[] = [];
 	const clearRanges: string[] = [];
 	for (const [sheet, records] of Object.entries(snapshots)) {
-		const definition = definitions[sheet];
+		const definition = definitionFor(sheet, reportProfile);
 		const targetSheet = sheet === 'Orders' ? ordersTab(tenant) : sheet;
 		data.push({ range: sheetRange(targetSheet, 'A1'), majorDimension: 'ROWS', values: [definition.headers, ...records.map(definition.values)] });
 		clearRanges.push(sheetRange(targetSheet, `A${records.length + 2}:ZZ`));
@@ -200,23 +251,29 @@ async function writeWorkbookSnapshot(database: AppDatabase, tenant: Pick<Tenant,
 		body: JSON.stringify({ valueInputOption: 'RAW', data })
 	});
 	await googleFetch(tenant, '/values:batchClear', { method: 'POST', body: JSON.stringify({ ranges: clearRanges }) });
-	await formatWorkbook(tenant, snapshots);
+	await formatWorkbook(tenant, snapshots, reportProfile);
 	return orders.length;
 }
 
 export async function flushSheetSync(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
 	// If Google is unavailable, outbox rows remain pending for the next retry.
+	let capabilities: EffectiveCapabilities | undefined;
+	if ('id' in tenant) {
+		const configuration = await getTenantConfiguration(database, tenant as Tenant);
+		if (!hasCapability(configuration.effectiveCapabilities, 'integrations.googleSheets')) return { configured: false, processed: 0, failed: 0, disabled: true };
+		capabilities = configuration.effectiveCapabilities;
+	}
 	if (!configured(tenant)) return { configured: false, processed: 0, failed: 0 };
 	const items = await pendingSyncItems(database);
 	try {
-		await ensureWorkbookTabs(tenant);
+		await ensureWorkbookTabs(tenant, workbookTabsFor(capabilities));
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : 'Google Sheets setup failed';
 		for (const item of items) await markSyncResult(database, item.id, message);
 		return { configured: true, processed: 0, failed: items.length, error: message };
 	}
 	try {
-		const orderCount = await writeWorkbookSnapshot(database, tenant);
+		const orderCount = await writeWorkbookSnapshot(database, tenant, capabilities);
 		for (const item of items) await markSyncResult(database, item.id);
 		return { configured: true, processed: items.length, failed: 0, orders: orderCount };
 	} catch (cause) {
@@ -229,7 +286,7 @@ export async function flushSheetSync(database: AppDatabase, tenant: Pick<Tenant,
 export async function importHistoricalOrders(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {
 	// Import is limited to old/historical orders; live operations stay Neon-first.
 	if (!configured(tenant)) throw new Error('Google Sheets service account is not configured.');
-	await ensureWorkbookTabs(tenant);
+	await ensureWorkbookTabs(tenant, ['Orders']);
 	const sheet = ordersTab(tenant);
 	const values = await readSheetValues(tenant, sheet) || [];
 	if (values.length < 2) return { imported: 0, skipped: 0 };

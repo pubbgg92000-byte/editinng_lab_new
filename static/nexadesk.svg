@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NexaDesk">
+  <defs>
+    <linearGradient id="nexa" x1="8" y1="8" x2="56" y2="56">
+      <stop stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#nexa)"/>
+  <path d="M17 47V17h7l16 19V17h7v30h-7L24 28v19h-7Z" fill="#fff"/>
+</svg>

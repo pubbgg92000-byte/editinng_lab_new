@@ -1,21 +1,22 @@
 <!-- Full-column mobile/desktop view of the tenant's Sheets and database records. -->
 <script lang="ts">
 	import { ArrowLeft, ArrowUpRight, RefreshCw, Sheet, CircleAlert, ExternalLink } from '@lucide/svelte';
+	import { labelFor } from '$lib/capabilities';
 	let { data } = $props();
 	let active = $state('Customers');
 	const selected = $derived(data.sheets.find((sheet) => sheet.name === active) ?? data.sheets[0]);
 	const isPhoneColumn = (column: string) => /phone|mobile|whatsapp/i.test(column);
 </script>
 
-<svelte:head><title>Sheets data — StudioFlow</title></svelte:head>
+<svelte:head><title>Sheets data — NexaDesk</title></svelte:head>
 
 <div class="sheet-heading">
-	<div class="heading-copy"><a href="/settings"><ArrowLeft size={14}/> Back to settings</a><span class="eyebrow"><Sheet size={13}/> Data workspace</span><h1>Google Sheets data</h1><p>Browse the live tables behind your customers, orders, editors, billing, and studio activity.</p></div>
+	<div class="heading-copy"><a href="/settings"><ArrowLeft size={14}/> Back to settings</a><span class="eyebrow"><Sheet size={13}/> Data workspace</span><h1>Google Sheets data</h1><p>Browse the live tables behind your {labelFor(data.configuration?.profile, 'customer', true).toLowerCase()}, {labelFor(data.configuration?.profile, 'order', true).toLowerCase()}, {labelFor(data.configuration?.profile, 'staff', true).toLowerCase()}, billing, and business activity.</p></div>
 	<div class="sheet-actions">{#if data.sheetUrl}<a class="secondary open-sheet" href={data.sheetUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13}/> Open Google Sheet</a>{/if}<button class="secondary" onclick={() => location.reload()}><RefreshCw size={13}/> Refresh</button></div>
 </div>
 
 <div class:live={data.live} class="mode-notice">
-	{#if data.live}<Sheet size={14}/><span><strong>Live Google Sheets</strong> — showing synchronized data from this tenant’s isolated workbook.</span>{:else}<CircleAlert size={14}/><span><strong>Sheet unavailable</strong> — no fallback data is shown; ask the StudioFlow owner to validate this tenant’s workbook connection.</span>{/if}
+	{#if data.live}<Sheet size={14}/><span><strong>Live Google Sheets</strong> — showing synchronized data from this tenant’s isolated workbook.</span>{:else}<CircleAlert size={14}/><span><strong>Sheet unavailable</strong> — no fallback data is shown; ask the NexaDesk owner to validate this tenant’s workbook connection.</span>{/if}
 </div>
 
 <div class="sheet-tabs" role="tablist" aria-label="Google Sheets tables">

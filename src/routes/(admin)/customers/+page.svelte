@@ -23,18 +23,25 @@
   } from "@lucide/svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import Modal from "$lib/components/Modal.svelte";
+  import DirectWhatsAppModal from "$lib/components/DirectWhatsAppModal.svelte";
   import NewCustomerModal from "$lib/components/NewCustomerModal.svelte";
   import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
+  import CustomFieldValues from "$lib/components/CustomFieldValues.svelte";
   import { formatDateTime, money } from "$lib/data";
-  import { whatsappNumber } from "$lib/phone";
   import { customerStore } from "$lib/stores/app";
   import type { Customer, Invoice, Order } from "$lib/types";
+  import { hasCapability, labelFor } from "$lib/capabilities";
 
+  let { data } = $props();
+  const customerLabel = $derived(labelFor(data.configuration?.profile, "customer"));
+  const portalEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "portal.customer"));
+  const whatsappEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "communications.whatsapp"));
+  const invoicesEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "billing.invoices"));
+  const customFieldsEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "customFields"));
   let query = $state("");
   let showNewCustomer = $state(false);
   let editingCustomer = $state<Customer | null>(null);
   let toast = $state("");
-  let { data } = $props();
   let customers = $state<Customer[]>(untrack(() => data.customers));
   let orders = $state<Order[]>(untrack(() => data.orders));
   let showArchived = $state(false);
@@ -44,6 +51,8 @@
   let copiedPortal = $state("");
   let mapOpen = $state(false);
   let mapTarget = $state("");
+  let directWhatsAppOpen = $state(false);
+  let directCustomer = $state<Customer | null>(null);
   const archivedCount = $derived(
     customers.filter((customer) => Boolean(customer.archived)).length,
   );
@@ -64,6 +73,14 @@
             order.customerId === customer.id ||
             (!order.customerId && order.customer === customer.business),
         )
+      : [];
+  });
+  const directCustomerOrders = $derived.by(() => {
+    const customer = directCustomer;
+    return customer
+      ? orders.filter((order) =>
+          order.customerId === customer.id ||
+          (!order.customerId && order.customer === customer.business))
       : [];
   });
   const totalBilled = $derived(
@@ -164,11 +181,9 @@
   }
   function openCustomerChat(customer: Customer | null) {
     if (!customer?.phone) return;
-    window.open(
-      `https://wa.me/${whatsappNumber(customer.phone)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    directCustomer = customer;
+    directWhatsAppOpen = true;
+    customerAction = "closed";
   }
   function previewMap(url: string | undefined) { if (!url) return; mapTarget = url; mapOpen = true; }
   async function sendInvoiceInWhatsApp(
@@ -270,9 +285,9 @@
 </script>
 
 <PageHeader
-  eyebrow="People you work with"
-  title="Customers"
-  action="New customer"
+  eyebrow="Customer relationships and service history"
+  title={labelFor(data.configuration?.profile, "customer", true)}
+  action={`New ${customerLabel.toLowerCase()}`}
   onclick={() => {
     editingCustomer = null;
     showNewCustomer = true;
@@ -339,7 +354,7 @@
                     onclick={() => edit(customer)}
                     aria-label="Edit customer"
                     title="Edit customer"><Edit3 size={14} /></button
-                  ><button
+                  >{#if portalEnabled}<button
                     class="portal-copy"
                     onclick={() => copyLink(customer)}
                     disabled={!customer.token}
@@ -355,15 +370,14 @@
                     onclick={() => regenerate(customer)}
                     aria-label="Regenerate private link"
                     title="Regenerate private link"
-                    ><RefreshCw size={14} /></button
-                  >{#if customer.phone}<a
+                    ><RefreshCw size={14} /></button>{/if}
+                  {#if whatsappEnabled && customer.phone}<button
+                      type="button"
                       class="whatsapp"
-                      href={"https://wa.me/" + whatsappNumber(customer.phone)}
-                      target="_blank"
-                      rel="noreferrer"
+                      onclick={() => openCustomerChat(customer)}
                       aria-label="WhatsApp customer"
-                      title="Open WhatsApp"><WhatsAppIcon size={15} /></a
-                    >{/if}{#if customer.token}<a
+                      title="Message customer"><WhatsAppIcon size={15} /></button
+                    >{/if}{#if portalEnabled && customer.token}<a
                       class="portal-action"
                       href={`/portal/${data.tenantSlug}/customer/${customer.token}`}
                       target="_blank"
@@ -396,14 +410,14 @@
             <p>{selectedCustomer.name}</p>
           </div>
           <div class="profile-actions">
-            <button
+            {#if whatsappEnabled}<button
               class="secondary whatsapp-detail"
               disabled={!selectedCustomer.phone}
               onclick={() =>
                 (customerAction =
                   customerAction === "closed" ? "choice" : "closed")}
-              ><WhatsAppIcon size={14} /> WhatsApp</button
-            ><button class="secondary" onclick={editSelectedCustomer}
+              ><WhatsAppIcon size={14} /> WhatsApp</button>{/if}
+            <button class="secondary" onclick={editSelectedCustomer}
               ><Edit3 size={13} /> Edit details</button
             >
           </div>
@@ -427,6 +441,7 @@
               >
             </div>
             {#if selectedCustomer.locationUrl}<div class="location-contact"><MapPin size={14}/><span>Google Maps location<strong><button onclick={() => previewMap(selectedCustomer?.locationUrl)}>Preview map</button><a href={selectedCustomer.locationUrl} target="_blank" rel="noreferrer">Open in new tab <ExternalLink size={11}/></a></strong></span></div>{/if}
+            {#if customFieldsEnabled}<CustomFieldValues definitions={data.configuration.profile.customFields} entity="customer" values={selectedCustomer.customFields}/>{/if}
         </div>
         {#if customerAction !== "closed"}<div class="customer-actions-panel">
             {#if customerAction === "choice"}<button
@@ -436,13 +451,13 @@
                     >Open a normal WhatsApp conversation</small
                   ></span
                 ><ArrowRight size={14} /></button
-              ><button onclick={() => (customerAction = "invoices")}
+              >{#if invoicesEnabled}<button onclick={() => (customerAction = "invoices")}
                 ><FileText size={17} /><span
                   ><strong>Send an invoice</strong><small
                     >Choose an invoice and review the amount due</small
                   ></span
-                ><ArrowRight size={14} /></button
-              >{:else}<div class="invoice-choice-head">
+                ><ArrowRight size={14} /></button>{/if}
+              {:else}<div class="invoice-choice-head">
                 <button onclick={() => (customerAction = "choice")}
                   ><ArrowRight size={13} /> Back</button
                 ><span
@@ -459,7 +474,7 @@
                           row.invoice.openedAt,
                         )}</small
                       ><em
-                        >Editing {row.order?.status} ({row.order?.progress}%) ·
+                        >{row.order?.status} ({row.order?.progress}%) ·
                         Due {money(row.invoice.balance)}</em
                       ></span
                     ><button
@@ -478,13 +493,13 @@
                     href={`/orders/${order.id}?invoice=1`}
                     ><span
                       ><strong>{order.project}</strong><small
-                        >Editing complete · no invoice yet</small
+                        >Work complete · no invoice yet</small
                       ></span
                     ><span>Create invoice <ArrowRight size={13} /></span></a
                   >{/each}
               </div>{/if}
           </div>{/if}
-        <div class="portal-panel">
+        {#if portalEnabled}<div class="portal-panel">
           <span
             ><strong>Private customer portal</strong><small
               >{selectedCustomer.token
@@ -505,7 +520,7 @@
               target="_blank"
               rel="noreferrer"><ExternalLink size={13} /> Open</a
             >{/if}
-        </div>
+        </div>{/if}
       </div>
       <div class="card customer-finance">
         <span>Account summary</span>
@@ -551,6 +566,14 @@
 <Modal title="Google Maps location" bind:open={mapOpen} wide>
   <div class="map-preview"><iframe title="Google Maps location preview" src={mapTarget} loading="lazy"></iframe><p>If Google blocks the embedded preview, use the new-tab button.</p><a class="primary" href={mapTarget} target="_blank" rel="noreferrer"><MapPin size={14}/> Open in Google Maps</a></div>
 </Modal>
+
+<DirectWhatsAppModal
+  bind:open={directWhatsAppOpen}
+  recipient={directCustomer ? { kind: "customer", record: directCustomer } : null}
+  orders={directCustomerOrders}
+  configuration={data.configuration}
+  onmessage={(value) => (toast = value)}
+/>
 
 <NewCustomerModal
   bind:open={showNewCustomer}
@@ -829,13 +852,11 @@
       transform 0.15s ease;
   }
   .action-cluster button + button,
-  .action-cluster button + a,
-  .action-cluster a + a {
+  .action-cluster button + a {
     position: relative;
   }
   .action-cluster button + button::before,
-  .action-cluster button + a::before,
-  .action-cluster a + a::before {
+  .action-cluster button + a::before {
     content: "";
     position: absolute;
     left: -1px;

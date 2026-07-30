@@ -28,9 +28,12 @@
   import DeliveryModal from "$lib/components/DeliveryModal.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import TaskModal from "$lib/components/TaskModal.svelte";
+  import CustomFieldValues from "$lib/components/CustomFieldValues.svelte";
   import { formatDate, formatDateTime, money } from "$lib/data";
   import { orderCode } from "$lib/identifiers";
+  import { flashAction, notifyAction } from "$lib/stores/actionFeedback";
   import type { Editor, Order, Task } from "$lib/types";
+  import { hasCapability, labelFor, statusFor } from "$lib/capabilities";
 
   let { data } = $props();
   let order = $state<Order>(untrack(() => data.order));
@@ -46,6 +49,27 @@
   let error = $state("");
   let busy = $state("");
   let showArchivedTasks = $state(false);
+  const messageCatalog = $derived(data.configuration?.moduleConfiguration?.["communications.whatsapp"]);
+  let customerTemplateId = $state(untrack(() => data.configuration?.moduleConfiguration?.["communications.whatsapp"]?.defaultTemplateIds?.["status-update"] || ""));
+  let staffTemplateId = $state(untrack(() => data.configuration?.moduleConfiguration?.["communications.whatsapp"]?.defaultTemplateIds?.["work-assignment"] || ""));
+  const tasksEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "work.tasks"));
+  const staffEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "work.staff"));
+  const paymentsEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "billing.payments"));
+  const invoicesEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "billing.invoices"));
+  const partialInvoicesEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "billing.partialInvoices"));
+  const deliveryEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "workflow.delivery"));
+  const whatsappEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "communications.whatsapp"));
+  const orderLabel = $derived(labelFor(data.configuration?.profile, "order"));
+  const taskLabel = $derived(labelFor(data.configuration?.profile, "task"));
+  const staffLabel = $derived(labelFor(data.configuration?.profile, "staff"));
+  const customerOrderTemplates = $derived(Object.values(messageCatalog?.templates || {}).filter((template) =>
+    template.enabled &&
+    template.audience === "customer" &&
+    (["order", "customer"].includes(template.context) || (template.context === "payment" && order.payments?.length))
+  ));
+  const staffAssignmentTemplates = $derived(Object.values(messageCatalog?.templates || {}).filter((template) =>
+    template.enabled && template.audience === "staff" && template.scenario === "work-assignment"
+  ));
 
   const activeTasks = $derived(order.tasks.filter((task) => !task.archived));
   const approvedTasks = $derived(
@@ -129,6 +153,7 @@
       return;
     }
     order = result.order;
+    notifyAction(order.important ? "Order marked as important." : "Important mark removed.");
   }
 
   function openTask(task: Task | null = null) {
@@ -155,6 +180,7 @@
       return;
     }
     await refresh();
+    notifyAction("Work item updated.");
   }
 
   async function archiveTask(task: Task) {
@@ -170,6 +196,7 @@
       return;
     }
     await refresh();
+    notifyAction("Work item archived.");
   }
 
   async function restoreTask(task: Task) {
@@ -185,6 +212,7 @@
       return;
     }
     await refresh();
+    notifyAction("Work item restored.");
   }
 
   async function openEditorWhatsApp(editor: Editor) {
@@ -195,7 +223,7 @@
       const response = await fetch(`/api/editors/${editor.id}/whatsapp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ orderId: order.id }),
+        body: JSON.stringify({ orderId: order.id, templateId: staffTemplateId }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -234,6 +262,7 @@
         error = result.error || "Unable to invoice completed work.";
         return;
       }
+      flashAction("Partial invoice created successfully.");
       location.href = result.invoiceUrl;
     } catch {
       error = "Unable to invoice completed work.";
@@ -267,6 +296,35 @@
     }
   }
 
+  async function openCustomerWhatsApp() {
+    if (!customerTemplateId) {
+      error = "Choose a customer message template.";
+      return;
+    }
+    const whatsappTab = reserveWhatsAppTab();
+    error = "";
+    busy = "customer-message";
+    try {
+      const response = await fetch(`/api/orders/${order.id}/whatsapp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ templateId: customerTemplateId })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        whatsappTab?.close();
+        error = result.error || "Unable to prepare the customer message.";
+        return;
+      }
+      openWhatsAppTab(whatsappTab, result.url);
+    } catch {
+      whatsappTab?.close();
+      error = "Unable to prepare the customer message.";
+    } finally {
+      busy = "";
+    }
+  }
+
   async function setOrderStatus(status: Order["status"]) {
     busy = "status";
     error = "";
@@ -285,6 +343,7 @@
       return;
     }
     order = result.order;
+    notifyAction(`Order status changed to ${statusFor(data.configuration?.profile, status).label}.`);
   }
 
   async function archiveCurrentOrder() {
@@ -304,6 +363,7 @@
       error = result.error || "Unable to archive order.";
       return;
     }
+    flashAction("Order archived.");
     location.href = "/orders";
   }
 
@@ -324,7 +384,12 @@
       error = result.error || "Unable to generate receipt.";
       return;
     }
+    flashAction("Receipt generated successfully.");
     location.href = result.invoiceUrl;
+  }
+  async function taskSaved() {
+    await refresh();
+    notifyAction("Work item saved.");
   }
   onMount(() => {
     const params = new URL(location.href).searchParams;
@@ -339,29 +404,31 @@
 </script>
 
 <svelte:head
-  ><title>{order.customer} · {order.project} — StudioFlow</title></svelte:head
+  ><title>{order.customer} · {order.project} — {data.settings.studioName}</title></svelte:head
 >
 
 <div class="detail-top">
-  <a href="/orders" class="back"><ArrowLeft size={16} /> Orders</a>
+  <a href="/orders" class="back"><ArrowLeft size={16} /> {labelFor(data.configuration?.profile, "order", true)}</a>
   <div class="actions">
-    {#if !order.archived}<button
+    {#if !order.archived && whatsappEnabled && customerOrderTemplates.length}<div class="message-action"><select bind:value={customerTemplateId} aria-label="Customer WhatsApp template">{#each customerOrderTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select><button class="secondary" disabled={busy === "customer-message" || !order.mobile} onclick={openCustomerWhatsApp}><WhatsAppIcon size={14}/>{busy === "customer-message" ? "Preparing…" : "Message customer"}</button></div>{/if}
+    {#if !order.archived}{#if paymentsEnabled || invoicesEnabled}<button
         class="secondary"
         onclick={() => (billingModalOpen = true)}
-        ><Settings2 size={14} /> Set order total</button
-      ><button class="secondary" onclick={() => (paymentModalOpen = true)}
+        ><Settings2 size={14} /> Set {orderLabel.toLowerCase()} total</button>{/if}
+      {#if paymentsEnabled}<button class="secondary" onclick={() => (paymentModalOpen = true)}
         ><IndianRupee size={14} /> Record customer payment</button
-      >
+      >{/if}
+      {#if invoicesEnabled}
       <button class="primary" disabled={busy === "invoice"} onclick={openBill}
         ><FileText size={15} />
         {busy === "invoice"
           ? "Creating final invoice…"
-          : "Create final invoice"}</button
-      ><button
+          : "Create final invoice"}</button>{/if}
+      <button
         class="archive-order"
         disabled={busy === "archive"}
         onclick={archiveCurrentOrder}
-        ><Archive size={14} /> Archive this order</button
+        ><Archive size={14} /> Archive this {orderLabel.toLowerCase()}</button
       >{/if}
   </div>
 </div>
@@ -425,7 +492,7 @@
     <span class="workflow-icon"><RotateCcw size={19} /></span>
     <div>
       <small>Next action · Review</small>
-      <h2>Review editor output</h2>
+      <h2>Review {staffLabel.toLowerCase()} output</h2>
       <p>
         Open each submitted output below. Approve it or request a revision. When
         every task is approved, the order automatically moves to Ready for
@@ -453,20 +520,20 @@
       </p>
     </div>
     <div class="workflow-actions">
-      <button
+      {#if whatsappEnabled}<button
         class="notify-customer"
         disabled={busy === "customer-whatsapp" || !order.mobile}
         onclick={notifyCustomerReady}
         ><WhatsAppIcon size={15} />{busy === "customer-whatsapp"
           ? "Preparing…"
-          : "WhatsApp customer"}</button
-      >{#if order.priceSet === false}<button
+          : "WhatsApp customer"}</button>{/if}
+      {#if order.priceSet === false && (paymentsEnabled || invoicesEnabled)}<button
           class="primary"
           onclick={() => (billingModalOpen = true)}>Set final total</button
         >{:else if balance > 0}<button
           class="primary"
           onclick={() => (paymentModalOpen = true)}>Add balance payment</button
-        >{:else}<button
+        >{:else if deliveryEnabled}<button
           class="deliver-order"
           onclick={() => (deliveryModalOpen = true)}
           ><CircleCheckBig size={15} /> Confirm delivery</button
@@ -487,10 +554,11 @@
 
 <div class="detail-grid">
   <div class="main-col">
+    {#if tasksEnabled}
     <section class="card">
       <div class="section-head">
         <div>
-          <h2>Assigned tasks</h2>
+          <h2>{labelFor(data.configuration?.profile, "task", true)}</h2>
           <p>
             {approvedTasks} completed · {Math.max(
               0,
@@ -506,7 +574,7 @@
               >{showArchivedTasks
                 ? "Active tasks"
                 : `Archived (${archivedTasks.length})`}</button
-            >{/if}{#if !showArchivedTasks && approvedTasks > 0}<button
+            >{/if}{#if partialInvoicesEnabled && !showArchivedTasks && approvedTasks > 0}<button
               class="partial-invoice"
               disabled={busy === "partial-invoice"}
               onclick={() =>
@@ -523,7 +591,7 @@
                 : "Set completed work value"}</button
             >{/if}{#if !showArchivedTasks}<button
               class="secondary"
-              onclick={() => openTask()}><Plus size={13} /> Assign work</button
+              onclick={() => openTask()}><Plus size={13} /> Add {taskLabel.toLowerCase()}</button
             >{/if}
         </div>
       </div>
@@ -615,7 +683,7 @@
                   href={task.outputLink}
                   target="_blank"
                   rel="noreferrer"
-                  >Open editor output <ExternalLink size={12} /></a
+                  >Open {staffLabel.toLowerCase()} output <ExternalLink size={12} /></a
                 >{/if}
             </article>
           {/each}
@@ -624,12 +692,13 @@
         <div class="empty">
           <p>No work assigned yet.</p>
           <button class="primary" onclick={() => openTask()}
-            ><Plus size={13} /> Create first task</button
+            ><Plus size={13} /> Create first {taskLabel.toLowerCase()}</button
           >
         </div>
       {:else}<div class="empty"><p>No archived tasks.</p></div>
       {/if}
     </section>
+    {/if}
 
     <section class="card activity-card">
       <div class="section-head">
@@ -655,7 +724,7 @@
       <div class="customer-card-head">
         <span><FolderKanban size={16} /></span>
         <div>
-          <small>Customer / studio</small>{#if customerRecord}<a
+          <small>{labelFor(data.configuration?.profile, "customer")}</small>{#if customerRecord}<a
               href={`/customers?customer=${customerRecord.id}`}
               >{order.customer}</a
             >{:else}<strong>{order.customer}</strong>{/if}
@@ -702,7 +771,7 @@
                   .value as Order["status"],
               )}
             >{#each ["Historical", "Received", "Assigned", "Editing", "Waiting Review", "Revision", "Ready Delivery", "Stopped", "Completed"] as status}<option
-                value={status}>{status}</option
+                value={status}>{statusFor(data.configuration?.profile, status).label}</option
               >{/each}</select
           ><small
             >Use the guided delivery confirmation to mark work Delivered.</small
@@ -734,11 +803,20 @@
           <dd>{order.due ? formatDate(order.due) : "Not set"}</dd>
         </div>
       </dl>
+      <CustomFieldValues definitions={data.configuration.profile.customFields} entity="order" values={order.customFields}/>
       {#if order.remarks}<p class="remarks">{order.remarks}</p>{/if}
     </section>
 
-    <section class="card people-card">
-      <h2>Assigned editors</h2>
+    {#if staffEnabled && tasksEnabled}<section class="card people-card">
+      <h2>Assigned {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</h2>
+      {#if whatsappEnabled && staffAssignmentTemplates.length > 1}
+        <label class="staff-template">
+          <span>Assignment message</span>
+          <select bind:value={staffTemplateId} aria-label="Worker assignment WhatsApp template">
+            {#each staffAssignmentTemplates as template}<option value={template.id}>{template.name}</option>{/each}
+          </select>
+        </label>
+      {/if}
       {#if assignedEditors.length}
         {#each assignedEditors as editor}
           <div class="person">
@@ -753,21 +831,20 @@
                   .length} task(s) · View profile</small
               >
             </div>
-            <button
+            {#if whatsappEnabled}<button
               class="whatsapp-icon"
               disabled={busy === editor.id}
               onclick={() => openEditorWhatsApp(editor)}
-              title="Open WhatsApp"><WhatsAppIcon size={15} /></button
-            >
+              title="Open WhatsApp"><WhatsAppIcon size={15} /></button>{/if}
           </div>
         {/each}
-      {:else}<p class="muted">Assign a task to add an editor.</p>{/if}
+      {:else}<p class="muted">Assign a {taskLabel.toLowerCase()} to add a {staffLabel.toLowerCase()}.</p>{/if}
       <button class="add-person" onclick={() => openTask()}
-        ><Plus size={13} /> Assign editor or task</button
+        ><Plus size={13} /> Assign {staffLabel.toLowerCase()} or {taskLabel.toLowerCase()}</button
       >
-    </section>
+    </section>{/if}
 
-    <section class="card invoice-card">
+    {#if paymentsEnabled || invoicesEnabled}<section class="card invoice-card">
       <div class="invoice-title">
         <span><FileText size={15} /></span>
         <div>
@@ -824,12 +901,11 @@
                     ? ` · ${payment.note}`
                     : ""}</small
                 ></span
-              ><b>{money(payment.amount)}</b><button
+              ><b>{money(payment.amount)}</b>{#if invoicesEnabled}<button
                 title="Generate receipt"
                 disabled={busy === payment.id}
                 onclick={() => createPaymentInvoice(payment.id, payment.kind)}
-                ><FileText size={12} /></button
-              >
+                ><FileText size={12} /></button>{/if}
             </div>{/each}
         </div>{/if}
       <div class="billing-buttons">
@@ -838,45 +914,44 @@
           {order.priceSet === false
             ? "Set order total"
             : "Edit order total"}</button
-        ><button
+        >{#if paymentsEnabled}<button
           class="invoice-button"
           onclick={() => (paymentModalOpen = true)}
-          ><IndianRupee size={13} /> Record payment</button
-        >
+          ><IndianRupee size={13} /> Record payment</button>{/if}
       </div>
-    </section>
+    </section>{/if}
   </div>
 </div>
 
-<TaskModal
+{#if tasksEnabled}<TaskModal
   bind:open={taskModalOpen}
   orderId={order.id}
   bind:editors
   bind:devices
   task={editingTask}
-  onsaved={refresh}
-/>
-<PaymentModal
+  onsaved={taskSaved}
+/>{/if}
+{#if paymentsEnabled}<PaymentModal
   bind:open={paymentModalOpen}
   orderId={order.id}
   {balance}
   orderStatus={order.status}
   onsaved={refresh}
-/>
-<BillingModal
+/>{/if}
+{#if paymentsEnabled || invoicesEnabled}<BillingModal
   bind:open={billingModalOpen}
   {order}
   onsaved={(savedOrder) => (order = savedOrder)}
-/>
-<InvoiceModal bind:open={invoiceModalOpen} {order} />
-<DeliveryModal
+/>{/if}
+{#if invoicesEnabled}<InvoiceModal bind:open={invoiceModalOpen} {order} />{/if}
+{#if deliveryEnabled}<DeliveryModal
   bind:open={deliveryModalOpen}
   {order}
   ondelivered={(savedOrder) => {
     order = savedOrder;
     refresh();
   }}
-/>
+/>{/if}
 
 <style>
   :global(html) {
@@ -910,6 +985,7 @@
     gap: 8px;
     flex-wrap: wrap;
   }
+  .message-action{display:flex;align-items:center;gap:6px}.message-action select{width:auto;min-width:150px;height:36px}
   .actions button,
   .section-head button,
   .invoice-button {
@@ -1522,6 +1598,7 @@
       padding: 10px;
       white-space: normal;
     }
+    .message-action{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.message-action select{width:100%;height:100%;min-height:44px}
     .task-row {
       grid-template-columns: 1fr auto;
     }

@@ -14,6 +14,7 @@ export const PATCH = async ({ request, cookies, locals }) => {
 	const input = await request.json() as Record<string, unknown>;
 	const allowed = new Set(['studioName', 'orderPrefix', 'editorPrefix', 'logoUrl', 'address', 'phone', 'email', 'gstin', 'paymentNote', 'invoiceFooter', 'assignmentTemplate', 'invoiceTemplate', 'themePalette', 'themeDefaultMode']);
 	const safeInput = Object.fromEntries(Object.entries(input).filter(([key]) => allowed.has(key)));
+	if (safeInput.studioName !== undefined && !String(safeInput.studioName || '').trim()) return json({ error: 'Business name is required.' }, { status: 400 });
 	for (const key of ['orderPrefix', 'editorPrefix']) {
 		if (safeInput[key] === undefined) continue;
 		const prefix = String(safeInput[key] || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 8);

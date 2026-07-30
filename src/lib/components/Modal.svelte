@@ -13,6 +13,7 @@
 	let originalBodyOverflow = '';
 	let originalBodyPosition = '';
 	let originalBodyTop = '';
+	let originalBodyWidth = '';
 	let lockedScrollY = 0;
 
 	const focusableSelector = [
@@ -71,6 +72,7 @@
 			originalBodyOverflow = document.body.style.overflow;
 			originalBodyPosition = document.body.style.position;
 			originalBodyTop = document.body.style.top;
+			originalBodyWidth = document.body.style.width;
 			document.body.style.overflow = 'hidden';
 			document.body.style.position = 'fixed';
 			document.body.style.top = `-${lockedScrollY}px`;
@@ -91,7 +93,7 @@
 			document.body.style.overflow = originalBodyOverflow;
 			document.body.style.position = originalBodyPosition;
 			document.body.style.top = originalBodyTop;
-			document.body.style.width = '';
+			document.body.style.width = originalBodyWidth;
 			window.scrollTo(0, lockedScrollY);
 			window.removeEventListener('keydown', handleKeydown, true);
 		}
@@ -126,14 +128,14 @@
 </script>
 {#if open}
 	<div class="modal-layer" class:inactive={!isTop} style={`z-index:${80 + stackIndex * 2}`} inert={!isTop} aria-hidden={!isTop}>
-		<button class="modal-backdrop" tabindex="-1" aria-label="Close dialog" onclick={() => { if (isTop) open = false; }}></button>
+		<button type="button" class="modal-backdrop" tabindex="-1" aria-label="Close dialog" onclick={() => { if (isTop) open = false; }}></button>
 		<div bind:this={modalElement} class:wide class="modal" role="dialog" aria-modal={isTop ? 'true' : undefined} aria-label={title} tabindex="-1">
-			<header><h2>{title}</h2><button class="icon-btn" aria-label="Close" onclick={() => (open = false)}><X size={18} /></button></header>
+			<header><h2>{title}</h2><button type="button" class="icon-btn" aria-label="Close" onclick={() => (open = false)}><X size={18} /></button></header>
 			<div class="modal-body">{@render children()}</div>
 			{#if footer}<footer>{@render footer()}</footer>{/if}
 		</div>
 	</div>
 {/if}
 <style>
-	.modal-layer{position:fixed;inset:0;pointer-events:none}.modal-layer.inactive{pointer-events:none}.modal-backdrop{position:absolute;inset:0;background:#05060aab;backdrop-filter:blur(3px);border:0;pointer-events:auto}.modal{position:absolute;z-index:1;top:50%;left:50%;transform:translate(-50%,-50%);width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto;border:1px solid #333744;border-radius:13px;background:#171a21;box-shadow:0 25px 80px #0009;pointer-events:auto;transition:filter .16s ease,opacity .16s ease}.modal-layer.inactive .modal{filter:saturate(.65);opacity:.72}.modal.wide{width:min(760px,calc(100vw - 32px))}.modal header,.modal footer{display:flex;align-items:center;padding:17px 20px}.modal header{justify-content:space-between;border-bottom:1px solid #292d36}.modal footer{justify-content:flex-end;gap:9px;border-top:1px solid #292d36}.modal h2{font-size:14px;margin:0}.modal-body{padding:22px}.icon-btn{border:0;background:transparent;color:#8791a0;padding:4px;display:grid;place-items:center}:global(html[data-theme="light"]) .modal-backdrop{background:#0f172a52;backdrop-filter:blur(8px)}:global(html[data-theme="light"]) .modal{border-color:#dbeafe;border-radius:18px;background:#fffffff7;box-shadow:0 30px 90px #6366f12e,0 8px 30px #0f172a18}:global(html[data-theme="light"]) .modal header{border-bottom-color:#e2e8f0}:global(html[data-theme="light"]) .modal footer{border-top-color:#e2e8f0;background:linear-gradient(180deg,#ffffff,#f8fafc)}:global(html[data-theme="light"]) .modal h2{color:#0f172a;font-size:15px}:global(html[data-theme="light"]) .icon-btn{color:#64748b;border-radius:10px}:global(html[data-theme="light"]) .icon-btn:hover{background:#eef2ff;color:#4f46e5}
+	:global(.card:has(.modal-layer)){transform:none!important;overflow:visible!important}.modal-layer{position:fixed;inset:0;pointer-events:none}.modal-layer.inactive{pointer-events:none}.modal-backdrop{position:absolute;inset:0;background:#05060aab;backdrop-filter:blur(3px);border:0;pointer-events:auto}.modal{position:absolute;z-index:1;top:50%;left:50%;transform:translate(-50%,-50%);width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px);overflow:auto;overscroll-behavior:contain;border:1px solid #333744;border-radius:13px;background:#171a21;box-shadow:0 25px 80px #0009;pointer-events:auto;transition:filter .16s ease,opacity .16s ease}.modal-layer.inactive .modal{filter:saturate(.65);opacity:.72}.modal.wide{width:min(760px,calc(100vw - 32px))}.modal header,.modal footer{display:flex;align-items:center;padding:17px 20px}.modal header{position:sticky;top:0;z-index:2;justify-content:space-between;border-bottom:1px solid #292d36;background:#171a21}.modal footer{position:sticky;bottom:0;z-index:2;justify-content:flex-end;gap:9px;border-top:1px solid #292d36;background:#171a21}.modal h2{font-size:14px;margin:0}.modal-body{padding:22px}.icon-btn{border:0;background:transparent;color:#8791a0;padding:4px;display:grid;place-items:center}:global(html[data-theme="light"]) .modal-backdrop{background:#0f172a52;backdrop-filter:blur(8px)}:global(html[data-theme="light"]) .modal{border-color:#dbeafe;border-radius:18px;background:#fffffff7;box-shadow:0 30px 90px #6366f12e,0 8px 30px #0f172a18}:global(html[data-theme="light"]) .modal header{border-bottom-color:#e2e8f0;background:#fff}:global(html[data-theme="light"]) .modal footer{border-top-color:#e2e8f0;background:linear-gradient(180deg,#ffffff,#f8fafc)}:global(html[data-theme="light"]) .modal h2{color:#0f172a;font-size:15px}:global(html[data-theme="light"]) .icon-btn{color:#64748b;border-radius:10px}:global(html[data-theme="light"]) .icon-btn:hover{background:#eef2ff;color:#4f46e5}@media(max-width:520px){.modal{top:auto;bottom:0;left:0;transform:none;width:100%;max-height:calc(100dvh - 12px);border-radius:18px 18px 0 0}.modal.wide{width:100%}.modal header,.modal footer{padding:14px 16px}.modal-body{padding:18px 16px}.modal footer>:global(button){min-height:42px;flex:1}}
 </style>

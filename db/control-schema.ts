@@ -42,5 +42,32 @@ export const controlSchemaStatements = [
 	`CREATE INDEX IF NOT EXISTS control_sessions_expiry_idx ON control_sessions(expires_at)`,
 	`CREATE TABLE IF NOT EXISTS control_login_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS control_audit_logs (id TEXT PRIMARY KEY, account_id TEXT, action TEXT NOT NULL, tenant_id TEXT, details TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
-	`CREATE INDEX IF NOT EXISTS control_audit_created_idx ON control_audit_logs(created_at)`
+	`CREATE INDEX IF NOT EXISTS control_audit_created_idx ON control_audit_logs(created_at)`,
+	`CREATE TABLE IF NOT EXISTS control_packages (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		version INTEGER NOT NULL DEFAULT 1,
+		description TEXT NOT NULL DEFAULT '',
+		definition TEXT NOT NULL,
+		is_builtin INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS control_tenant_packages (
+		tenant_id TEXT PRIMARY KEY,
+		package_id TEXT NOT NULL,
+		package_version INTEGER NOT NULL,
+		snapshot TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY(tenant_id) REFERENCES control_tenants(id) ON DELETE CASCADE
+	)`,
+	`CREATE TABLE IF NOT EXISTS control_tenant_capabilities (
+		tenant_id TEXT NOT NULL,
+		capability_key TEXT NOT NULL,
+		allowed_value TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY(tenant_id, capability_key),
+		FOREIGN KEY(tenant_id) REFERENCES control_tenants(id) ON DELETE CASCADE
+	)`,
+	`CREATE INDEX IF NOT EXISTS control_tenant_capabilities_tenant_idx ON control_tenant_capabilities(tenant_id)`
 ];
