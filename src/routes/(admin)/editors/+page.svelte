@@ -3,8 +3,10 @@
   import { onMount, untrack } from "svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import EditorModal from "$lib/components/EditorModal.svelte";
+  import DirectWhatsAppModal from "$lib/components/DirectWhatsAppModal.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
+  import CustomFieldValues from "$lib/components/CustomFieldValues.svelte";
   import {
     Pencil,
     Link2,
@@ -23,10 +25,17 @@
   } from "@lucide/svelte";
   import { editorStore } from "$lib/stores/app";
   import { formatDate } from "$lib/data";
-  import { whatsappNumber } from "$lib/phone";
   import type { Editor, Order } from "$lib/types";
+  import { hasCapability, labelFor, statusFor } from "$lib/capabilities";
+  import { flashAction, notifyAction } from "$lib/stores/actionFeedback";
 
   let { data } = $props();
+  const staffLabel = $derived(labelFor(data.configuration?.profile, "staff"));
+  const taskLabel = $derived(labelFor(data.configuration?.profile, "task"));
+  const customerLabel = $derived(labelFor(data.configuration?.profile, "customer"));
+  const portalEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "work.staffPortal"));
+  const whatsappEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "communications.whatsapp"));
+  const customFieldsEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "customFields"));
   let editors = $state<Editor[]>(untrack(() => data.editors));
   let orders = $state<Order[]>(untrack(() => data.orders));
   let showEditor = $state(false);
@@ -39,8 +48,16 @@
   let reconciling = $state(false);
   let mapOpen = $state(false);
   let mapTarget = $state("");
+  let directWhatsAppOpen = $state(false);
+  let directEditor = $state<Editor | null>(null);
   const visibleEditors = $derived(
     editors.filter((editor) => Boolean(editor.archived) === showArchived),
+  );
+  const directEditorOrders = $derived(
+    directEditor
+      ? orders.filter((order) =>
+          order.tasks.some((task) => !task.archived && task.editorId === directEditor?.id))
+      : [],
   );
 
   function tasksFor(editorId: string) {
@@ -64,6 +81,11 @@
     detailsOpen = true;
   }
   function previewMap(url: string | undefined) { if (!url) return; mapTarget = url; mapOpen = true; }
+  function openEditorChat(editor: Editor) {
+    if (!editor.phone) return;
+    directEditor = editor;
+    directWhatsAppOpen = true;
+  }
   function editDetails(editor: Editor) {
     detailsOpen = false;
     openEditor(editor);
@@ -80,6 +102,7 @@
         ? items.map((item) => (item.id === editor.id ? editor : item))
         : [editor, ...items],
     );
+    notifyAction(`${staffLabel} saved.`);
   }
   async function copyPortal(editor: Editor) {
     let token = editor.token;
@@ -108,6 +131,7 @@
       `${location.origin}/portal/${data.tenantSlug}/editor/${token}`,
     );
     copied = editor.id;
+    notifyAction(`Private ${staffLabel.toLowerCase()} portal link copied.`);
     setTimeout(() => (copied = ""), 1800);
   }
   async function archiveEditor(editor: Editor) {
@@ -135,6 +159,7 @@
       result.sync?.configured && !result.sync?.failed
         ? "Editor archived in the database and Google Sheets"
         : "Editor archived in the database; Google Sheets update is queued";
+    notifyAction(`${staffLabel} archived.`);
   }
   async function restoreEditor(editor: Editor) {
     const response = await fetch(`/api/editors/${editor.id}`, {
@@ -158,6 +183,7 @@
       result.sync?.configured && !result.sync?.failed
         ? "Editor restored in the database and Google Sheets"
         : "Editor restored in the database; Google Sheets update is queued";
+    notifyAction(`${staffLabel} restored.`);
   }
   async function permanentlyDelete(editor: Editor) {
     if (
@@ -186,6 +212,7 @@
       result.sync?.configured && !result.sync?.failed
         ? `${editor.name} permanently deleted from the database and Google Sheets`
         : `${editor.name} deleted from the database; Google Sheets deletion is queued until writable credentials are added`;
+    notifyAction(`${staffLabel} permanently deleted.`);
   }
   async function reconcileEditors() {
     reconciling = true;
@@ -198,9 +225,12 @@
       return;
     }
     message = result.editorsArchived
-      ? `${result.editorsArchived} editor(s) missing from Sheets moved to Archived.`
-      : "Editors already match Google Sheets.";
-    if (result.editorsArchived) location.reload();
+      ? `${result.editorsArchived} ${staffLabel.toLowerCase()} record(s) missing from Sheets moved to Archived.`
+      : `${labelFor(data.configuration?.profile, "staff", true)} already match Google Sheets.`;
+    if (result.editorsArchived) {
+      flashAction(message);
+      location.reload();
+    } else notifyAction(message);
   }
   onMount(() => {
     const editorId = new URL(location.href).searchParams.get("editor");
@@ -213,15 +243,15 @@
 </script>
 
 <PageHeader
-  eyebrow="Create, edit and assign"
-  title="Editors"
-  action="New editor"
+  eyebrow="Team availability and work allocation"
+  title={labelFor(data.configuration?.profile, "staff", true)}
+  action={`New ${staffLabel.toLowerCase()}`}
   onclick={() => openEditor()}
 />
 {#if showArchived}<div class="archive-context">
     <span
-      ><Archive size={15} /><strong>Archived editors</strong><small
-        >Restore an editor or delete them permanently.</small
+      ><Archive size={15} /><strong>Archived {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</strong><small
+        >Restore a {staffLabel.toLowerCase()} or delete the record permanently.</small
       ></span
     ><button
       class="back-active"
@@ -229,7 +259,7 @@
         showArchived = false;
         detailsOpen = false;
         detailEditor = null;
-      }}><ArrowLeft size={13} /> Back to active editors</button
+      }}><ArrowLeft size={13} /> Back to active {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</button
     >
   </div>{/if}
 <div class="editor-tools">
@@ -243,14 +273,14 @@
         showArchived = false;
         detailsOpen = false;
         detailEditor = null;
-      }}><ArrowLeft size={12} /> Back to active editors</button
+      }}><ArrowLeft size={12} /> Back to active {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</button
     >{:else}<button
       onclick={() => {
         showArchived = true;
         detailsOpen = false;
         detailEditor = null;
       }}><Archive size={12} /> View archived</button
-    >{/if}<span>{visibleEditors.length} editors</span>
+    >{/if}<span>{visibleEditors.length} {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</span>
 </div>
 {#if message}<p class="message">{message}</p>{/if}
 
@@ -270,7 +300,7 @@
         <h2>{editor.name}</h2>
         <p>{editor.specialty || "Specialty not set"}</p>
         <div class="editor-meta">
-          <span><strong>{editor.activeTasks}</strong> Active tasks</span><span
+          <span><strong>{editor.activeTasks}</strong> Active {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</span><span
             >{editor.phone || "No WhatsApp number"}</span
           >
         </div>
@@ -293,29 +323,27 @@
               ><Trash2 size={13} /><span class="action-label">Delete</span
               ></button
             >{:else}
-            <button
+            {#if portalEnabled}<button
               aria-label={`Copy ${editor.name} portal link`}
               onclick={() => copyPortal(editor)}
               >{#if copied === editor.id}<Check size={13} /><span
                   class="action-label">Copied</span
                 >{:else}<Link2 size={13} /><span class="action-label"
                   >Portal</span
-                >{/if}</button
-            >
+                >{/if}</button>{/if}
             <button
               aria-label={`Edit ${editor.name}`}
               onclick={() => openEditor(editor)}
               ><Pencil size={13} /><span class="action-label">Edit</span
               ></button
             >
-            {#if editor.phone}<a
+            {#if whatsappEnabled && editor.phone}<button
+                type="button"
                 class="whatsapp"
-                href={"https://wa.me/" + whatsappNumber(editor.phone)}
-                target="_blank"
-                rel="noopener noreferrer"
+                onclick={() => openEditorChat(editor)}
                 aria-label={`WhatsApp ${editor.name}`}
-                ><WhatsAppIcon size={14} /></a
-              >{:else}<button
+                ><WhatsAppIcon size={14} /></button
+              >{:else if whatsappEnabled}<button
                 type="button"
                 class="whatsapp unavailable"
                 aria-disabled="true"
@@ -339,15 +367,15 @@
   bind:open={detailsOpen}
   wide
   title={detailEditor
-    ? `${detailEditor.name} — Editor profile`
-    : "Editor profile"}
+    ? `${detailEditor.name} — ${staffLabel} profile`
+    : `${staffLabel} profile`}
 >
   {#if detailEditor}
     <div class="editor-detail">
       <div class="expansion-head">
         <div>
           <div class="entity-tags">
-            <span class="editor-tag">Editor</span><span
+            <span class="editor-tag">{staffLabel}</span><span
               >{detailEditor.availability || "available"}</span
             >
           </div>
@@ -357,9 +385,13 @@
               "Add a specialty to help with assignment decisions."}
           </p>
         </div>
-        <button class="secondary" onclick={() => editDetails(detailEditor!)}
-          ><Pencil size={13} /> Edit profile</button
-        >
+        <div class="detail-actions">
+          {#if whatsappEnabled}<button class="secondary" disabled={!detailEditor.phone} onclick={() => openEditorChat(detailEditor!)}
+            ><WhatsAppIcon size={13}/> WhatsApp</button>{/if}
+          <button class="secondary" onclick={() => editDetails(detailEditor!)}
+            ><Pencil size={13} /> Edit profile</button
+          >
+        </div>
       </div>
       <div class="editor-stats">
         <div>
@@ -376,7 +408,7 @@
         </div>
         <div>
           <ClipboardList size={15} /><span
-            >Active work<strong>{tasksFor(detailEditor.id).length} tasks</strong
+            >Active work<strong>{tasksFor(detailEditor.id).length} {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</strong
             ></span
           >
         </div>
@@ -385,15 +417,16 @@
             >Completed<strong
               >{tasksFor(detailEditor.id).filter(
                 (task) => task.status === "Completed",
-              ).length} tasks</strong
+              ).length} {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</strong
             ></span
           >
         </div>
         {#if detailEditor.locationUrl}<div class="editor-location"><MapPin size={15}/><span>Google Maps<strong><button onclick={() => previewMap(detailEditor?.locationUrl)}>Preview map</button><a href={detailEditor.locationUrl} target="_blank" rel="noreferrer">Open in new tab <ExternalLink size={10}/></a></strong></span></div>{/if}
+        {#if customFieldsEnabled}<CustomFieldValues definitions={data.configuration.profile.customFields} entity="staff" values={detailEditor.customFields}/>{/if}
       </div>
       <div class="assignment-head">
         <span>Current assignments</span><strong
-          >{tasksFor(detailEditor.id).length} tasks</strong
+          >{tasksFor(detailEditor.id).length} {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</strong
         >
       </div>
       {#if tasksFor(detailEditor.id).length}<div class="assignment-list">
@@ -401,8 +434,8 @@
               href={"/orders/" + task.orderId}
               ><div class="assignment-copy">
                 <div class="entity-tags">
-                  <span class="task-tag">Task</span><span class="customer-tag"
-                    >Customer</span
+                  <span class="task-tag">{taskLabel}</span><span class="customer-tag"
+                    >{customerLabel}</span
                   ><span>{task.customer}</span>
                 </div>
                 <strong>{task.name}</strong><small
@@ -412,24 +445,31 @@
                 >
               </div>
               <div class="assignment-status">
-                <span>{task.status}</span><small
+                <span>{statusFor(data.configuration?.profile, task.status).label}</span><small
                   >{task.progress}% complete</small
                 >
               </div></a
             >{/each}
         </div>{:else}<p class="empty-detail">
-          No active assignments for this editor.
+          No active assignments for this {staffLabel.toLowerCase()}.
         </p>{/if}
     </div>
   {/if}
 </Modal>
-<Modal title="Editor Google Maps location" bind:open={mapOpen} wide>
-  <div class="map-preview"><iframe title="Editor Google Maps location preview" src={mapTarget} loading="lazy"></iframe><p>If Google blocks the embedded preview, use the new-tab button.</p><a class="primary" href={mapTarget} target="_blank" rel="noreferrer"><MapPin size={14}/> Open in Google Maps</a></div>
+<Modal title={`${staffLabel} Google Maps location`} bind:open={mapOpen} wide>
+  <div class="map-preview"><iframe title={`${staffLabel} Google Maps location preview`} src={mapTarget} loading="lazy"></iframe><p>If Google blocks the embedded preview, use the new-tab button.</p><a class="primary" href={mapTarget} target="_blank" rel="noreferrer"><MapPin size={14}/> Open in Google Maps</a></div>
 </Modal>
+<DirectWhatsAppModal
+  bind:open={directWhatsAppOpen}
+  recipient={directEditor ? { kind: "staff", record: directEditor } : null}
+  orders={directEditorOrders}
+  configuration={data.configuration}
+  onmessage={(value) => (message = value)}
+/>
 <EditorModal bind:open={showEditor} editor={editing} onsaved={saved} />
 
 <style>
-  .editor-location strong{display:flex!important;align-items:flex-start;flex-direction:column;gap:3px}.editor-location button,.editor-location a{display:flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--purple);padding:0;font-size:8px}.map-preview{display:grid;gap:10px}.map-preview iframe{width:100%;height:min(55vh,430px);border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.map-preview p{margin:0;color:var(--muted);font-size:8px}.map-preview>a{display:flex;align-items:center;justify-content:center;gap:6px}
+  .detail-actions{display:flex;align-items:center;gap:7px}.detail-actions button{display:flex;align-items:center;justify-content:center;gap:6px}.editor-location strong{display:flex!important;align-items:flex-start;flex-direction:column;gap:3px}.editor-location button,.editor-location a{display:flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--purple);padding:0;font-size:8px}.map-preview{display:grid;gap:10px}.map-preview iframe{width:100%;height:min(55vh,430px);border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.map-preview p{margin:0;color:var(--muted);font-size:8px}.map-preview>a{display:flex;align-items:center;justify-content:center;gap:6px}
   .archive-context {
     display: flex;
     align-items: center;
@@ -591,7 +631,6 @@
   .editor-actions.archived-actions {
     grid-template-columns: minmax(0, 1fr) auto;
   }
-  .editor-actions a,
   .editor-actions button {
     min-width: 0;
     height: 32px;
@@ -784,6 +823,12 @@
     }
     .expansion-head {
       flex-direction: column;
+    }
+    .detail-actions {
+      width: 100%;
+    }
+    .detail-actions button {
+      flex: 1;
     }
     .assignment-list > a {
       align-items: flex-start;

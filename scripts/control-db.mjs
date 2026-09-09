@@ -48,7 +48,7 @@ if (!ownerCount) {
 	if (!email || !password) throw new Error('OWNER_BOOTSTRAP_EMAIL and OWNER_BOOTSTRAP_PASSWORD are required for the first bootstrap.');
 	const timestamp = now();
 	await client.query('INSERT INTO control_accounts (id, email, password_hash, role, tenant_id, created_at, updated_at) VALUES ($1, $2, $3, $4, NULL, $5, $6)', [id('ACC'), email, await hashPassword(password), 'owner', timestamp, timestamp]);
-	console.log('Created the initial StudioFlow owner account.');
+	console.log('Created the initial NexaDesk owner account.');
 }
 
 const tenantCount = Number((await client.query('SELECT COUNT(*) AS count FROM control_tenants', [])).rows[0]?.count || 0);

@@ -5,6 +5,8 @@ import { readyDatabase } from '$lib/server/db';
 import { addEventOption, createCustomer, createOrder, createTask, defaultEventOptions, getOrder, listCustomers, listOrdersPage } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
 import { indianMobileError, normalizeIndianMobile } from '$lib/phone';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { hasCapability, validateCustomValues } from '$lib/capabilities';
 
 export const GET = async ({ cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
@@ -14,6 +16,10 @@ export const GET = async ({ cookies, locals, url }) => {
 		query: url.searchParams.get('q') || '',
 		status: url.searchParams.get('status') || '',
 		event: url.searchParams.get('event') || '',
+		sort: (url.searchParams.get('sort') as 'newest' | 'oldest') || 'oldest',
+		dateFrom: url.searchParams.get('dateFrom') || '',
+		dateTo: url.searchParams.get('dateTo') || '',
+		pendingBalance: url.searchParams.get('pendingBalance') === 'true',
 		includeHistorical: url.searchParams.get('historical') !== 'false',
 		archived: url.searchParams.get('archived') === 'true'
 	}));
@@ -37,6 +43,7 @@ export const POST = async ({ request, cookies, locals }) => {
 		if (priceSet && advanceSet && paid > price) return json({ error: `Advance cannot be greater than the total for “${item.project}”.` }, { status: 400 });
 	}
 	const database = await readyDatabase(locals.tenant);
+	const configuration = await getTenantConfiguration(database, locals.tenant!);
 	let customerId = String(input.customerId || '').trim();
 	let createdCustomer = null;
 	if (input.createCustomer) {
@@ -53,13 +60,15 @@ export const POST = async ({ request, cookies, locals }) => {
 	const createdOrders = [];
 	for (const item of orderInputs) {
 		const priceSet = item.amount !== null && item.amount !== undefined && item.amount !== '';
-		const advanceSet = item.advance !== null && item.advance !== undefined && item.advance !== '';
+		const advanceSet = hasCapability(configuration.effectiveCapabilities, 'billing.payments') && item.advance !== null && item.advance !== undefined && item.advance !== '';
 		const event = String(item.event).trim();
+		try { item.customFields = hasCapability(configuration.effectiveCapabilities, 'customFields') ? validateCustomValues(configuration.profile, 'order', item.customFields) : {}; }
+		catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Custom fields are invalid.' }, { status: 400 }); }
 		if (!defaultEventOptions.some((option) => option.toLowerCase() === event.toLowerCase())) await addEventOption(database, event);
 		let order;
-		try { order = await createOrder(database, { customerId, customer: String(input.customer).trim(), mobile: String(input.mobile || '').trim(), workType: event, project: String(item.project).trim(), receiving: String(item.receiving ?? input.receiving ?? '').trim(), duration: String(item.duration ?? input.duration ?? '').trim(), price: priceSet ? Math.max(0, Number(item.amount)) : 0, paid: advanceSet ? Math.max(0, Number(item.advance)) : 0, priceSet, advanceSet, source: String(item.source ?? input.source ?? '').trim(), remarks: String(item.remarks ?? input.remarks ?? '').trim(), due: String(item.due || '').trim(), important: Boolean(item.important ?? input.important) }); }
+		try { order = await createOrder(database, { customerId, customer: String(input.customer).trim(), mobile: String(input.mobile || '').trim(), workType: event, project: String(item.project).trim(), receiving: String(item.receiving ?? input.receiving ?? '').trim(), duration: String(item.duration ?? input.duration ?? '').trim(), price: priceSet ? Math.max(0, Number(item.amount)) : 0, paid: advanceSet ? Math.max(0, Number(item.advance)) : 0, priceSet, advanceSet, source: String(item.source ?? input.source ?? '').trim(), remarks: String(item.remarks ?? input.remarks ?? '').trim(), due: String(item.due || '').trim(), important: Boolean(item.important ?? input.important), customFields: item.customFields }); }
 		catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to create order.' }, { status: 400 }); }
-		const initialTasks = Array.isArray(item.tasks) ? item.tasks : [];
+		const initialTasks = hasCapability(configuration.effectiveCapabilities, 'work.tasks') && Array.isArray(item.tasks) ? item.tasks : [];
 		for (const task of initialTasks) {
 			if (!String(task.name || '').trim()) continue;
 			await createTask(database, order.id, { name: String(task.name).trim(), due: String(task.due || item.due || ''), billableAmount: Math.max(0, Number(task.billableAmount || 0)) });

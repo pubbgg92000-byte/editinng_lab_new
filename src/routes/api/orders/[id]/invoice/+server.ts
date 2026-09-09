@@ -1,21 +1,26 @@
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
-import { getOrder, getSettings, listCustomers, recordInvoice, regenerateCustomerToken, updateOrder, updateTask } from '$lib/server/repository';
+import { getBusinessProfile, getOrder, getSettings, listCustomers, recordInvoice, regenerateCustomerToken, updateOrder, updateTask } from '$lib/server/repository';
 import { applicationUrl, invoiceMessage, whatsappUrl } from '$lib/server/whatsapp';
 import { flushSheetSync } from '$lib/server/googleSheets';
 import { money } from '$lib/data';
 import { durationBillableAmount } from '$lib/duration';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { hasCapability } from '$lib/capabilities';
 
 // Final billing decision: manual subtotal or task duration, plus amount/percent discount.
 export const POST = async ({ params, request, cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
+	const configuration = await getTenantConfiguration(database, locals.tenant!);
 	const existingOrder = await getOrder(database, params.id);
 	if (!existingOrder) return json({ error: 'Order not found' }, { status: 404 });
 	let order = existingOrder;
 	const input = await request.json().catch(() => ({})) as { kind?: 'advance' | 'payment' | 'partial' | 'final'; paymentId?: string; taskIds?: string[]; billingMode?: 'manual' | 'duration'; manualSubtotal?: number; discountMode?: 'percent' | 'amount'; discountValue?: number };
 	const requestedKind = input.kind === 'advance' ? 'advance' : input.kind === 'payment' ? 'payment' : input.kind === 'partial' ? 'partial' : 'final';
+	if (requestedKind === 'partial' && !hasCapability(configuration.effectiveCapabilities, 'billing.partialInvoices')) return json({ error: 'Partial invoices are not available for this workspace.' }, { status: 403 });
+	if (input.billingMode === 'duration' && !hasCapability(configuration.effectiveCapabilities, 'billing.duration')) return json({ error: 'Duration billing is not available for this workspace.' }, { status: 403 });
 	const payment = input.paymentId ? order.payments?.find((item) => item.id === input.paymentId) : undefined;
 	if (input.paymentId && !payment) return json({ error: 'Payment record not found.' }, { status: 404 });
 	const kind = payment?.kind || requestedKind;
@@ -25,8 +30,9 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 	const customers = await listCustomers(database, true);
 	const customer = customers.find((item) => item.id === order.customerId)
 		|| customers.find((item) => item.business === order.customer && item.phone.replace(/\D/g, '') === order.mobile?.replace(/\D/g, ''));
-	if (customer && !customer.token && !customer.archived) customer.token = await regenerateCustomerToken(database, customer.id) || undefined;
-	const settings = await getSettings(database);
+	if (customer && !customer.token && !customer.archived && hasCapability(configuration.effectiveCapabilities, 'portal.customer')) customer.token = await regenerateCustomerToken(database, customer.id) || undefined;
+	const [settings, profile] = await Promise.all([getSettings(database), getBusinessProfile(database)]);
+	const customerPortalToken = hasCapability(configuration.effectiveCapabilities, 'portal.customer') ? customer?.token || '' : '';
 	let billingMode: 'manual' | 'duration' = input.billingMode === 'duration' ? 'duration' : 'manual';
 	let discountMode: 'percent' | 'amount' = input.discountMode === 'percent' ? 'percent' : 'amount';
 	let taskItems = partialTasks.map((task) => ({ taskId: task.id, name: task.name, amount: Math.max(0, Number(task.billableAmount || 0) - Number(task.invoicedAmount || 0)) }));
@@ -54,9 +60,9 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 	}
 	const total = Math.max(0, subtotal - discount);
 	const invoice = await recordInvoice(database, order.id, (number, invoiceId) => {
-		const portalLink = customer?.token ? `${applicationUrl(url.origin)}/portal/${locals.tenant!.slug}/customer/${customer.token}` : '';
-		const invoiceLink = customer?.token ? `${portalLink}/invoice/${invoiceId}` : '';
-		if (kind !== 'partial') return invoiceMessage(settings, number, order, customer?.token || '', url.origin, { kind, amount: payment?.amount, invoiceUrl: invoiceLink }, locals.tenant!.slug);
+		const portalLink = customerPortalToken ? `${applicationUrl(url.origin)}/portal/${locals.tenant!.slug}/customer/${customerPortalToken}` : '';
+		const invoiceLink = customerPortalToken ? `${portalLink}/invoice/${invoiceId}` : '';
+		if (kind !== 'partial') return invoiceMessage(settings, number, order, customerPortalToken, url.origin, { kind, amount: payment?.amount, invoiceUrl: invoiceLink }, locals.tenant!.slug, customer, profile);
 		return [
 			settings.studioName,
 			`Partial work invoice: ${number}`,

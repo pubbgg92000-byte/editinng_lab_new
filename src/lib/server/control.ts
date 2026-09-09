@@ -3,7 +3,8 @@ import { dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
 import { controlSchemaStatements } from '../../../db/control-schema';
 import { databaseFromUrl } from './db';
-import type { Account, AuthSession, Tenant, TenantStatus } from '$lib/types';
+import { builtInPackages, capabilityKeys, defaultPackage, packageById, parseJsonSetting } from '$lib/capabilities';
+import type { Account, AuthSession, NichePackage, Tenant, TenantEntitlements, TenantStatus } from '$lib/types';
 
 /**
  * MASTER CONTROL PLANE
@@ -96,6 +97,29 @@ async function bootstrap(database: AppDatabase) {
 	}
 }
 
+async function seedCapabilityControl(database: AppDatabase) {
+	const timestamp = now();
+	await database.batch(builtInPackages.map((item) => database.prepare(
+		`INSERT INTO control_packages (id, name, version, description, definition, is_builtin, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET name = excluded.name, version = excluded.version,
+		 description = excluded.description, definition = excluded.definition, updated_at = excluded.updated_at`
+	).bind(item.id, item.name, item.version, item.description, JSON.stringify(item), timestamp, timestamp)));
+	const tenantRows = await database.prepare('SELECT id FROM control_tenants').all<{ id: string }>();
+	for (const tenant of tenantRows.results || []) {
+		await database.prepare(
+			`INSERT INTO control_tenant_packages (tenant_id, package_id, package_version, snapshot, updated_at)
+			 VALUES (?, ?, ?, ?, ?) ON CONFLICT(tenant_id) DO NOTHING`
+		).bind(tenant.id, defaultPackage.id, defaultPackage.version, JSON.stringify(defaultPackage), timestamp).run();
+		const assignment = await database.prepare('SELECT snapshot FROM control_tenant_packages WHERE tenant_id = ?').bind(tenant.id).first<{ snapshot: string }>();
+		const snapshot = parseJsonSetting<NichePackage>(assignment?.snapshot, defaultPackage);
+		await database.batch(capabilityKeys.map((key) => database.prepare(
+			`INSERT INTO control_tenant_capabilities (tenant_id, capability_key, allowed_value, updated_at)
+			 VALUES (?, ?, ?, ?) ON CONFLICT(tenant_id, capability_key) DO NOTHING`
+		).bind(tenant.id, key, JSON.stringify(snapshot.allowed[key] ?? false), timestamp)));
+	}
+}
+
 export async function readyControlDatabase() {
 	if (controlReady) return controlReady;
 	controlReady = (async () => {
@@ -103,6 +127,7 @@ export async function readyControlDatabase() {
 		await database.batch(controlSchemaStatements.map((statement) => database.prepare(statement)));
 		await database.prepare('DELETE FROM control_sessions WHERE expires_at <= ?').bind(now()).run();
 		await bootstrap(database);
+		await seedCapabilityControl(database);
 		return database;
 	})();
 	try { return await controlReady; }
@@ -217,28 +242,99 @@ export async function listTenantSummaries() {
 			databaseName = decodeURIComponent(connection.pathname.replace(/^\//, '')) || databaseName;
 			databaseRole = decodeURIComponent(connection.username) || databaseRole;
 		} catch { /* Keep protected labels for malformed legacy URLs. */ }
-		return { ...tenant, adminEmail: row.admin_email || '', activeSessions: Number(row.active_sessions || 0), databaseUrl: undefined, databaseHost, databaseName, databaseRole };
+		const assignment = await getTenantPackage(tenant.id);
+		return { ...tenant, adminEmail: row.admin_email || '', activeSessions: Number(row.active_sessions || 0), databaseUrl: undefined, databaseHost, databaseName, databaseRole, packageId: assignment.package.id, packageName: assignment.package.name, packageVersion: assignment.package.version, packageUpdateAvailable: assignment.updateAvailable, entitlements: assignment.allowed };
 	}));
 }
 
 export interface NewTenantInput {
 	internalName: string; slug: string; studioName: string; logoUrl: string; databaseUrl: string;
-	googleSheetId: string; ordersTab: string; email: string; password: string; isDemo: boolean; status: TenantStatus;
+	googleSheetId: string; ordersTab: string; email: string; password: string; isDemo: boolean; status: TenantStatus; packageId?: string;
 }
 
 export async function createTenant(input: NewTenantInput, ownerId: string) {
 	const database = await readyControlDatabase();
 	const timestamp = now();
 	const tenantId = id('TEN');
+	const selectedPackage = await getPackage(input.packageId || defaultPackage.id);
 	await database.batch([
 		database.prepare('INSERT INTO control_tenants (id, slug, internal_name, studio_name, logo_url, database_url_cipher, google_sheet_id, orders_tab, status, is_demo, is_legacy, connection_status, connection_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)')
 			.bind(tenantId, input.slug, input.internalName, input.studioName, input.logoUrl, await encryptSecret(input.databaseUrl), input.googleSheetId, input.ordersTab, input.status, input.isDemo ? 1 : 0, 'healthy', '', timestamp, timestamp),
 		database.prepare('INSERT INTO control_accounts (id, email, password_hash, role, tenant_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
 			.bind(id('ACC'), input.email.toLowerCase(), await hashPassword(input.password), 'client_admin', tenantId, timestamp, timestamp),
 		database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-			.bind(id('AUD'), ownerId, 'Tenant created', tenantId, input.internalName, timestamp)
+			.bind(id('AUD'), ownerId, 'Tenant created', tenantId, `${input.internalName} · ${selectedPackage.name}`, timestamp),
+		database.prepare('INSERT INTO control_tenant_packages (tenant_id, package_id, package_version, snapshot, updated_at) VALUES (?, ?, ?, ?, ?)')
+			.bind(tenantId, selectedPackage.id, selectedPackage.version, JSON.stringify(selectedPackage), timestamp),
+		...capabilityKeys.map((key) => database.prepare('INSERT INTO control_tenant_capabilities (tenant_id, capability_key, allowed_value, updated_at) VALUES (?, ?, ?, ?)')
+			.bind(tenantId, key, JSON.stringify(selectedPackage.allowed[key] ?? false), timestamp))
 	]);
 	return findTenantBySlug(input.slug);
+}
+
+export async function listPackages(): Promise<NichePackage[]> {
+	const database = await readyControlDatabase();
+	const result = await database.prepare('SELECT definition FROM control_packages ORDER BY is_builtin DESC, name').all<{ definition: string }>();
+	return (result.results || []).map((row) => parseJsonSetting<NichePackage>(row.definition, defaultPackage));
+}
+
+export async function getPackage(packageId: string): Promise<NichePackage> {
+	const database = await readyControlDatabase();
+	const row = await database.prepare('SELECT definition FROM control_packages WHERE id = ?').bind(packageId).first<{ definition: string }>();
+	return row ? parseJsonSetting<NichePackage>(row.definition, packageById(packageId)) : packageById(packageId);
+}
+
+export async function savePackage(input: NichePackage, ownerId: string) {
+	const database = await readyControlDatabase();
+	const packageId = String(input.id || '').trim().toLowerCase();
+	if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(packageId)) throw new Error('Package ID may contain lowercase letters, numbers, and hyphens.');
+	if (!input.name?.trim()) throw new Error('Package name is required.');
+	const existing = await database.prepare('SELECT version, is_builtin FROM control_packages WHERE id = ?').bind(packageId).first<{ version: number; is_builtin: number }>();
+	if (existing?.is_builtin) throw new Error('Built-in packages cannot be overwritten. Duplicate it with a new ID.');
+	const value: NichePackage = { ...input, id: packageId, name: input.name.trim(), version: Number(existing?.version || 0) + 1 };
+	const timestamp = now();
+	await database.batch([
+		database.prepare(`INSERT INTO control_packages (id, name, version, description, definition, is_builtin, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET name = excluded.name, version = excluded.version, description = excluded.description, definition = excluded.definition, updated_at = excluded.updated_at`)
+			.bind(value.id, value.name, value.version, value.description || '', JSON.stringify(value), timestamp, timestamp),
+		database.prepare('INSERT INTO control_audit_logs (id, account_id, action, details, created_at) VALUES (?, ?, ?, ?, ?)')
+			.bind(id('AUD'), ownerId, existing ? 'Niche package updated' : 'Niche package created', `${value.name} v${value.version}`, timestamp)
+	]);
+	return value;
+}
+
+export async function getTenantEntitlements(tenantId: string): Promise<TenantEntitlements> {
+	const database = await readyControlDatabase();
+	const result = await database.prepare('SELECT capability_key, allowed_value FROM control_tenant_capabilities WHERE tenant_id = ?').bind(tenantId).all<{ capability_key: string; allowed_value: string }>();
+	const values = Object.fromEntries((result.results || []).map((row) => [row.capability_key, parseJsonSetting(row.allowed_value, false)]));
+	return { ...Object.fromEntries(capabilityKeys.map((key) => [key, false])), ...values };
+}
+
+export async function getTenantPackage(tenantId: string): Promise<{ package: NichePackage; allowed: TenantEntitlements; updateAvailable: boolean }> {
+	const database = await readyControlDatabase();
+	const row = await database.prepare('SELECT package_id, package_version, snapshot FROM control_tenant_packages WHERE tenant_id = ?').bind(tenantId).first<{ package_id: string; package_version: number; snapshot: string }>();
+	const snapshot = row ? parseJsonSetting<NichePackage>(row.snapshot, defaultPackage) : defaultPackage;
+	const current = await getPackage(row?.package_id || snapshot.id);
+	return { package: snapshot, allowed: await getTenantEntitlements(tenantId), updateAvailable: current.version > Number(row?.package_version || snapshot.version) };
+}
+
+export async function assignTenantPackage(tenantId: string, packageId: string, allowed: TenantEntitlements, ownerId: string) {
+	const database = await readyControlDatabase();
+	const selectedPackage = await getPackage(packageId);
+	const timestamp = now();
+	await database.batch([
+		database.prepare(`INSERT INTO control_tenant_packages (tenant_id, package_id, package_version, snapshot, updated_at)
+			VALUES (?, ?, ?, ?, ?) ON CONFLICT(tenant_id) DO UPDATE SET package_id = excluded.package_id,
+			package_version = excluded.package_version, snapshot = excluded.snapshot, updated_at = excluded.updated_at`)
+			.bind(tenantId, selectedPackage.id, selectedPackage.version, JSON.stringify(selectedPackage), timestamp),
+		...capabilityKeys.map((key) => database.prepare(`INSERT INTO control_tenant_capabilities (tenant_id, capability_key, allowed_value, updated_at)
+			VALUES (?, ?, ?, ?) ON CONFLICT(tenant_id, capability_key) DO UPDATE SET allowed_value = excluded.allowed_value, updated_at = excluded.updated_at`)
+			.bind(tenantId, key, JSON.stringify(allowed[key] ?? false), timestamp)),
+		database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+			.bind(id('AUD'), ownerId, 'Tenant capabilities updated', tenantId, `${selectedPackage.name} v${selectedPackage.version}`, timestamp)
+	]);
+	return { package: selectedPackage, allowed: await getTenantEntitlements(tenantId), updateAvailable: false };
 }
 
 export async function setTenantConnectionResult(tenantId: string, status: 'healthy' | 'error', error = '') {
@@ -293,6 +389,6 @@ export async function updateTenantConnection(tenantId: string, input: { database
 		database.prepare('UPDATE control_tenants SET database_url_cipher = ?, google_sheet_id = ?, orders_tab = ?, studio_name = ?, logo_url = ?, connection_status = ?, connection_error = ?, updated_at = ? WHERE id = ?')
 			.bind(await encryptSecret(input.databaseUrl), input.googleSheetId, input.ordersTab, input.studioName, input.logoUrl, 'healthy', '', now(), tenantId),
 		database.prepare('DELETE FROM control_sessions WHERE account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ?)').bind(tenantId),
-		database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id('AUD'), ownerId, 'Tenant connections updated', tenantId, 'Connections revalidated; client sessions revoked', now())
+		database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id('AUD'), ownerId, 'Workspace connections updated', tenantId, 'Connections revalidated; workspace sessions revoked', now())
 	]);
 }

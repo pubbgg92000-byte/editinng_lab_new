@@ -1,9 +1,10 @@
 // Central tenant business-data layer for customers, editors, orders, tasks, billing, and history.
-import type { ActivityLog, Customer, Editor, EditorAvailability, Invoice, Order, Payment, StudioSettings, Task, TaskStatus } from '$lib/types';
+import type { ActivityLog, BusinessProfile, Customer, Editor, EditorAvailability, Invoice, NichePackage, Order, Payment, StudioSettings, Task, TaskStatus, TenantPreferences, WorkspaceModuleOverrides } from '$lib/types';
 import { createPortalToken, hashPortalToken, openPortalToken, sealPortalToken } from './tokens';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate, legacyAssignmentTemplate, legacyInvoiceTemplate } from '$lib/messageTemplates';
 import { durationBillableAmount } from '$lib/duration';
 import { indianMobileError, normalizeIndianMobile } from '$lib/phone';
+import { defaultPackage, parseJsonSetting, profileForPackage } from '$lib/capabilities';
 
 /**
  * TENANT BUSINESS REPOSITORY
@@ -14,6 +15,7 @@ type Row = Record<string, any>;
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+const customValues = (value: unknown) => parseJsonSetting<Record<string, string | number | boolean | null>>(value, {});
 
 async function rows(database: AppDatabase, query: string, values: unknown[] = []) {
 	return (await database.prepare(query).bind(...values).all<Row>()).results ?? [];
@@ -36,17 +38,17 @@ export async function queueSheetSync(database: AppDatabase, entityType: string, 
 }
 
 function customerFrom(row: Row): Customer {
-	return { id: row.id, name: row.name, business: row.business, phone: row.phone, email: row.email, address: row.address, locationUrl: row.location_url || '', gst: row.gst, projects: Number(row.projects ?? 0), pending: Number(row.pending ?? 0), archived: Boolean(row.archived_at) };
+	return { id: row.id, name: row.name, business: row.business, phone: row.phone, email: row.email, address: row.address, locationUrl: row.location_url || '', gst: row.gst, projects: Number(row.projects ?? 0), pending: Number(row.pending ?? 0), archived: Boolean(row.archived_at), customFields: customValues(row.custom_values) };
 }
 
 function editorFrom(row: Row): Editor {
 	const availability = row.availability as EditorAvailability;
-	return { id: row.id, code: row.code || row.id, name: row.name, initials: initials(row.name), specialty: row.specialty, phone: row.phone, locationUrl: row.location_url || '', activeTasks: Number(row.active_tasks ?? 0), available: availability === 'available', availability, archived: Boolean(row.archived_at) };
+	return { id: row.id, code: row.code || row.id, name: row.name, initials: initials(row.name), specialty: row.specialty, phone: row.phone, locationUrl: row.location_url || '', activeTasks: Number(row.active_tasks ?? 0), available: availability === 'available', availability, archived: Boolean(row.archived_at), customFields: customValues(row.custom_values) };
 }
 
 function taskFrom(row: Row): Task {
 	// Central task mapping keeps admin billing and editor work data on the same record.
-	return { id: row.id, orderId: row.order_id, name: row.title, assignee: row.editor_name || 'Unassigned', editorId: row.editor_id || undefined, editorCode: row.editor_code || undefined, status: row.status, progress: Number(row.progress), due: row.due_date, instructions: row.instructions, textLink: row.text_link, imageUrl: row.image_url, outputLink: row.output_link, notes: row.notes, billableAmount: Number(row.billable_amount || 0), invoicedAmount: Number(row.invoiced_amount || 0), billingMode: row.billing_mode === 'duration' ? 'duration' : 'manual', hourlyRate: Number(row.hourly_rate || 0), videoDurationMinutes: Number(row.video_duration_minutes || 0), device: String(row.device || ''), editorSettlement: row.editor_settlement === 'editor-bills-admin' ? 'editor-bills-admin' : row.editor_settlement === 'admin-issues-statement' ? 'admin-issues-statement' : 'not-set', archived: Boolean(row.archived_at) };
+	return { id: row.id, orderId: row.order_id, name: row.title, assignee: row.editor_name || 'Unassigned', editorId: row.editor_id || undefined, editorCode: row.editor_code || undefined, status: row.status, progress: Number(row.progress), due: row.due_date, instructions: row.instructions, textLink: row.text_link, imageUrl: row.image_url, outputLink: row.output_link, notes: row.notes, billableAmount: Number(row.billable_amount || 0), invoicedAmount: Number(row.invoiced_amount || 0), billingMode: row.billing_mode === 'duration' ? 'duration' : 'manual', hourlyRate: Number(row.hourly_rate || 0), videoDurationMinutes: Number(row.video_duration_minutes || 0), device: String(row.device || ''), editorSettlement: row.editor_settlement === 'editor-bills-admin' ? 'editor-bills-admin' : row.editor_settlement === 'admin-issues-statement' ? 'admin-issues-statement' : 'not-set', archived: Boolean(row.archived_at), customFields: customValues(row.custom_values) };
 }
 
 function paymentFrom(row: Row): Payment {
@@ -56,7 +58,7 @@ function paymentFrom(row: Row): Payment {
 function orderFrom(row: Row, orderTasks: Task[] = [], orderPayments: Payment[] = []): Order {
 	const initialAdvance = Number(row.advance);
 	const paid = initialAdvance + orderPayments.reduce((sum, payment) => sum + payment.amount, 0);
-	return { id: row.id, serial: Number(row.serial), customerId: row.customer_id || undefined, customer: row.customer_name, mobile: row.mobile, workType: row.event, project: row.project, receiving: row.receiving, duration: row.duration, price: Number(row.amount), discount: Number(row.discount || 0), paid, initialAdvance, priceSet: Boolean(row.amount_set), advanceSet: Boolean(row.advance_set), source: row.source, remarks: row.remarks, due: row.due_date, status: row.status, progress: Number(row.progress), files: 0, fileLink: '', color: '#00ADB5', tasks: orderTasks, payments: orderPayments, important: Boolean(row.important), historical: Boolean(row.historical), archived: Boolean(row.archived_at), deliveryMethod: row.delivery_method || '', deliveredAt: row.delivered_at || '', customerNotifiedAt: row.customer_notified_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '' };
+	return { id: row.id, serial: Number(row.serial), customerId: row.customer_id || undefined, customer: row.customer_name, mobile: row.mobile, workType: row.event, project: row.project, receiving: row.receiving, duration: row.duration, price: Number(row.amount), discount: Number(row.discount || 0), paid, initialAdvance, priceSet: Boolean(row.amount_set), advanceSet: Boolean(row.advance_set), source: row.source, remarks: row.remarks, due: row.due_date, status: row.status, progress: Number(row.progress), files: 0, fileLink: '', color: '#00ADB5', tasks: orderTasks, payments: orderPayments, important: Boolean(row.important), historical: Boolean(row.historical), archived: Boolean(row.archived_at), deliveryMethod: row.delivery_method || '', deliveredAt: row.delivered_at || '', customerNotifiedAt: row.customer_notified_at || '', createdAt: row.created_at || '', updatedAt: row.updated_at || '', customFields: customValues(row.custom_values) };
 }
 
 // ---------- Studio profile, prefixes, WhatsApp templates, and tenant theme ----------
@@ -67,7 +69,7 @@ export async function getSettings(database: AppDatabase): Promise<StudioSettings
 	const storedInvoiceTemplate = String(values.invoiceTemplate || '');
 	const savedInvoiceTemplate = !storedInvoiceTemplate || storedInvoiceTemplate.trim() === legacyInvoiceTemplate.trim() ? defaultInvoiceTemplate : storedInvoiceTemplate;
 	const invoiceTemplate = savedInvoiceTemplate.includes('{{portal_link}}') ? savedInvoiceTemplate : `${savedInvoiceTemplate.trimEnd()}\n\nView your work status and bill:\n{{portal_link}}`;
-	return { studioName: values.studioName || 'StudioFlow Studio', orderPrefix: String(values.orderPrefix || 'ORD').toUpperCase(), editorPrefix: String(values.editorPrefix || 'ED').toUpperCase(), logoUrl: values.logoUrl || '', address: values.address || '', phone: values.phone || '', email: values.email || '', gstin: values.gstin || '', paymentNote: values.paymentNote || '', invoiceFooter: values.invoiceFooter || '', assignmentTemplate, invoiceTemplate, themePalette: values.themePalette || 'graphite-aqua', themeDefaultMode: values.themeDefaultMode === 'dark' ? 'dark' : 'light' } as StudioSettings;
+	return { studioName: values.studioName || 'NexaDesk Workspace', orderPrefix: String(values.orderPrefix || 'ORD').toUpperCase(), editorPrefix: String(values.editorPrefix || 'ED').toUpperCase(), logoUrl: values.logoUrl || '', address: values.address || '', phone: values.phone || '', email: values.email || '', gstin: values.gstin || '', paymentNote: values.paymentNote || '', invoiceFooter: values.invoiceFooter || '', assignmentTemplate, invoiceTemplate, themePalette: values.themePalette || 'graphite-aqua', themeDefaultMode: values.themeDefaultMode === 'dark' ? 'dark' : 'light' } as StudioSettings;
 }
 
 export async function updateSettings(database: AppDatabase, input: Partial<StudioSettings>) {
@@ -77,6 +79,122 @@ export async function updateSettings(database: AppDatabase, input: Partial<Studi
 	await activity(database, 'admin', 'Settings updated', 'settings', 'studio', 'Studio profile, messages and appearance updated');
 	await queueSheetSync(database, 'Settings', 'studio', settings);
 	return settings;
+}
+
+export async function getBusinessProfile(database: AppDatabase): Promise<BusinessProfile> {
+	const row = await database.prepare("SELECT value FROM settings WHERE key = 'businessProfile'").first<{ value: string }>();
+	return parseJsonSetting<BusinessProfile>(row?.value, defaultPackage.profile);
+}
+
+export async function getCapabilityPreferences(database: AppDatabase): Promise<TenantPreferences> {
+	const row = await database.prepare("SELECT value FROM settings WHERE key = 'capabilityPreferences'").first<{ value: string }>();
+	return parseJsonSetting<TenantPreferences>(row?.value, defaultPackage.enabled);
+}
+
+export async function getModuleConfigurationOverrides(database: AppDatabase): Promise<WorkspaceModuleOverrides | null> {
+	const row = await database.prepare("SELECT value FROM settings WHERE key = 'moduleConfigurationOverrides'").first<{ value: string }>();
+	return row ? parseJsonSetting<WorkspaceModuleOverrides>(row.value, {}) : null;
+}
+
+export async function updateModuleConfigurationOverrides(database: AppDatabase, overrides: WorkspaceModuleOverrides, actor = 'admin') {
+	const timestamp = now();
+	await database.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('moduleConfigurationOverrides', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+		.bind(JSON.stringify(overrides), timestamp).run();
+	await activity(database, actor, 'Portal and messaging configuration updated', 'settings', 'modules', 'Customer portal, worker portal, and WhatsApp preferences');
+	await queueSheetSync(database, 'Settings', 'modules', overrides);
+	return overrides;
+}
+
+type OwnerConfigurationSnapshot = {
+	id: string;
+	createdAt: string;
+	label: string;
+	profile: BusinessProfile;
+	preferences: TenantPreferences;
+	moduleOverrides: WorkspaceModuleOverrides;
+	settings: Pick<StudioSettings, 'studioName' | 'orderPrefix' | 'editorPrefix' | 'logoUrl' | 'themePalette' | 'themeDefaultMode'>;
+	ownerState?: { packageId: string; allowed: Record<string, unknown> };
+};
+
+export async function listConfigurationSnapshots(database: AppDatabase): Promise<OwnerConfigurationSnapshot[]> {
+	const row = await database.prepare("SELECT value FROM settings WHERE key = 'ownerConfigurationHistory'").first<{ value: string }>();
+	return parseJsonSetting<OwnerConfigurationSnapshot[]>(row?.value, []).slice(0, 20);
+}
+
+export async function createConfigurationSnapshot(database: AppDatabase, label: string, ownerState?: OwnerConfigurationSnapshot['ownerState']) {
+	const [profile, preferences, moduleOverrides, settings, history] = await Promise.all([
+		getBusinessProfile(database),
+		getCapabilityPreferences(database),
+		getModuleConfigurationOverrides(database),
+		getSettings(database),
+		listConfigurationSnapshots(database)
+	]);
+	const snapshot: OwnerConfigurationSnapshot = {
+		id: id('CFG'),
+		createdAt: now(),
+		label: label.slice(0, 120),
+		profile,
+		preferences,
+		moduleOverrides: moduleOverrides || {},
+		settings: {
+			studioName: settings.studioName,
+			orderPrefix: settings.orderPrefix,
+			editorPrefix: settings.editorPrefix,
+			logoUrl: settings.logoUrl,
+			themePalette: settings.themePalette,
+			themeDefaultMode: settings.themeDefaultMode
+		},
+		ownerState
+	};
+	const next = [snapshot, ...history].slice(0, 20);
+	await database.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('ownerConfigurationHistory', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+		.bind(JSON.stringify(next), snapshot.createdAt).run();
+	return snapshot;
+}
+
+export async function restoreConfigurationSnapshot(database: AppDatabase, snapshotId: string) {
+	const history = await listConfigurationSnapshots(database);
+	const snapshot = history.find((item) => item.id === snapshotId);
+	if (!snapshot) throw new Error('Configuration snapshot not found.');
+	const timestamp = now();
+	const entries: Array<[string, string]> = [
+		['businessProfile', JSON.stringify(snapshot.profile)],
+		['capabilityPreferences', JSON.stringify(snapshot.preferences)],
+		['moduleConfigurationOverrides', JSON.stringify(snapshot.moduleOverrides)],
+		...Object.entries(snapshot.settings).map(([key, value]) => [key, String(value)] as [string, string])
+	];
+	await database.batch(entries.map(([key, value]) =>
+		database.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+			.bind(key, value, timestamp)
+	));
+	await activity(database, 'owner', 'Workspace configuration rolled back', 'settings', snapshot.id, snapshot.label);
+	await queueSheetSync(database, 'Settings', 'rollback', snapshot);
+	return snapshot;
+}
+
+export async function updateTenantProfile(database: AppDatabase, profile: BusinessProfile, preferences: TenantPreferences, actor = 'admin') {
+	const timestamp = now();
+	await database.batch([
+		database.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('businessProfile', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(profile), timestamp),
+		database.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('capabilityPreferences', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify(preferences), timestamp)
+	]);
+	await activity(database, actor, 'Workspace capabilities updated', 'settings', 'capabilities', profile.presetId);
+	await queueSheetSync(database, 'Settings', 'capabilities', { profile, preferences });
+	return { profile: await getBusinessProfile(database), preferences: await getCapabilityPreferences(database) };
+}
+
+export async function applyNichePackage(database: AppDatabase, nichePackage: NichePackage) {
+	const currentProfile = await getBusinessProfile(database);
+	const profile = profileForPackage(currentProfile, nichePackage);
+	const currentModules = await getModuleConfigurationOverrides(database);
+	const customTemplates = Object.fromEntries(Object.entries(currentModules?.['communications.whatsapp']?.templates || {})
+		.filter(([, item]) => item.source === 'custom'));
+	await updateModuleConfigurationOverrides(database, Object.keys(customTemplates).length ? {
+		schemaVersion: 1,
+		'communications.whatsapp': { templates: customTemplates }
+	} : {}, 'owner');
+	if (Object.keys(nichePackage.settingsDefaults || {}).length) await updateSettings(database, nichePackage.settingsDefaults);
+	return updateTenantProfile(database, profile, nichePackage.enabled, 'owner');
 }
 
 // ---------- Customers: unique phone, edit propagation, archive, and portal token ----------
@@ -108,8 +226,8 @@ export async function createCustomer(database: AppDatabase, input: Partial<Custo
 	if (phoneError) throw new Error(phoneError);
 	const phone = normalizeIndianMobile(input.phone);
 	if (await database.prepare('SELECT id FROM customers WHERE phone_normalized = ? OR RIGHT(regexp_replace(phone, ?, ?, ?), 10) = ? LIMIT 1').bind(phone, '\\D', '', 'g', phone).first()) throw new Error('A customer with this mobile number already exists. Open the existing customer instead.');
-	const customer: Customer = { id: id('CUST'), name: String(input.name || '').trim(), business: String(input.business || input.name || '').trim(), phone, email: String(input.email || '').trim(), address: input.address || '', locationUrl: String(input.locationUrl || '').trim(), gst: input.gst || '', projects: 0, pending: 0, token };
-	await database.prepare('INSERT INTO customers (id, name, business, phone, phone_normalized, email, address, location_url, gst, portal_token_hash, portal_token_cipher, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(customer.id, customer.name, customer.business, customer.phone, phone, customer.email, customer.address, customer.locationUrl, customer.gst, await hashPortalToken(token), await sealPortalToken(token), timestamp, timestamp).run();
+	const customer: Customer = { id: id('CUST'), name: String(input.name || '').trim(), business: String(input.business || input.name || '').trim(), phone, email: String(input.email || '').trim(), address: input.address || '', locationUrl: String(input.locationUrl || '').trim(), gst: input.gst || '', projects: 0, pending: 0, token, customFields: input.customFields || {} };
+	await database.prepare('INSERT INTO customers (id, name, business, phone, phone_normalized, email, address, location_url, gst, portal_token_hash, portal_token_cipher, custom_values, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)').bind(customer.id, customer.name, customer.business, customer.phone, phone, customer.email, customer.address, customer.locationUrl, customer.gst, await hashPortalToken(token), await sealPortalToken(token), JSON.stringify(customer.customFields), timestamp, timestamp).run();
 	await activity(database, 'admin', 'Customer created', 'customer', customer.id, customer.business);
 	await queueSheetSync(database, 'Customers', customer.id, customer);
 	return customer;
@@ -127,7 +245,7 @@ export async function updateCustomer(database: AppDatabase, customerId: string, 
 	const business = String(input.business ?? existing.business).trim() || String(input.name ?? existing.name).trim();
 	const linkedOrders = await rows(database, 'SELECT id FROM orders WHERE customer_id = ?', [customerId]);
 	await database.batch([
-		database.prepare('UPDATE customers SET name = ?, business = ?, phone = ?, phone_normalized = ?, email = ?, address = ?, location_url = ?, gst = ?, updated_at = ? WHERE id = ?').bind(input.name ?? existing.name, business, phone, phone, input.email ?? existing.email, input.address ?? existing.address, input.locationUrl ?? existing.location_url ?? '', input.gst ?? existing.gst, timestamp, customerId),
+		database.prepare('UPDATE customers SET name = ?, business = ?, phone = ?, phone_normalized = ?, email = ?, address = ?, location_url = ?, gst = ?, custom_values = ?::jsonb, updated_at = ? WHERE id = ?').bind(input.name ?? existing.name, business, phone, phone, input.email ?? existing.email, input.address ?? existing.address, input.locationUrl ?? existing.location_url ?? '', input.gst ?? existing.gst, JSON.stringify({ ...customValues(existing.custom_values), ...(input.customFields || {}) }), timestamp, customerId),
 		database.prepare('UPDATE orders SET customer_name = ?, mobile = ?, updated_at = ? WHERE customer_id = ?').bind(business, phone, timestamp, customerId)
 	]);
 	const customer = (await listCustomers(database)).find((item) => item.id === customerId)!;
@@ -191,8 +309,8 @@ export async function createEditor(database: AppDatabase, input: Partial<Editor>
 	if (await database.prepare('SELECT id FROM editors WHERE phone_normalized = ? OR RIGHT(regexp_replace(phone, ?, ?, ?), 10) = ? LIMIT 1').bind(phone, '\\D', '', 'g', phone).first()) throw new Error('An editor with this mobile number already exists. Open the existing editor instead.');
 	const serial = await database.prepare("INSERT INTO counters (name, value) VALUES ('editor_serial', 1) ON CONFLICT(name) DO UPDATE SET value = counters.value + 1 RETURNING value").first<{ value: number }>();
 	const prefix = (await getSettings(database)).editorPrefix;
-	const editor: Editor = { id: id('ED'), code: `${prefix}-${String(Number(serial?.value || 1)).padStart(4, '0')}`, name: String(input.name || '').trim(), initials: initials(String(input.name || '')), phone, locationUrl: String(input.locationUrl || '').trim(), specialty: String(input.specialty || '').trim(), availability: input.availability || 'available', available: (input.availability || 'available') === 'available', activeTasks: 0, token };
-	await database.prepare('INSERT INTO editors (id, code, name, phone, phone_normalized, location_url, specialty, availability, portal_token_hash, portal_token_cipher, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(editor.id, editor.code, editor.name, editor.phone, phone, editor.locationUrl, editor.specialty, editor.availability, await hashPortalToken(token), await sealPortalToken(token), timestamp, timestamp).run();
+	const editor: Editor = { id: id('ED'), code: `${prefix}-${String(Number(serial?.value || 1)).padStart(4, '0')}`, name: String(input.name || '').trim(), initials: initials(String(input.name || '')), phone, locationUrl: String(input.locationUrl || '').trim(), specialty: String(input.specialty || '').trim(), availability: input.availability || 'available', available: (input.availability || 'available') === 'available', activeTasks: 0, token, customFields: input.customFields || {} };
+	await database.prepare('INSERT INTO editors (id, code, name, phone, phone_normalized, location_url, specialty, availability, portal_token_hash, portal_token_cipher, custom_values, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)').bind(editor.id, editor.code, editor.name, editor.phone, phone, editor.locationUrl, editor.specialty, editor.availability, await hashPortalToken(token), await sealPortalToken(token), JSON.stringify(editor.customFields), timestamp, timestamp).run();
 	await activity(database, 'admin', 'Editor created', 'editor', editor.id, editor.name);
 	await queueSheetSync(database, 'Editors', editor.id, editor);
 	return editor;
@@ -206,7 +324,7 @@ export async function updateEditor(database: AppDatabase, editorId: string, inpu
 	const phone = normalizeIndianMobile(input.phone ?? existing.phone);
 	if (await database.prepare('SELECT id FROM editors WHERE id != ? AND (phone_normalized = ? OR RIGHT(regexp_replace(phone, ?, ?, ?), 10) = ?) LIMIT 1').bind(editorId, phone, '\\D', '', 'g', phone).first()) throw new Error('Another editor already uses this mobile number.');
 	const availability = input.availability || existing.availability;
-	await database.prepare('UPDATE editors SET name = ?, phone = ?, phone_normalized = ?, location_url = ?, specialty = ?, availability = ?, updated_at = ? WHERE id = ?').bind(input.name ?? existing.name, phone, phone, input.locationUrl ?? existing.location_url ?? '', input.specialty ?? existing.specialty, availability, now(), editorId).run();
+	await database.prepare('UPDATE editors SET name = ?, phone = ?, phone_normalized = ?, location_url = ?, specialty = ?, availability = ?, custom_values = ?::jsonb, updated_at = ? WHERE id = ?').bind(input.name ?? existing.name, phone, phone, input.locationUrl ?? existing.location_url ?? '', input.specialty ?? existing.specialty, availability, JSON.stringify({ ...customValues(existing.custom_values), ...(input.customFields || {}) }), now(), editorId).run();
 	const editor = (await listEditors(database, true)).find((item) => item.id === editorId)!;
 	await activity(database, 'admin', 'Editor updated', 'editor', editorId, editor.name);
 	await queueSheetSync(database, 'Editors', editorId, editor);
@@ -293,6 +411,10 @@ export interface OrderPageOptions {
 	query?: string;
 	status?: string;
 	event?: string;
+	sort?: 'newest' | 'oldest';
+	dateFrom?: string;
+	dateTo?: string;
+	pendingBalance?: boolean;
 	includeHistorical?: boolean;
 	archived?: boolean;
 }
@@ -310,13 +432,17 @@ export async function listOrdersPage(database: AppDatabase, options: OrderPageOp
 	}
 	if (options.status?.trim()) { conditions.push('status = ?'); values.push(options.status.trim()); }
 	if (options.event?.trim()) { conditions.push('event = ?'); values.push(options.event.trim()); }
+	if (options.dateFrom?.trim()) { conditions.push('created_at >= ?'); values.push(options.dateFrom.trim()); }
+	if (options.dateTo?.trim()) { conditions.push('created_at < ?'); values.push(options.dateTo.trim() + 'T23:59:59.999Z'); }
+	if (options.pendingBalance) { conditions.push('amount_set = 1 AND (amount - discount - advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = orders.id), 0)) > 0.009'); }
 	const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 	const count = await database.prepare(`SELECT COUNT(*) AS count FROM orders ${where}`).bind(...values).first<{ count: number | string }>();
 	const total = Number(count?.count || 0);
 	const totalPages = Math.max(1, Math.ceil(total / pageSize));
 	const page = Math.min(requestedPage, totalPages);
 	const offset = (page - 1) * pageSize;
-	const orderRows = await rows(database, `SELECT * FROM orders ${where} ORDER BY important DESC, serial DESC LIMIT ? OFFSET ?`, [...values, pageSize, offset]);
+	const sortDirection = options.sort === 'newest' ? 'DESC' : 'ASC';
+	const orderRows = await rows(database, `SELECT * FROM orders ${where} ORDER BY important DESC, serial ${sortDirection} LIMIT ? OFFSET ?`, [...values, pageSize, offset]);
 	return {
 		orders: await hydrateOrders(database, orderRows),
 		pagination: { page, pageSize, total, totalPages, from: total ? offset + 1 : 0, to: Math.min(offset + pageSize, total) }
@@ -393,7 +519,7 @@ export async function createOrder(database: AppDatabase, input: Partial<Order>) 
 	const mobile = normalizeIndianMobile(mobileInput);
 	const serialRow = await database.prepare("INSERT INTO counters (name, value) SELECT 'order_serial', COALESCE(MAX(serial), 0) + 1 FROM orders ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 RETURNING value AS serial").first<{ serial: number }>();
 	const orderId = id('ORD');
-	await database.prepare('INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, amount_set, advance_set, source, remarks, due_date, status, progress, historical, important, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)').bind(orderId, Number(serialRow?.serial || 1), input.customerId || null, customerName, mobile, input.workType || '', input.project || '', input.receiving || '', input.duration || '', Number(input.price || 0), Number(input.priceSet !== false), Number(input.advanceSet !== false), input.source || '', input.remarks || '', input.due || '', 'Received', Number(Boolean(input.important)), timestamp, timestamp).run();
+	await database.prepare('INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, amount_set, advance_set, source, remarks, due_date, status, progress, historical, important, custom_values, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?::jsonb, ?, ?)').bind(orderId, Number(serialRow?.serial || 1), input.customerId || null, customerName, mobile, input.workType || '', input.project || '', input.receiving || '', input.duration || '', Number(input.price || 0), Number(input.priceSet !== false), Number(input.advanceSet !== false), input.source || '', input.remarks || '', input.due || '', 'Received', Number(Boolean(input.important)), JSON.stringify(input.customFields || {}), timestamp, timestamp).run();
 	if (Number(input.paid || 0) > 0) await recordPayment(database, orderId, { amount: Number(input.paid), paidAt: timestamp.slice(0, 10), method: 'Advance at booking', note: 'Advance collected when order was created', kind: 'advance' });
 	const order = await getOrder(database, orderId);
 	await activity(database, 'admin', 'Order created', 'order', orderId, `${customerName} · ${input.project}`);
@@ -417,7 +543,7 @@ export async function updateOrder(database: AppDatabase, orderId: string, input:
 	if (mobileError) throw new Error(mobileError);
 	const mobile = normalizeIndianMobile(mobileInput);
 	const deliveredAt = nextStatus === 'Delivered' ? input.deliveredAt || existing.deliveredAt || now() : nextStatus === 'Ready Delivery' ? '' : existing.deliveredAt || '';
-	await database.prepare('UPDATE orders SET customer_id = ?, customer_name = ?, mobile = ?, event = ?, project = ?, receiving = ?, duration = ?, amount = ?, discount = ?, amount_set = ?, advance_set = ?, source = ?, remarks = ?, due_date = ?, status = ?, progress = ?, historical = ?, important = ?, delivery_method = ?, delivered_at = ?, customer_notified_at = ?, updated_at = ? WHERE id = ?').bind(nextCustomerId ?? null, customerName, mobile, input.workType ?? existing.workType, input.project ?? existing.project, input.receiving ?? existing.receiving ?? '', input.duration ?? existing.duration ?? '', price, discount, input.priceSet === undefined ? Number(existing.priceSet !== false) : Number(input.priceSet), input.advanceSet === undefined ? Number(existing.advanceSet !== false) : Number(input.advanceSet), input.source ?? existing.source ?? '', input.remarks ?? existing.remarks ?? '', input.due ?? existing.due, nextStatus, Math.max(0, Math.min(100, Number(input.progress ?? existing.progress))), input.historical === undefined ? Number(existing.historical) : Number(input.historical), input.important === undefined ? Number(existing.important) : Number(input.important), input.deliveryMethod ?? existing.deliveryMethod ?? '', deliveredAt || null, input.customerNotifiedAt ?? existing.customerNotifiedAt ?? null, now(), orderId).run();
+	await database.prepare('UPDATE orders SET customer_id = ?, customer_name = ?, mobile = ?, event = ?, project = ?, receiving = ?, duration = ?, amount = ?, discount = ?, amount_set = ?, advance_set = ?, source = ?, remarks = ?, due_date = ?, status = ?, progress = ?, historical = ?, important = ?, delivery_method = ?, delivered_at = ?, customer_notified_at = ?, custom_values = ?::jsonb, updated_at = ? WHERE id = ?').bind(nextCustomerId ?? null, customerName, mobile, input.workType ?? existing.workType, input.project ?? existing.project, input.receiving ?? existing.receiving ?? '', input.duration ?? existing.duration ?? '', price, discount, input.priceSet === undefined ? Number(existing.priceSet !== false) : Number(input.priceSet), input.advanceSet === undefined ? Number(existing.advanceSet !== false) : Number(input.advanceSet), input.source ?? existing.source ?? '', input.remarks ?? existing.remarks ?? '', input.due ?? existing.due, nextStatus, Math.max(0, Math.min(100, Number(input.progress ?? existing.progress))), input.historical === undefined ? Number(existing.historical) : Number(input.historical), input.important === undefined ? Number(existing.important) : Number(input.important), input.deliveryMethod ?? existing.deliveryMethod ?? '', deliveredAt || null, input.customerNotifiedAt ?? existing.customerNotifiedAt ?? null, JSON.stringify({ ...(existing.customFields || {}), ...(input.customFields || {}) }), now(), orderId).run();
 	const order = await getOrder(database, orderId);
 	await activity(database, 'admin', 'Order updated', 'order', orderId, order?.project);
 	await queueSheetSync(database, 'Orders', orderId, order);
@@ -465,15 +591,14 @@ export async function permanentlyDeleteOrder(database: AppDatabase, orderId: str
 // ---------- Tasks: editor assignment, device, Drive links, duration, and progress ----------
 export async function createTask(database: AppDatabase, orderId: string, input: Partial<Task>) {
 	const timestamp = now();
-	if (input.editorId && !String(input.device || '').trim()) throw new Error('Enter the device given to the editor, such as HD-1.');
 	const billingMode = input.billingMode === 'duration' ? 'duration' : 'manual';
 	const hourlyRate = billingMode === 'duration' ? Math.max(0, Number(input.hourlyRate || 0)) : 0;
 	const videoDurationMinutes = Math.max(0, Math.round(Number(input.videoDurationMinutes || 0)));
 	// Duration billing is calculated; manual billing uses the entered task amount.
 	const billableAmount = billingMode === 'duration' ? durationBillableAmount(hourlyRate, videoDurationMinutes) : Math.max(0, Number(input.billableAmount || 0));
 	const editorSettlement = input.editorSettlement === 'editor-bills-admin' ? 'editor-bills-admin' : input.editorSettlement === 'admin-issues-statement' ? 'admin-issues-statement' : 'not-set';
-	const task: Task = { id: id('TSK'), orderId, name: String(input.name || '').trim(), assignee: '', editorId: input.editorId, status: 'Not started', progress: 0, due: input.due || '', instructions: input.instructions || '', textLink: input.textLink || '', imageUrl: input.imageUrl || '', outputLink: '', notes: '', billableAmount, invoicedAmount: 0, billingMode, hourlyRate, videoDurationMinutes, device: String(input.device || '').trim(), editorSettlement };
-	await database.prepare('INSERT INTO tasks (id, order_id, editor_id, title, instructions, due_date, text_link, image_url, status, progress, billable_amount, billing_mode, hourly_rate, video_duration_minutes, device, editor_settlement, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)').bind(task.id, orderId, task.editorId || null, task.name, task.instructions, task.due, task.textLink, task.imageUrl, task.status, task.billableAmount, task.billingMode, task.hourlyRate, task.videoDurationMinutes, task.device, task.editorSettlement, timestamp, timestamp).run();
+	const task: Task = { id: id('TSK'), orderId, name: String(input.name || '').trim(), assignee: '', editorId: input.editorId, status: 'Not started', progress: 0, due: input.due || '', instructions: input.instructions || '', textLink: input.textLink || '', imageUrl: input.imageUrl || '', outputLink: '', notes: '', billableAmount, invoicedAmount: 0, billingMode, hourlyRate, videoDurationMinutes, device: String(input.device || '').trim(), editorSettlement, customFields: input.customFields || {} };
+	await database.prepare('INSERT INTO tasks (id, order_id, editor_id, title, instructions, due_date, text_link, image_url, status, progress, billable_amount, billing_mode, hourly_rate, video_duration_minutes, device, editor_settlement, custom_values, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)').bind(task.id, orderId, task.editorId || null, task.name, task.instructions, task.due, task.textLink, task.imageUrl, task.status, task.billableAmount, task.billingMode, task.hourlyRate, task.videoDurationMinutes, task.device, task.editorSettlement, JSON.stringify(task.customFields), timestamp, timestamp).run();
 	await updateOrderSummary(database, orderId);
 	const saved = (await getOrder(database, orderId))!.tasks.find((item) => item.id === task.id)!;
 	await activity(database, 'admin', saved.editorId ? 'Task assigned' : 'Task created', 'task', task.id, saved.editorId ? `${saved.name} · ${saved.assignee}` : saved.name);
@@ -495,10 +620,9 @@ export async function updateTask(database: AppDatabase, taskId: string, input: P
 	const nextEditorId = editorId ? existing.editor_id : input.editorId ?? existing.editor_id;
 	const device = editorId ? existing.device : input.device ?? existing.device ?? '';
 	const editorSettlement = editorId ? existing.editor_settlement : input.editorSettlement === 'editor-bills-admin' ? 'editor-bills-admin' : input.editorSettlement === 'admin-issues-statement' ? 'admin-issues-statement' : input.editorSettlement === 'not-set' ? 'not-set' : existing.editor_settlement || 'not-set';
-	if (nextEditorId && !String(device).trim()) throw new Error('Enter the device given to the editor, such as HD-1.');
 	const invoicedAmount = Number((await database.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM invoice_task_items WHERE task_id = ?').bind(taskId).first<{ total: number | string }>())?.total || 0);
 	if (billableAmount + 0.009 < invoicedAmount) throw new Error('Task value cannot be lower than the amount already invoiced.');
-	await database.prepare('UPDATE tasks SET editor_id = ?, title = ?, instructions = ?, due_date = ?, text_link = ?, image_url = ?, status = ?, progress = ?, output_link = ?, notes = ?, billable_amount = ?, billing_mode = ?, hourly_rate = ?, video_duration_minutes = ?, device = ?, editor_settlement = ?, updated_at = ? WHERE id = ?').bind(nextEditorId, input.name ?? existing.title, input.instructions ?? existing.instructions, input.due ?? existing.due_date, input.textLink ?? existing.text_link, input.imageUrl ?? existing.image_url, status, progress, input.outputLink ?? existing.output_link, input.notes ?? existing.notes, billableAmount, billingMode, hourlyRate, videoDurationMinutes, device, editorSettlement, now(), taskId).run();
+	await database.prepare('UPDATE tasks SET editor_id = ?, title = ?, instructions = ?, due_date = ?, text_link = ?, image_url = ?, status = ?, progress = ?, output_link = ?, notes = ?, billable_amount = ?, billing_mode = ?, hourly_rate = ?, video_duration_minutes = ?, device = ?, editor_settlement = ?, custom_values = ?::jsonb, updated_at = ? WHERE id = ?').bind(nextEditorId, input.name ?? existing.title, input.instructions ?? existing.instructions, input.due ?? existing.due_date, input.textLink ?? existing.text_link, input.imageUrl ?? existing.image_url, status, progress, input.outputLink ?? existing.output_link, input.notes ?? existing.notes, billableAmount, billingMode, hourlyRate, videoDurationMinutes, device, editorSettlement, JSON.stringify({ ...customValues(existing.custom_values), ...(input.customFields || {}) }), now(), taskId).run();
 	await updateOrderSummary(database, existing.order_id);
 	const task = (await getOrder(database, existing.order_id))!.tasks.find((item) => item.id === taskId)!;
 	const updateDetails = `${task.name} · ${task.status} · ${task.progress}%${task.videoDurationMinutes ? ` · ${task.videoDurationMinutes} min` : ''}${task.outputLink ? ' · Output link submitted' : ''}`;

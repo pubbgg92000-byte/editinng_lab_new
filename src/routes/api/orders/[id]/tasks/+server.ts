@@ -6,13 +6,27 @@ import { createTask } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
 import { taskLinkError } from '$lib/server/validation';
 import { parseVideoDurationMinutes } from '$lib/duration';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { hasCapability, validateCustomValues } from '$lib/capabilities';
 
 export const POST = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const input = await request.json();
 	const tasks: Record<string, unknown>[] = Array.isArray(input.tasks) ? input.tasks : [input];
+	const database = await readyDatabase(locals.tenant);
+	const configuration = await getTenantConfiguration(database, locals.tenant!);
 	if (!tasks.length || tasks.some((task: Record<string, unknown>) => !String(task.name || '').trim())) return json({ error: 'Every task needs a title.' }, { status: 400 });
 	for (const task of tasks) {
+		if (!hasCapability(configuration.effectiveCapabilities, 'work.staff')) task.editorId = '';
+		if (!hasCapability(configuration.effectiveCapabilities, 'work.assignedAssets')) task.device = '';
+		if (!hasCapability(configuration.effectiveCapabilities, 'billing.duration')) {
+			task.billingMode = 'manual';
+			task.hourlyRate = 0;
+			task.videoDurationMinutes = 0;
+			delete task.videoDuration;
+		}
+		try { task.customFields = hasCapability(configuration.effectiveCapabilities, 'customFields') ? validateCustomValues(configuration.profile, 'task', task.customFields) : {}; }
+		catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Custom fields are invalid.' }, { status: 400 }); }
 		const linkError = taskLinkError(task);
 		if (linkError) return json({ error: `${linkError} Upload files to Drive, R2, S3 or another file host and paste the link here.` }, { status: 400 });
 		if (task.billableAmount !== undefined && (!Number.isFinite(Number(task.billableAmount)) || Number(task.billableAmount) < 0)) return json({ error: 'Task value must be zero or a positive number.' }, { status: 400 });
@@ -25,7 +39,6 @@ export const POST = async ({ params, request, cookies, locals }) => {
 			task.videoDurationMinutes = minutes;
 		}
 	}
-	const database = await readyDatabase(locals.tenant);
 	const created = [];
 	for (const task of tasks) created.push(await createTask(database, params.id, task));
 	await flushSheetSync(database, locals.tenant!);

@@ -1,5 +1,6 @@
 import ExcelJS, { type Cell, type Worksheet } from 'exceljs';
-import type { ActivityLog, Customer, Editor, Invoice, Order, StudioSettings } from '$lib/types';
+import type { ActivityLog, BusinessProfile, CustomFieldEntity, Customer, Editor, EffectiveCapabilities, Invoice, Order, StudioSettings } from '$lib/types';
+import { hasCapability } from '$lib/capabilities';
 import { editorCode, orderCode } from '$lib/identifiers';
 
 // Builds the downloadable styled .xlsx backup/report; it does not modify Google Sheets.
@@ -17,6 +18,8 @@ export interface ExportWorkbookData {
 	invoices: Invoice[];
 	activity: ActivityLog[];
 	settings: StudioSettings;
+	profile: BusinessProfile;
+	capabilities: EffectiveCapabilities;
 }
 
 const COLORS = {
@@ -46,6 +49,25 @@ const asDate = (value?: string) => {
 };
 const externalLink = (value?: string) => value ? { text: value, hyperlink: value, tooltip: 'Open link' } : null;
 const byText = (left: string, right: string) => left.localeCompare(right, undefined, { sensitivity: 'base' });
+const customFieldColumns = (profile: BusinessProfile, entity: CustomFieldEntity): ColumnDefinition[] =>
+	profile.customFields
+		.filter((field) => field.active && field.entity === entity && field.visibility.export)
+		.sort((left, right) => left.order - right.order)
+		.map((field) => ({
+			header: field.label,
+			key: `custom_${entity}_${field.key}`,
+			width: field.type === 'textarea' ? 36 : 20,
+			format: field.type === 'date' ? 'date' : field.type === 'datetime' ? 'datetime' : field.type === 'number' ? 'integer' : field.type === 'url' ? 'link' : undefined
+		}));
+const customFieldRecord = (profile: BusinessProfile, entity: CustomFieldEntity, values: Record<string, unknown> = {}) =>
+	Object.fromEntries(profile.customFields
+		.filter((field) => field.active && field.entity === entity && field.visibility.export)
+		.map((field) => {
+			const value = values[field.key];
+			if (field.type === 'date' || field.type === 'datetime') return [`custom_${entity}_${field.key}`, asDate(typeof value === 'string' ? value : undefined)];
+			if (field.type === 'url') return [`custom_${entity}_${field.key}`, externalLink(typeof value === 'string' ? value : undefined)];
+			return [`custom_${entity}_${field.key}`, value ?? null];
+		}));
 
 function styleStatus(cell: Cell) {
 	const value = String(cell.value || '').toLowerCase();
@@ -72,7 +94,7 @@ function styleSheet(worksheet: Worksheet, columns: ColumnDefinition[], rowCount:
 		margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
 		printTitlesRow: '1:1'
 	};
-	worksheet.headerFooter.oddFooter = '&LStudioFlow export&CPage &P of &N&R&D &T';
+	worksheet.headerFooter.oddFooter = '&LNexaDesk export&CPage &P of &N&R&D &T';
 	worksheet.properties.defaultRowHeight = 22;
 	worksheet.getRow(1).height = 32;
 	worksheet.getRow(1).eachCell((cell) => {
@@ -131,7 +153,8 @@ function styleSheet(worksheet: Worksheet, columns: ColumnDefinition[], rowCount:
 	}
 }
 
-function addSheet(workbook: ExcelJS.Workbook, name: string, columns: ColumnDefinition[], records: Record<string, unknown>[], options: { statusKey?: string; archivedKey?: string; importantKey?: string; tabColor?: string } = {}) {
+function addSheet(workbook: ExcelJS.Workbook, name: string, columns: ColumnDefinition[], records: Record<string, unknown>[], options: { statusKey?: string; archivedKey?: string; importantKey?: string; tabColor?: string; enabled?: boolean } = {}) {
+	if (options.enabled === false) return null;
 	const worksheet = workbook.addWorksheet(name, {
 		properties: { tabColor: { argb: options.tabColor || COLORS.headerAccent } },
 		views: [{ state: 'frozen', ySplit: 1 }]
@@ -144,19 +167,20 @@ function addSheet(workbook: ExcelJS.Workbook, name: string, columns: ColumnDefin
 
 export async function buildExportWorkbook(data: ExportWorkbookData) {
 	const workbook = new ExcelJS.Workbook();
-	workbook.creator = 'StudioFlow';
-	workbook.lastModifiedBy = 'StudioFlow';
+	workbook.creator = 'NexaDesk';
+	workbook.lastModifiedBy = 'NexaDesk';
 	workbook.created = new Date();
 	workbook.modified = new Date();
 	workbook.calcProperties.fullCalcOnLoad = true;
 
 	const orders = [...data.orders].sort((left, right) => Number(right.serial || 0) - Number(left.serial || 0));
+	const terms = data.profile.terminology;
 	const ordersSheet = addSheet(workbook, 'Orders', [
 		{ header: 'Order ID', key: 'serial', width: 14 },
-		{ header: 'Studio Name', key: 'customer', width: 24 },
+		{ header: terms.customer.singular, key: 'customer', width: 24 },
 		{ header: 'Mobile No.', key: 'mobile', width: 16, format: 'center' },
 		{ header: 'Event', key: 'event', width: 16 },
-		{ header: 'Project / Names', key: 'project', width: 28 },
+		{ header: terms.project.singular, key: 'project', width: 28 },
 		{ header: 'Receiving', key: 'receiving', width: 18 },
 		{ header: 'Duration', key: 'duration', width: 12, format: 'center' },
 		{ header: 'Subtotal', key: 'amount', width: 15, format: 'currency' },
@@ -171,10 +195,11 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 		{ header: 'Important', key: 'important', width: 11, format: 'center' },
 		{ header: 'Status', key: 'status', width: 18, format: 'center' },
 		{ header: 'Progress', key: 'progress', width: 12, format: 'percent' },
-		{ header: 'Due Date', key: 'dueDate', width: 15, format: 'date' },
+		{ header: terms.dueDate.singular, key: 'dueDate', width: 15, format: 'date' },
 		{ header: 'Historical', key: 'historical', width: 11, format: 'center' },
 		{ header: 'Archived', key: 'archived', width: 11, format: 'center' },
-		{ header: 'Order ID', key: 'orderId', width: 24 }
+		{ header: 'Order ID', key: 'orderId', width: 24 },
+		...customFieldColumns(data.profile, 'order')
 	], orders.map((order, index) => ({
 		serial: orderCode(data.settings, order.serial), customer: order.customer, mobile: order.mobile || null, event: order.workType, project: order.project,
 		receiving: order.receiving || null, duration: order.duration || null, amount: order.priceSet === false ? null : order.price,
@@ -184,38 +209,42 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 		balance: order.priceSet === false ? null : { formula: `MAX(0,K${index + 2}-L${index + 2})`, result: Math.max(0, order.price - Number(order.discount || 0) - order.paid) },
 		source: order.source || null, assignedNames: [...new Set(order.tasks.filter((task) => !task.archived && task.assignee !== 'Unassigned').map((task) => task.assignee))].join(', ') || null,
 		remark: order.remarks || null, important: order.important ? 'Yes' : null, status: order.status, progress: Number(order.progress || 0) / 100,
-		dueDate: asDate(order.due), historical: order.historical ? 'Yes' : null, archived: order.archived ? 'Yes' : null, orderId: order.id
+		dueDate: asDate(order.due), historical: order.historical ? 'Yes' : null, archived: order.archived ? 'Yes' : null, orderId: order.id,
+		...customFieldRecord(data.profile, 'order', order.customFields)
 	})), { statusKey: 'status', importantKey: 'important', archivedKey: 'archived', tabColor: 'FFD4AF37' });
-	ordersSheet.getColumn('balance').eachCell((cell, rowNumber) => { if (rowNumber > 1 && cell.value) cell.font = { name: 'Aptos', size: 10, bold: true, color: { argb: COLORS.text } }; });
+	ordersSheet?.getColumn('balance').eachCell((cell, rowNumber) => { if (rowNumber > 1 && cell.value) cell.font = { name: 'Aptos', size: 10, bold: true, color: { argb: COLORS.text } }; });
 
 	addSheet(workbook, 'Customers', [
-		{ header: 'Customer ID', key: 'id', width: 24 }, { header: 'Contact Name', key: 'name', width: 22 }, { header: 'Studio Name', key: 'business', width: 26 },
+		{ header: `${terms.customer.singular} ID`, key: 'id', width: 24 }, { header: 'Contact Name', key: 'name', width: 22 }, { header: terms.customer.singular, key: 'business', width: 26 },
 		{ header: 'Phone', key: 'phone', width: 16, format: 'center' }, { header: 'Email', key: 'email', width: 28 }, { header: 'Address', key: 'address', width: 36 }, { header: 'Google Maps Location', key: 'locationUrl', width: 36, format: 'link' },
 		{ header: 'GSTIN', key: 'gst', width: 20 }, { header: 'Projects', key: 'projects', width: 12, format: 'integer' }, { header: 'Pending', key: 'pending', width: 15, format: 'currency' },
-		{ header: 'Archived', key: 'archived', width: 11, format: 'center' }
-	], [...data.customers].sort((a, b) => byText(a.business, b.business)).map((customer) => ({ id: customer.id, name: customer.name, business: customer.business, phone: customer.phone || null, email: customer.email || null, address: customer.address || null, locationUrl: externalLink(customer.locationUrl), gst: customer.gst || null, projects: customer.projects, pending: customer.pending, archived: customer.archived ? 'Yes' : null })), { archivedKey: 'archived', tabColor: 'FF2563EB' });
+		{ header: 'Archived', key: 'archived', width: 11, format: 'center' },
+		...customFieldColumns(data.profile, 'customer')
+	], [...data.customers].sort((a, b) => byText(a.business, b.business)).map((customer) => ({ id: customer.id, name: customer.name, business: customer.business, phone: customer.phone || null, email: customer.email || null, address: customer.address || null, locationUrl: externalLink(customer.locationUrl), gst: customer.gst || null, projects: customer.projects, pending: customer.pending, archived: customer.archived ? 'Yes' : null, ...customFieldRecord(data.profile, 'customer', customer.customFields) })), { archivedKey: 'archived', tabColor: 'FF2563EB' });
 
 	addSheet(workbook, 'Editors', [
-		{ header: 'Editor ID', key: 'id', width: 22 }, { header: 'Name', key: 'name', width: 22 }, { header: 'Phone', key: 'phone', width: 16, format: 'center' }, { header: 'Google Maps Location', key: 'locationUrl', width: 36, format: 'link' },
+		{ header: `${terms.staff.singular} ID`, key: 'id', width: 22 }, { header: 'Name', key: 'name', width: 22 }, { header: 'Phone', key: 'phone', width: 16, format: 'center' }, { header: 'Google Maps Location', key: 'locationUrl', width: 36, format: 'link' },
 		{ header: 'Specialty', key: 'specialty', width: 24 }, { header: 'Availability', key: 'availability', width: 16, format: 'center' },
-		{ header: 'Active Tasks', key: 'activeTasks', width: 14, format: 'integer' }, { header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: 'Record ID', key: 'recordId', width: 24 }
-	], [...data.editors].sort((a, b) => byText(a.name, b.name)).map((editor) => ({ id: editorCode(data.settings, editor.code) || editor.id, name: editor.name, phone: editor.phone || null, locationUrl: externalLink(editor.locationUrl), specialty: editor.specialty || null, availability: editor.availability || (editor.available ? 'available' : 'busy'), activeTasks: editor.activeTasks, archived: editor.archived ? 'Yes' : null, recordId: editor.id })), { statusKey: 'availability', archivedKey: 'archived', tabColor: 'FF7C3AED' });
+		{ header: `Active ${terms.task.plural}`, key: 'activeTasks', width: 14, format: 'integer' }, { header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: 'Record ID', key: 'recordId', width: 24 },
+		...customFieldColumns(data.profile, 'staff')
+	], [...data.editors].sort((a, b) => byText(a.name, b.name)).map((editor) => ({ id: editorCode(data.settings, editor.code) || editor.id, name: editor.name, phone: editor.phone || null, locationUrl: externalLink(editor.locationUrl), specialty: editor.specialty || null, availability: editor.availability || (editor.available ? 'available' : 'busy'), activeTasks: editor.activeTasks, archived: editor.archived ? 'Yes' : null, recordId: editor.id, ...customFieldRecord(data.profile, 'staff', editor.customFields) })), { statusKey: 'availability', archivedKey: 'archived', tabColor: 'FF7C3AED', enabled: hasCapability(data.capabilities, 'work.staff') });
 
 	addSheet(workbook, 'Tasks', [
-		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' }, { header: 'Project', key: 'project', width: 26 }, { header: 'Task', key: 'task', width: 24 },
-		{ header: 'Editor ID', key: 'editorId', width: 14 }, { header: 'Editor', key: 'editor', width: 20 }, { header: 'Status', key: 'status', width: 22, format: 'center' }, { header: 'Progress', key: 'progress', width: 12, format: 'percent' },
+		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' }, { header: terms.project.singular, key: 'project', width: 26 }, { header: terms.task.singular, key: 'task', width: 24 },
+		{ header: `${terms.staff.singular} ID`, key: 'editorId', width: 14 }, { header: terms.staff.singular, key: 'editor', width: 20 }, { header: 'Status', key: 'status', width: 22, format: 'center' }, { header: 'Progress', key: 'progress', width: 12, format: 'percent' },
 		{ header: 'Device', key: 'device', width: 14 }, { header: 'Editor Payment Arrangement', key: 'editorSettlement', width: 28 }, { header: 'Billing Method', key: 'billingMode', width: 20 }, { header: 'Rate / Video Hour', key: 'hourlyRate', width: 18, format: 'currency' }, { header: 'Video Duration (Minutes)', key: 'videoDurationMinutes', width: 23, format: 'integer' },
 		{ header: 'Due Date', key: 'dueDate', width: 15, format: 'date' }, { header: 'Task Value (Billable)', key: 'billableAmount', width: 19, format: 'currency' }, { header: 'Already Invoiced', key: 'invoicedAmount', width: 17, format: 'currency' }, { header: 'Instructions', key: 'instructions', width: 38 },
 		{ header: 'Reference Link', key: 'textLink', width: 34, format: 'link' }, { header: 'Image URL', key: 'imageUrl', width: 34, format: 'link' },
 		{ header: 'Output Link', key: 'outputLink', width: 34, format: 'link' }, { header: 'Notes', key: 'notes', width: 34 },
-		{ header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: 'Task ID', key: 'taskId', width: 24 }, { header: 'Order ID', key: 'orderId', width: 24 }
-	], orders.flatMap((order) => order.tasks.map((task) => ({ project: order.project, task: task.name, editorId: editorCode(data.settings, task.editorCode) || null, editor: task.assignee, device: task.device || null, editorSettlement: task.editorSettlement === 'editor-bills-admin' ? 'Editor bills admin' : task.editorSettlement === 'admin-issues-statement' ? 'Admin issues statement' : 'Not decided', billingMode: task.billingMode === 'duration' ? 'By video duration' : 'Manual amount', hourlyRate: task.hourlyRate || null, videoDurationMinutes: task.videoDurationMinutes || null, status: task.status, progress: Number(task.progress || 0) / 100, dueDate: asDate(task.due), billableAmount: task.billableAmount || null, invoicedAmount: task.invoicedAmount || null, instructions: task.instructions || null, textLink: externalLink(task.textLink), imageUrl: externalLink(task.imageUrl), outputLink: externalLink(task.outputLink), notes: task.notes || null, archived: task.archived ? 'Yes' : null, taskId: task.id, orderId: order.id }))).map((record, index) => ({ serial: index + 1, ...record })), { statusKey: 'status', archivedKey: 'archived', tabColor: 'FF0EA5E9' });
+		{ header: 'Archived', key: 'archived', width: 11, format: 'center' }, { header: `${terms.task.singular} ID`, key: 'taskId', width: 24 }, { header: `${terms.order.singular} ID`, key: 'orderId', width: 24 },
+		...customFieldColumns(data.profile, 'task')
+	], orders.flatMap((order) => order.tasks.map((task) => ({ project: order.project, task: task.name, editorId: editorCode(data.settings, task.editorCode) || null, editor: task.assignee, device: task.device || null, editorSettlement: task.editorSettlement === 'editor-bills-admin' ? `${terms.staff.singular} bills admin` : task.editorSettlement === 'admin-issues-statement' ? `Admin issues ${terms.staff.singular.toLowerCase()} statement` : 'Not decided', billingMode: task.billingMode === 'duration' ? 'By duration' : 'Manual amount', hourlyRate: task.hourlyRate || null, videoDurationMinutes: task.videoDurationMinutes || null, status: task.status, progress: Number(task.progress || 0) / 100, dueDate: asDate(task.due), billableAmount: task.billableAmount || null, invoicedAmount: task.invoicedAmount || null, instructions: task.instructions || null, textLink: externalLink(task.textLink), imageUrl: externalLink(task.imageUrl), outputLink: externalLink(task.outputLink), notes: task.notes || null, archived: task.archived ? 'Yes' : null, taskId: task.id, orderId: order.id, ...customFieldRecord(data.profile, 'task', task.customFields) }))).map((record, index) => ({ serial: index + 1, ...record })), { statusKey: 'status', archivedKey: 'archived', tabColor: 'FF0EA5E9', enabled: hasCapability(data.capabilities, 'work.tasks') });
 
 	addSheet(workbook, 'Payments', [
 		{ header: 'S.No.', key: 'serial', width: 10, format: 'integer' }, { header: 'Studio Name', key: 'customer', width: 24 }, { header: 'Project', key: 'project', width: 26 },
 		{ header: 'Type', key: 'kind', width: 18 }, { header: 'Amount', key: 'amount', width: 15, format: 'currency' }, { header: 'Paid Date', key: 'paidDate', width: 15, format: 'date' },
 		{ header: 'Method', key: 'method', width: 16 }, { header: 'Note', key: 'note', width: 32 }, { header: 'Payment ID', key: 'paymentId', width: 24 }, { header: 'Order ID', key: 'orderId', width: 24 }
-	], orders.flatMap((order) => (order.payments || []).map((payment) => ({ customer: order.customer, project: order.project, kind: payment.kind === 'advance' ? 'Advance collected' : 'Payment', amount: payment.amount, paidDate: asDate(payment.paidAt), method: payment.method || null, note: payment.note || null, paymentId: payment.id, orderId: order.id }))).map((record, index) => ({ serial: index + 1, ...record })), { tabColor: 'FF16A34A' });
+	], orders.flatMap((order) => (order.payments || []).map((payment) => ({ customer: order.customer, project: order.project, kind: payment.kind === 'advance' ? 'Advance collected' : 'Payment', amount: payment.amount, paidDate: asDate(payment.paidAt), method: payment.method || null, note: payment.note || null, paymentId: payment.id, orderId: order.id }))).map((record, index) => ({ serial: index + 1, ...record })), { tabColor: 'FF16A34A', enabled: hasCapability(data.capabilities, 'billing.payments') });
 
 	const ordersById = new Map(orders.map((order) => [order.id, order]));
 	addSheet(workbook, 'Invoices', [
@@ -227,7 +256,7 @@ export async function buildExportWorkbook(data: ExportWorkbookData) {
 	], [...data.invoices].sort((left, right) => {
 		const serialDifference = Number(ordersById.get(right.orderId)?.serial || 0) - Number(ordersById.get(left.orderId)?.serial || 0);
 		return serialDifference || String(right.openedAt).localeCompare(String(left.openedAt));
-	}).map((invoice) => { const order = ordersById.get(invoice.orderId); return { number: invoice.number, customer: order?.customer || null, project: order?.project || null, kind: invoice.kind === 'advance' ? 'Advance receipt' : invoice.kind === 'payment' ? 'Payment receipt' : invoice.kind === 'partial' ? 'Partial work invoice' : 'Final invoice', received: invoice.amountReceived, subtotal: invoice.subtotal, discountPercent: invoice.subtotal > 0 ? invoice.discount / invoice.subtotal : 0, discount: invoice.discount, total: invoice.total, paid: invoice.paid, balance: invoice.balance, openedAt: asDate(invoice.openedAt), invoiceId: invoice.id, orderId: invoice.orderId, message: invoice.message || null }; }).map((record, index) => ({ serial: index + 1, ...record })), { tabColor: 'FFF59E0B' });
+	}).map((invoice) => { const order = ordersById.get(invoice.orderId); return { number: invoice.number, customer: order?.customer || null, project: order?.project || null, kind: invoice.kind === 'advance' ? 'Advance receipt' : invoice.kind === 'payment' ? 'Payment receipt' : invoice.kind === 'partial' ? 'Partial work invoice' : 'Final invoice', received: invoice.amountReceived, subtotal: invoice.subtotal, discountPercent: invoice.subtotal > 0 ? invoice.discount / invoice.subtotal : 0, discount: invoice.discount, total: invoice.total, paid: invoice.paid, balance: invoice.balance, openedAt: asDate(invoice.openedAt), invoiceId: invoice.id, orderId: invoice.orderId, message: invoice.message || null }; }).map((record, index) => ({ serial: index + 1, ...record })), { tabColor: 'FFF59E0B', enabled: hasCapability(data.capabilities, 'billing.invoices') });
 
 	addSheet(workbook, 'Activity Logs', [
 		{ header: 'Date & Time', key: 'createdAt', width: 21, format: 'datetime' }, { header: 'Actor', key: 'actor', width: 18 }, { header: 'Action', key: 'action', width: 28 },

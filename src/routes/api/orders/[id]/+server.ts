@@ -4,6 +4,8 @@ import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
 import { archiveOrder, getOrder, listOrderActivity, permanentlyDeleteOrder, restoreOrder, updateOrder } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { hasCapability, validateCustomValues } from '$lib/capabilities';
 
 export const GET = async ({ params, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
@@ -16,19 +18,22 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
 	const input = await request.json();
+	const configuration = await getTenantConfiguration(database, locals.tenant!);
+	try {
+		if (input.customFields !== undefined) {
+			if (hasCapability(configuration.effectiveCapabilities, 'customFields')) input.customFields = validateCustomValues(configuration.profile, 'order', input.customFields);
+			else delete input.customFields;
+		}
+	} catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Custom fields are invalid.' }, { status: 400 }); }
 	const allowedStatuses = ['Historical', 'Received', 'Assigned', 'Editing', 'Waiting Review', 'Revision', 'Ready Delivery', 'Delivered', 'Stopped', 'Completed'];
 	if (input.status && !allowedStatuses.includes(input.status)) return json({ error: 'Unknown order status.' }, { status: 400 });
 	if (input.status === 'Delivered') {
+		if (!hasCapability(configuration.effectiveCapabilities, 'workflow.delivery')) return json({ error: 'Delivery is not available for this workspace.' }, { status: 403 });
 		const currentOrder = await getOrder(database, params.id);
 		if (!currentOrder) return json({ error: 'Order not found.' }, { status: 404 });
-		if (currentOrder.priceSet === false) return json({ error: 'Set the final total before marking this order as delivered.' }, { status: 409 });
-		const balance = Math.max(0, currentOrder.price - currentOrder.discount - currentOrder.paid);
-		if (balance > 0.009) return json({ error: `Collect the remaining balance of ₹${balance.toLocaleString('en-IN')} before marking this order as delivered.` }, { status: 409 });
 		const hasDigitalOutput = currentOrder.tasks.some((task) => !task.archived && task.status === 'Completed' && Boolean(task.outputLink?.trim()));
 		const deliveryMethod = input.deliveryMethod === 'offline' ? 'offline' : input.deliveryMethod === 'digital' ? 'digital' : currentOrder.deliveryMethod;
-		if (!hasDigitalOutput && deliveryMethod !== 'offline') return json({ error: 'Add a completed task output link, or choose physical/offline delivery before marking this order delivered.' }, { status: 409 });
-		if (deliveryMethod === 'digital' && !hasDigitalOutput) return json({ error: 'Digital delivery requires a completed task output link.' }, { status: 409 });
-		input.deliveryMethod = deliveryMethod || (hasDigitalOutput ? 'digital' : '');
+		input.deliveryMethod = deliveryMethod || (hasDigitalOutput ? 'digital' : 'offline');
 		input.deliveredAt = input.deliveredAt || new Date().toISOString();
 	}
 	if (input.price !== undefined) {

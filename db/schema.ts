@@ -4,10 +4,12 @@ export const schemaStatements = [
 	`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, business TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', gst TEXT NOT NULL DEFAULT '', portal_token_hash TEXT, portal_token_cipher TEXT, projects INTEGER NOT NULL DEFAULT 0, pending REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,
 	`ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_normalized TEXT`,
 	`ALTER TABLE customers ADD COLUMN IF NOT EXISTS location_url TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE customers ADD COLUMN IF NOT EXISTS custom_values JSONB NOT NULL DEFAULT '{}'::jsonb`,
 	`CREATE TABLE IF NOT EXISTS editors (id TEXT PRIMARY KEY, code TEXT, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', specialty TEXT NOT NULL DEFAULT '', availability TEXT NOT NULL DEFAULT 'available', portal_token_hash TEXT, portal_token_cipher TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT)`,
 	`ALTER TABLE editors ADD COLUMN IF NOT EXISTS code TEXT`,
 	`ALTER TABLE editors ADD COLUMN IF NOT EXISTS phone_normalized TEXT`,
 	`ALTER TABLE editors ADD COLUMN IF NOT EXISTS location_url TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE editors ADD COLUMN IF NOT EXISTS custom_values JSONB NOT NULL DEFAULT '{}'::jsonb`,
 	`CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, serial INTEGER NOT NULL UNIQUE, customer_id TEXT, customer_name TEXT NOT NULL, mobile TEXT NOT NULL DEFAULT '', event TEXT NOT NULL, project TEXT NOT NULL, receiving TEXT NOT NULL DEFAULT '', duration TEXT NOT NULL DEFAULT '', amount REAL NOT NULL DEFAULT 0, advance REAL NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT '', remarks TEXT NOT NULL DEFAULT '', due_date TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Received', progress INTEGER NOT NULL DEFAULT 0, historical INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(customer_id) REFERENCES customers(id))`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS amount_set INTEGER NOT NULL DEFAULT 1`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS advance_set INTEGER NOT NULL DEFAULT 1`,
@@ -17,6 +19,7 @@ export const schemaStatements = [
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_method TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TEXT`,
 	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_notified_at TEXT`,
+	`ALTER TABLE orders ADD COLUMN IF NOT EXISTS custom_values JSONB NOT NULL DEFAULT '{}'::jsonb`,
 	`UPDATE orders
 	 SET customer_name = customers.business,
 	     mobile = customers.phone
@@ -30,6 +33,7 @@ export const schemaStatements = [
 	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS video_duration_minutes INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS device TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS editor_settlement TEXT NOT NULL DEFAULT 'not-set'`,
+	`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS custom_values JSONB NOT NULL DEFAULT '{}'::jsonb`,
 	`UPDATE orders
 	 SET status = 'Received'
 	 WHERE status = 'Assigned'

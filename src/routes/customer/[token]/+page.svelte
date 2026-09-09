@@ -5,28 +5,40 @@
     ArrowUpRight,
     Check,
     ChevronDown,
-    Circle,
     Clock3,
     Download,
+    Eye,
     FileText,
     Printer,
   } from "@lucide/svelte";
   import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
   import PortalHeader from "$lib/components/PortalHeader.svelte";
+  import CustomFieldValues from "$lib/components/CustomFieldValues.svelte";
+  import ProgressDisplay from "$lib/components/ProgressDisplay.svelte";
   import { formatDate, money } from "$lib/data";
   import { orderCode } from "$lib/identifiers";
   import type { Invoice, Order } from "$lib/types";
+  import { hasCapability, labelFor, statusFor } from "$lib/capabilities";
+  import { customerPortalSections } from "$lib/moduleConfiguration";
+  import { whatsappNumber } from "$lib/phone";
 
   let { data } = $props();
   let selected = $state<Order | null>(untrack(() => data.orders[0] || null));
   let documentsOpen = $state(false);
+  const portalConfiguration = $derived(data.configuration.moduleConfiguration["portal.customer"]);
+  const portalSections = $derived(customerPortalSections(portalConfiguration));
+  const tasksEnabled = $derived(portalSections.tasks && hasCapability(data.configuration.effectiveCapabilities, "work.tasks"));
+  const paymentsEnabled = $derived(portalSections.payments && hasCapability(data.configuration.effectiveCapabilities, "billing.payments"));
+  const invoicesEnabled = $derived(portalSections.documents && hasCapability(data.configuration.effectiveCapabilities, "billing.invoices"));
+  const billingEnabled = $derived(portalSections.billing && (paymentsEnabled || invoicesEnabled));
+  const deliveryEnabled = $derived(portalSections.delivery && hasCapability(data.configuration.effectiveCapabilities, "workflow.delivery"));
+  const whatsappEnabled = $derived(hasCapability(data.configuration.effectiveCapabilities, "communications.whatsapp"));
+  const customFieldsEnabled = $derived(portalSections.customFields && hasCapability(data.configuration.effectiveCapabilities, "customFields"));
   const firstName = $derived(
     (data.customer.name || data.customer.business || "there").split(" ")[0],
   );
   const outputLink = $derived(
-    selected?.tasks.find(
-      (task) => task.outputLink && task.status === "Completed",
-    )?.outputLink || "",
+    selected ? data.deliveryLinks?.[selected.id] || "" : "",
   );
   const discountPercent = $derived(
     selected && selected.price > 0
@@ -56,101 +68,81 @@
         ) => right.invoice.openedAt.localeCompare(left.invoice.openedAt),
       ),
   );
-  const steps = $derived(
-    selected
-      ? [
-          [
-            "Files received",
-            selected.progress > 0 || selected.status !== "Received"
-              ? "done"
-              : "current",
-          ],
-          ["Work assigned", selected.tasks.length ? "done" : ""],
-          [
-            "Editing in progress",
-            selected.progress >= 100
-              ? "done"
-              : selected.progress > 0
-                ? "current"
-                : "",
-          ],
-          [
-            "Quality review",
-            selected.status === "Waiting Review"
-              ? "current"
-              : ["Ready Delivery", "Completed", "Delivered"].includes(
-                    selected.status,
-                  )
-                ? "done"
-                : "",
-          ],
-          [
-            "Ready for delivery",
-            selected.status === "Ready Delivery"
-              ? "current"
-              : ["Completed", "Delivered"].includes(selected.status)
-                ? "done"
-                : "",
-          ],
-          [
-            "Delivered",
-            ["Completed", "Delivered"].includes(selected.status) ? "done" : "",
-          ],
-        ]
-      : [],
+  const deliveryCopy = $derived(({
+    digital: { title: "Delivered files", ready: "Your files are ready", action: "View delivered files" },
+    pickup: { title: "Pickup details", ready: "Your order is ready for pickup", action: "View pickup details" },
+    appointment: { title: "Appointment details", ready: "Your appointment details are ready", action: "View appointment details" },
+    fulfilment: { title: "Order fulfilment", ready: "Your order details are ready", action: "View order details" },
+    handover: { title: "Handover details", ready: "Your handover details are ready", action: "View handover details" },
+    completion: { title: "Completion details", ready: "Your completion details are ready", action: "View completion details" }
+  } as const)[portalConfiguration.deliveryExperience]);
+  const studioPhone = $derived(whatsappNumber(data.settings?.phone));
+  const portalLabel = $derived(
+    portalConfiguration.mode === "status-only"
+      ? "Private status"
+      : billingEnabled || invoicesEnabled
+        ? "Private status & billing"
+        : "Customer portal",
   );
-  const studioPhone = $derived(data.settings?.phone?.replace(/\D/g, "") || "");
+  const socialImage = $derived(`${data.appUrl}/nexadesk-social.png`);
 </script>
 
 <svelte:head>
-  <title>{data.customer.business} — {data.settings.studioName} portal</title>
+  <title>Secure customer portal — {data.settings.studioName}</title>
   <meta
     property="og:title"
-    content={`${data.customer.business} — Private customer portal`}
+    content={`${data.settings.studioName} — Secure customer portal`}
   />
   <meta
     property="og:description"
-    content={`View orders, task progress and invoices from ${data.settings.studioName}.`}
+    content={`Privately view service progress, billing, documents, and delivery updates from ${data.settings.studioName}.`}
   />
   <meta property="og:type" content="website" />
-  {#if data.settings.logoUrl}<meta
-      property="og:image"
-      content={data.settings.logoUrl}
-    />{/if}
+  <meta property="og:site_name" content={data.settings.studioName} />
+  <meta property="og:url" content={data.pageUrl} />
+  <meta property="og:image" content={socialImage} />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content={`${data.settings.studioName} secure customer portal`} />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content={`${data.settings.studioName} — Secure customer portal`} />
+  <meta name="twitter:description" content={`Private status, billing, document, and delivery access from ${data.settings.studioName}.`} />
+  <meta name="twitter:image" content={socialImage} />
   <meta name="robots" content="noindex,nofollow" />
 </svelte:head>
-<PortalHeader label="Private status & bill" settings={data.settings} />
+<PortalHeader label={portalLabel} settings={data.settings} themeScope={data.tenantSlug} />
 
 <main class="customer-main">
-  <div class="hello">
+  {#if portalSections.summary}<div class="hello">
     <p>Hello {firstName} 👋</p>
     <h1>{data.customer.business || data.customer.name}</h1>
-    <span>Your studio orders, assigned tasks, billing and approved files.</span>
-  </div>
+    {#if customFieldsEnabled}<CustomFieldValues definitions={data.configuration.profile.customFields} entity="customer" values={data.customer.customFields} surface="customerPortal"/>{/if}
+    <span>Your {labelFor(data.configuration.profile, "order", true).toLowerCase()}, status, billing and approved files.</span>
+  </div>{/if}
   <div class="portal-shortcuts">
-    <a href="#work-status"><Clock3 size={14} /> View work status</a><a
+    {#if portalSections.progress}<a href="#work-status"><Clock3 size={14} /> View {labelFor(data.configuration.profile, "order").toLowerCase()} status</a>{/if}{#if invoicesEnabled}<a
       href="#documents"
       onclick={() => (documentsOpen = true)}
       ><FileText size={14} /> Invoices & receipts</a
-    >{#if studioPhone}<a
+    >{/if}{#if whatsappEnabled && studioPhone}<a
         class="contact"
         href={`https://wa.me/${studioPhone}`}
         target="_blank"
-        rel="noreferrer"><WhatsAppIcon size={15} /> Contact studio</a
+        rel="noreferrer"><WhatsAppIcon size={15} /> Contact {data.settings.studioName}</a
       >{/if}
   </div>
   {#if !selected}
     <section class="empty card">
       <FileText size={24} />
-      <h2>No projects yet</h2>
-      <p>Your studio will add projects here after creating an order.</p>
+      <h2>No {labelFor(data.configuration.profile, "project", true).toLowerCase()} yet</h2>
+      <p>{data.settings.studioName} will add them here after creating a {labelFor(data.configuration.profile, "order").toLowerCase()}.</p>
     </section>
   {:else}
     <div class="orders-heading">
-      <h2>Orders</h2>
+      <h2>{labelFor(data.configuration.profile, "order", true)}</h2>
       <span
         >{data.orders.length}
-        {data.orders.length === 1 ? "order" : "orders"}</span
+        {data.orders.length === 1 ? labelFor(data.configuration.profile, "order").toLowerCase() : labelFor(data.configuration.profile, "order", true).toLowerCase()}</span
       >
     </div>
     <div class="project-switch">
@@ -160,45 +152,54 @@
           >{orderCode(data.settings, order.serial)} · {order.project}</button
         >{/each}
     </div>
-    <section id="work-status" class="project-card card">
+    {#if portalSections.summary || portalSections.progress}<section id="work-status" class="project-card card">
+      {#if portalSections.summary}
       <div class="project-head">
         <div>
-          <span>{selected.workType || "Studio project"}</span>
+          <span>{selected.workType || labelFor(data.configuration.profile, "project")}</span>
           <h2>{selected.project}</h2>
+          {#if customFieldsEnabled}<CustomFieldValues definitions={data.configuration.profile.customFields} entity="order" values={selected.customFields} surface="customerPortal"/>{/if}
           <p>
-            Order {orderCode(data.settings, selected.serial)}
-            {selected.due ? `· Delivery ${formatDate(selected.due)}` : ""}
+            {labelFor(data.configuration.profile, "order")} {orderCode(data.settings, selected.serial)}
+            {selected.due ? `· ${labelFor(data.configuration.profile, "dueDate")} ${formatDate(selected.due)}` : ""}
           </p>
         </div>
-        <span class="percent"
-          ><strong>{selected.progress}%</strong> complete</span
-        >
+        {#if portalConfiguration.progressMode === "milestones"}<span class="percent"><strong>{statusFor(data.configuration.profile, selected.status).label}</strong> current status</span>{/if}
       </div>
-      <div class="customer-progress">
-        {#each steps as step, index}<div
-            class:done={step[1] === "done"}
-            class:current={step[1] === "current"}
-          >
-            <span
-              >{#if step[1] === "done"}<Check
-                  size={13}
-                />{:else if step[1] === "current"}<Clock3
-                  size={13}
-                />{:else}<Circle size={9} />{/if}</span
-            ><strong>{step[0]}</strong>{#if index < steps.length - 1}<i
-              ></i>{/if}
-          </div>{/each}
-      </div>
-    </section>
+      {/if}
+      {#if portalSections.progress}<div class="customer-progress"><ProgressDisplay milestones={portalConfiguration.milestones} status={selected.status} percent={selected.progress} mode={portalConfiguration.progressMode} label={`${labelFor(data.configuration.profile, "order")} progress`}/></div>{/if}
+    </section>{/if}
+    {#if tasksEnabled}
+      <section class="card task-summary">
+        <div class="section-title">
+          <span><Check size={16} /></span>
+          <div>
+            <h2>{labelFor(data.configuration.profile, "task", true)}</h2>
+            <p>Current progress for this {labelFor(data.configuration.profile, "order").toLowerCase()}</p>
+          </div>
+        </div>
+        {#if selected.tasks.length}
+          <div class="customer-tasks">
+            {#each selected.tasks as task}
+              <article>
+                <div><strong>{task.name}</strong><small>{task.due ? `${labelFor(data.configuration.profile, "dueDate")} ${formatDate(task.due)}` : "No date set"}</small></div>
+                <span>{statusFor(data.configuration.profile, task.status).label} · {task.progress}%</span>
+              </article>
+            {/each}
+          </div>
+        {:else}<p class="empty-task-list">No {labelFor(data.configuration.profile, "task", true).toLowerCase()} have been shared yet.</p>{/if}
+      </section>
+    {/if}
     <div class="customer-grid">
-      <section id="bill" class="card invoice">
+      {#if billingEnabled || invoicesEnabled}<section id="bill" class="card invoice">
         <div class="section-title">
           <span><FileText size={16} /></span>
           <div>
-            <h2>Your bill</h2>
-            <p>Advance, payments and remaining balance</p>
+            <h2>{billingEnabled ? "Billing summary" : "Invoices & receipts"}</h2>
+            <p>{billingEnabled ? "Payments, invoices and remaining balance" : "Your billing documents"}</p>
           </div>
         </div>
+        {#if billingEnabled}
         <div class="money-grid">
           <div>
             <span
@@ -234,7 +235,7 @@
             >
           </div>
         </div>
-        {#if (selected.initialAdvance || 0) > 0 || (selected.payments || []).length}<div
+        {#if paymentsEnabled && ((selected.initialAdvance || 0) > 0 || (selected.payments || []).length)}<div
             class="ledger"
           >
             <h3>Payment history</h3>
@@ -255,7 +256,8 @@
                 ><b>{money(payment.amount)}</b>
               </div>{/each}
           </div>{/if}
-        <div id="documents" class="invoice-history">
+        {/if}
+        {#if invoicesEnabled}<div id="documents" class="invoice-history">
           <h3>
             <button
               aria-expanded={documentsOpen}
@@ -265,8 +267,7 @@
             >
           </h3>
           {#if documentsOpen}<p class="document-note">
-              Newest documents are shown first. Open a document to view it, or
-              use Download / print PDF.
+              View a document online or open the print dialog to save it as a PDF.
             </p>
             {#each allInvoiceRows as row, index}<article class="document-row">
                 <span class="document-icon"><FileText size={14} /></span>
@@ -285,65 +286,66 @@
                       row.invoice.openedAt,
                     )}</small
                   ><em
-                    >{row.order?.project || "Order"} · Due {money(
-                      row.invoice.balance,
-                    )}</em
+                    >{row.order?.project || "Order"} · {row.invoice.balance > 0
+                      ? `Balance ${money(row.invoice.balance)}`
+                      : "Paid in full"}</em
                   ></span
                 >
                 <span class="document-actions"
                   ><a
+                    class="view-document"
                     href={`/portal/${data.tenantSlug}/customer/${data.token}/invoice/${row.invoice.id}`}
                     target="_blank"
-                    rel="noreferrer">Open</a
+                    rel="noreferrer"><Eye size={13}/> View</a
                   ><a
+                    class="save-document"
                     href={`/portal/${data.tenantSlug}/customer/${data.token}/invoice/${row.invoice.id}?print=1`}
                     target="_blank"
                     rel="noreferrer"
-                    ><Printer size={12} /> Download / print PDF</a
+                    ><Printer size={13} /> Print / Save PDF</a
                   ></span
                 >
               </article>{/each}
             {#if !allInvoiceRows.length}<p class="empty-documents">
                 No invoices or receipts have been generated yet.
               </p>{/if}{/if}
-        </div>
-      </section>
-      <section class="card delivery">
+        </div>{/if}
+      </section>{/if}
+      {#if deliveryEnabled}<section class="card delivery">
         <div class="section-title">
           <span><Download size={16} /></span>
           <div>
-            <h2>Project files</h2>
+            <h2>{deliveryCopy.title}</h2>
             <p>
               {outputLink
-                ? "Approved delivery is available"
+                ? deliveryCopy.ready
                 : selected.status === "Delivered" &&
                     selected.deliveryMethod === "offline"
-                  ? "Delivered physically / offline"
-                  : "Available after final approval"}
+                  ? `${labelFor(data.configuration.profile, "delivery")} completed offline`
+                  : `Available when the ${labelFor(data.configuration.profile, "order").toLowerCase()} is ready`}
             </p>
           </div>
         </div>
         {#if outputLink}<a href={outputLink} target="_blank" rel="noreferrer"
-            >Open delivery <ArrowUpRight size={13} /></a
+            >{deliveryCopy.action} <ArrowUpRight size={13} /></a
           >{:else if selected.status === "Delivered" && selected.deliveryMethod === "offline"}<span
             class="delivered-offline"
-            ><Check size={14} /> Delivery completed {selected.deliveredAt
+            ><Check size={14} /> {labelFor(data.configuration.profile, "delivery")} completed {selected.deliveredAt
               ? formatDate(selected.deliveredAt)
               : ""}</span
-          >{:else}<span class="locked">Delivery link will appear here</span
+          >{:else}<span class="locked">{labelFor(data.configuration.profile, "delivery")} details will appear here</span
           >{/if}
-      </section>
+      </section>{/if}
     </div>
   {/if}
-  {#if studioPhone}<a
+  {#if whatsappEnabled && studioPhone}<a
       class="whatsapp"
       href={`https://wa.me/${studioPhone}`}
       target="_blank"
-      rel="noreferrer"><WhatsAppIcon size={17} /> Contact studio on WhatsApp</a
+      rel="noreferrer"><WhatsAppIcon size={17} /> Contact {data.settings.studioName} on WhatsApp</a
     >{/if}
   <p class="privacy">
-    This private link shows only your projects, payments, and approved delivery
-    details.
+    This private link shows only your workspace records and the details shared with you.
   </p>
 </main>
 
@@ -431,6 +433,50 @@
     padding: 22px;
     scroll-margin-top: 18px;
   }
+  .task-summary {
+    margin-top: 14px;
+    padding: 22px;
+  }
+  .customer-tasks {
+    display: grid;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .customer-tasks article {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 11px 12px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--theme-soft);
+  }
+  .customer-tasks article > div {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+  .customer-tasks strong {
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .customer-tasks small,
+  .customer-tasks article > span,
+  .empty-task-list {
+    color: var(--muted);
+    font-size: 8px;
+  }
+  .customer-tasks article > span {
+    flex: none;
+    color: var(--purple);
+    font-weight: 700;
+  }
+  .empty-task-list {
+    margin: 16px 0 0;
+  }
   .project-head {
     display: flex;
     justify-content: space-between;
@@ -460,57 +506,12 @@
     font-size: 18px;
   }
   .customer-progress {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
     margin-top: 34px;
-  }
-  .customer-progress > div {
-    position: relative;
-    text-align: center;
-    display: flex;
-    align-items: center;
-    flex-direction: column;
-    gap: 9px;
-  }
-  .customer-progress > div > span {
-    position: relative;
-    z-index: 2;
-    width: 25px;
-    height: 25px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--line);
-    background: var(--card);
-    color: var(--muted);
-  }
-  .customer-progress > div.done > span {
-    border-color: #22c55e50;
-    background: #22c55e15;
-    color: #4fd17d;
-  }
-  .customer-progress > div.current > span {
-    border-color: var(--purple);
-    background: var(--theme-soft);
-    color: var(--purple);
-  }
-  .customer-progress strong {
-    font-size: 8px;
-    font-weight: 550;
-    color: var(--muted);
-  }
-  .customer-progress i {
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    right: -50%;
-    height: 1px;
-    background: var(--line);
-    z-index: 1;
   }
   .customer-grid {
     display: grid;
     grid-template-columns: 1.3fr 1fr;
+    align-items: start;
     gap: 13px;
     margin-top: 13px;
   }
@@ -568,16 +569,26 @@
   .delivery > a,
   .locked {
     margin-top: 18px;
-    height: 36px;
+    min-height: 40px;
+    box-sizing: border-box;
     border: 1px solid var(--line);
-    background: var(--theme-soft);
+    background: color-mix(in srgb, var(--purple) 7%, var(--card));
     color: var(--purple);
-    border-radius: 7px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
+    padding: 0 12px;
     font-size: 9px;
+    font-weight: 700;
+    text-align: center;
+    transition: border-color .18s ease, background .18s ease, transform .18s ease;
+  }
+  .delivery > a:hover {
+    border-color: var(--purple);
+    background: color-mix(in srgb, var(--purple) 12%, var(--card));
+    transform: translateY(-1px);
   }
   .locked {
     color: var(--muted);
@@ -600,21 +611,6 @@
   @media (max-width: 650px) {
     .customer-main {
       padding-top: 40px;
-    }
-    .customer-progress {
-      grid-template-columns: 1fr;
-      gap: 11px;
-    }
-    .customer-progress > div {
-      flex-direction: row;
-      text-align: left;
-    }
-    .customer-progress i {
-      left: 12px;
-      top: 25px;
-      bottom: -11px;
-      width: 1px;
-      height: auto;
     }
     .customer-grid {
       grid-template-columns: 1fr;
@@ -756,9 +752,42 @@
     gap: 5px;
   }
   .invoice-history .document-actions a {
-    min-height: 30px;
-    padding: 0 8px;
+    min-height: 34px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 10px;
     border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--card);
+    color: var(--theme-text);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: border-color .18s ease, background .18s ease, color .18s ease, transform .18s ease;
+  }
+  .invoice-history .document-actions .view-document {
+    border-color: color-mix(in srgb, var(--purple) 72%, var(--line));
+    background: var(--purple);
+    color: var(--accent-text, #fff);
+  }
+  .invoice-history .document-actions .save-document {
+    color: var(--purple);
+  }
+  .invoice-history .document-actions a:hover {
+    border-color: var(--purple);
+    transform: translateY(-1px);
+  }
+  .invoice-history .document-actions .save-document:hover {
+    background: color-mix(in srgb, var(--purple) 8%, var(--card));
+  }
+  .invoice-history .document-actions a:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--purple) 22%, transparent);
+    outline-offset: 2px;
   }
   .empty-documents {
     padding: 12px;
@@ -776,5 +805,11 @@
     .document-actions a {
       flex: 1;
     }
+    .customer-tasks article {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 7px;
+    }
   }
+  .customer-progress{display:block;margin-top:28px}
 </style>

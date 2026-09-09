@@ -2,6 +2,8 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import { money } from '$lib/data';
+	import { requestJson } from '$lib/http';
+	import { notifyAction } from '$lib/stores/actionFeedback';
 	import type { Order } from '$lib/types';
 
 	let { open = $bindable(), order, onsaved = () => {} }: { open: boolean; order: Order; onsaved?: (order: Order) => void } = $props();
@@ -26,12 +28,17 @@
 		if (discountPercent < 0 || discountPercent > 100) { error = 'Discount percentage must be between 0% and 100%.'; return; }
 		if (finalTotal < order.paid) { error = `The discounted total cannot be below the already collected amount (${money(order.paid)}).`; return; }
 		saving = true;
-		const response = await fetch(`/api/orders/${order.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ price: Number(total), discount: discountAmount, priceSet: true }) });
-		const result = await response.json();
-		saving = false;
-		if (!response.ok) { error = result.error || 'Unable to save billing details.'; return; }
-		open = false;
-		onsaved(result.order);
+		error = '';
+		try {
+			const result = await requestJson<{ order: Order }>(`/api/orders/${order.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ price: Number(total), discount: discountAmount, priceSet: true }) }, 'Unable to save billing details.');
+			open = false;
+			onsaved(result.order);
+			notifyAction('Billing details saved.');
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'Unable to save billing details.';
+		} finally {
+			saving = false;
+		}
 	}
 </script>
 
@@ -42,7 +49,7 @@
 	</div>
 	<div class="summary"><div><span>Discount ({discountPercent || 0}%)</span><strong>−{money(discountAmount)}</strong></div><div><span>Total after discount</span><strong>{money(finalTotal)}</strong></div><div><span>Already collected</span><strong>{money(order.paid)}</strong></div><div><span>Balance</span><strong>{money(balance)}</strong></div></div>
 	{#if error}<p class="error">{error}</p>{/if}
-	{#snippet footer()}<button class="secondary" onclick={() => open = false}>Cancel</button><button class="primary" disabled={saving} onclick={save}>{saving ? 'Saving…' : 'Save billing'}</button>{/snippet}
+	{#snippet footer()}<button type="button" class="secondary" disabled={saving} onclick={() => open = false}>Cancel</button><button type="button" class="primary" disabled={saving} aria-busy={saving} onclick={save}>{saving ? 'Saving…' : 'Save billing'}</button>{/snippet}
 </Modal>
 
 <style>.summary{display:grid;gap:7px;margin-top:16px;border:1px solid var(--line);border-radius:10px;background:var(--theme-soft);padding:12px}.summary div{display:flex;justify-content:space-between;gap:12px;font-size:10px}.summary span{color:var(--muted)}.error{color:#ef4444;font-size:10px;margin-top:12px}</style>

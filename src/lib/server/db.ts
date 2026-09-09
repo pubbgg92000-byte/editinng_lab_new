@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { neon, type FullQueryResults, type NeonQueryFunction } from '@neondatabase/serverless';
 import { schemaStatements } from '../../../db/schema';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate } from '$lib/messageTemplates';
+import { defaultPackage } from '$lib/capabilities';
 import { runScheduledMaintenance } from './maintenance';
 import type { Tenant } from '$lib/types';
 
@@ -103,7 +104,7 @@ export async function ensureDatabase(database: AppDatabase, cacheKey: string | A
 		await database.batch(schemaStatements.map((statement) => database.prepare(statement)));
 		const now = new Date().toISOString();
 		const defaultSettings: Record<string, string> = {
-			studioName: 'StudioFlow Studio',
+			studioName: 'NexaDesk Workspace',
 			logoUrl: '',
 			address: '',
 			phone: '',
@@ -113,6 +114,8 @@ export async function ensureDatabase(database: AppDatabase, cacheKey: string | A
 			invoiceFooter: 'Thank you for choosing our studio.',
 			assignmentTemplate: defaultAssignmentTemplate,
 			invoiceTemplate: defaultInvoiceTemplate,
+			businessProfile: JSON.stringify(defaultPackage.profile),
+			capabilityPreferences: JSON.stringify(defaultPackage.enabled),
 			themePalette: 'graphite-aqua',
 			themeDefaultMode: 'light'
 		};
@@ -160,7 +163,7 @@ export async function readyDatabase(tenant?: Tenant | null) {
 	if (tenant && !brandInitialized.has(databaseUrl)) {
 		await database.batch([
 			database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'logoUrl' AND value = ''").bind(tenant.logoUrl || '', new Date().toISOString()),
-			database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'studioName' AND value = 'StudioFlow Studio'").bind(tenant.studioName, new Date().toISOString())
+			database.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = 'studioName' AND value IN ('StudioFlow Studio', 'NexaDesk Workspace')").bind(tenant.studioName, new Date().toISOString())
 		]);
 		brandInitialized.add(databaseUrl);
 	}

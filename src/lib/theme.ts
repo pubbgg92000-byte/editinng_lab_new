@@ -21,6 +21,7 @@ export const themePalettes: { id: ThemePalette; name: string; mode: ThemeMode; c
 
 const storageKey = (name: 'palette' | 'theme', scope: string) =>
 	`studioflow_${name}:${encodeURIComponent(scope || 'public')}`;
+const lastWorkspaceScopeKey = 'studioflow_last_workspace_scope';
 
 export function getStoredTheme(defaultPalette: ThemePalette = 'graphite-aqua', defaultMode: ThemeMode = 'light', scope = 'public'): ThemeSelection {
 	if (typeof localStorage === 'undefined') return { palette: defaultPalette, mode: defaultMode };
@@ -36,6 +37,12 @@ export function currentTheme(): ThemeSelection {
 	return { palette: theme.id, mode: theme.mode };
 }
 
+export function getLastWorkspaceTheme(defaultPalette: ThemePalette = 'graphite-aqua', defaultMode: ThemeMode = 'light') {
+	if (typeof localStorage === 'undefined') return { palette: defaultPalette, mode: defaultMode };
+	const scope = localStorage.getItem(lastWorkspaceScopeKey) || 'public';
+	return getStoredTheme(defaultPalette, defaultMode, scope);
+}
+
 export function applyTheme(selection: ThemeSelection, remember = true, scope = 'public') {
 	if (typeof document === 'undefined') return;
 	const theme = themePalettes.find((item) => item.id === selection.palette) ?? themePalettes[0];
@@ -45,5 +52,6 @@ export function applyTheme(selection: ThemeSelection, remember = true, scope = '
 	if (remember) {
 		localStorage.setItem(storageKey('palette', scope), theme.id);
 		localStorage.setItem(storageKey('theme', scope), theme.mode);
+		if (scope && scope !== 'public') localStorage.setItem(lastWorkspaceScopeKey, scope);
 	}
 }

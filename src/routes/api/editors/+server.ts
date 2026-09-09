@@ -5,6 +5,8 @@ import { readyDatabase } from '$lib/server/db';
 import { createEditor, listEditors } from '$lib/server/repository';
 import { flushSheetSync } from '$lib/server/googleSheets';
 import { indianMobileError } from '$lib/phone';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { hasCapability, validateCustomValues } from '$lib/capabilities';
 
 export const GET = async ({ cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
@@ -19,6 +21,9 @@ export const POST = async ({ request, cookies, locals }) => {
 	if (phoneError) return json({ error: phoneError }, { status: 400 });
 	if (String(input.locationUrl || '').trim() && !/^https:\/\//i.test(String(input.locationUrl).trim())) return json({ error: 'Google Maps location must be an HTTPS link.' }, { status: 400 });
 	const database = await readyDatabase(locals.tenant);
+	const configuration = await getTenantConfiguration(database, locals.tenant!);
+	try { input.customFields = hasCapability(configuration.effectiveCapabilities, 'customFields') ? validateCustomValues(configuration.profile, 'staff', input.customFields) : {}; }
+	catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Custom fields are invalid.' }, { status: 400 }); }
 	let editor;
 	try { editor = await createEditor(database, input); }
 	catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to save editor.' }, { status: 400 }); }

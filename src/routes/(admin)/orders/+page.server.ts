@@ -8,6 +8,10 @@ export const load = async ({ locals, url }) => {
 		query: String(url.searchParams.get('q') || '').trim(),
 		status: String(url.searchParams.get('status') || '').trim(),
 		event: String(url.searchParams.get('event') || '').trim(),
+		sort: (url.searchParams.get('sort') || 'oldest') as 'newest' | 'oldest',
+		dateFrom: String(url.searchParams.get('dateFrom') || '').trim(),
+		dateTo: String(url.searchParams.get('dateTo') || '').trim(),
+		pendingBalance: url.searchParams.get('pendingBalance') === 'true',
 		archived: url.searchParams.get('archived') === 'true'
 	};
 	const [result, eventOptions, archivedCount, queueCounts] = await Promise.all([

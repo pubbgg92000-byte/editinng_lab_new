@@ -1,13 +1,16 @@
 import type { Handle } from '@sveltejs/kit';
 import { error, redirect } from '@sveltejs/kit';
 import { getAuthSession, SESSION_COOKIE } from '$lib/server/auth';
+import { readyDatabase } from '$lib/server/db';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { capabilityRegistry, hasCapability } from '$lib/capabilities';
+import { capabilitiesForPath } from '$lib/server/capabilityRoutes';
 
 /**
  * Global request gate: separates owner, client-admin, API, and public portal access
  * before a page runs, and rejects cross-site form/API mutations.
  */
 const protectedPrefixes = ['/dashboard', '/customers', '/orders', '/editors', '/invoices', '/settings', '/api'];
-
 export const handle: Handle = async ({ event, resolve }) => {
 	// Load one control session, then enforce owner and client route boundaries centrally.
 	const session = await getAuthSession(event.cookies.get(SESSION_COOKIE)).catch(() => null);
@@ -23,6 +26,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (needsClient && (!event.locals.tenant || event.locals.account?.role !== 'client_admin')) {
 		if (pathname.startsWith('/api')) error(401, 'Unauthorized');
 		redirect(303, '/login');
+	}
+	const required = capabilitiesForPath(pathname);
+	if (required.length && event.locals.tenant) {
+		const database = await readyDatabase(event.locals.tenant);
+		const configuration = await getTenantConfiguration(database, event.locals.tenant);
+		const unavailable = required.find((capability) => !hasCapability(configuration.effectiveCapabilities, capability));
+		if (unavailable) error(403, `${capabilityRegistry[unavailable].label} is not available for this workspace.`);
 	}
 
 	if (!['GET', 'HEAD', 'OPTIONS'].includes(event.request.method)) {

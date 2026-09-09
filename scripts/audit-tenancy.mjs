@@ -27,6 +27,14 @@ if (!settingsApi.includes('readyDatabase(locals.tenant)')) failures.push('Settin
 const sheetsView = await readFile(new URL('../src/routes/(admin)/settings/sheets/+page.server.ts', import.meta.url), 'utf8');
 if (/1jsxofck|publicSheetId|readPublicSheetValues/.test(sheetsView)) failures.push('Sheets view still contains a global/public workbook fallback.');
 
+const portalTaskApi = await readFile(new URL('../src/routes/api/portal/[slug]/tasks/[id]/+server.ts', import.meta.url), 'utf8');
+if (!portalTaskApi.includes('const input: Partial<Task> = {};')) failures.push('Worker portal updates are not using an explicit safe-field allowlist.');
+if (/updateTask\(database,\s*params\.id,\s*submitted/.test(portalTaskApi)) failures.push('Worker portal passes untrusted request fields to the repository.');
+
+const portalLoader = await readFile(new URL('../src/lib/server/portals.ts', import.meta.url), 'utf8');
+if (/\.\.\.order,/.test(portalLoader)) failures.push('Customer portal serializes the full internal order record.');
+if (!portalLoader.includes('portal_token_hash = ?')) failures.push('Customer portal token lookup is not hash-bound.');
+
 if (failures.length) {
 	console.error(failures.join('\n'));
 	process.exit(1);

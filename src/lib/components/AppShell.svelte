@@ -3,6 +3,8 @@
   import { page } from "$app/state";
   import { onMount, untrack } from "svelte";
   import { sidebarOpen } from "$lib/stores/app";
+  import ActionFeedback from "$lib/components/ActionFeedback.svelte";
+  import { beginAction, consumeActionFlash } from "$lib/stores/actionFeedback";
   import type {
     ActivityLog,
     Customer,
@@ -10,7 +12,9 @@
     Editor,
     Order,
     StudioSettings,
+    TenantConfiguration,
   } from "$lib/types";
+  import { hasCapability, labelFor, statusFor } from "$lib/capabilities";
   import { formatDateTime } from "$lib/data";
   import {
     LayoutDashboard,
@@ -47,6 +51,7 @@
   let {
     children,
     settings,
+    configuration,
     customers = [],
     editors = [],
     orders = [],
@@ -56,6 +61,7 @@
   }: {
     children: import("svelte").Snippet;
     settings: StudioSettings;
+    configuration: TenantConfiguration;
     customers?: Customer[];
     editors?: Editor[];
     orders?: Order[];
@@ -68,35 +74,46 @@
       lastAttemptAt: string;
     };
   } = $props();
-  const nav = [
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Customers", href: "/customers", icon: Users },
-    { label: "Orders", href: "/orders", icon: ClipboardList },
-    { label: "Editors", href: "/editors", icon: UserRound },
-    { label: "Invoices", href: "/invoices", icon: ReceiptText },
-    { label: "Sheets data", href: "/settings/sheets", icon: Sheet },
-    { label: "Settings", href: "/settings", icon: Settings },
-  ];
-  const workflowPages = [
+  const displayName = $derived(hasCapability(configuration.effectiveCapabilities, "branding.whiteLabel") ? settings.studioName : "NexaDesk");
+  const displayLogo = $derived(hasCapability(configuration.effectiveCapabilities, "branding.whiteLabel") ? settings.logoUrl : "");
+  const workerLabel = $derived(labelFor(configuration.profile, "staff"));
+  const workerPlural = $derived(labelFor(configuration.profile, "staff", true));
+  const orderLabel = $derived(labelFor(configuration.profile, "order"));
+  const orderPlural = $derived(labelFor(configuration.profile, "order", true));
+  const nav = $derived([
+    { label: "Overview", href: "/dashboard", icon: LayoutDashboard, visible: true },
+    { label: labelFor(configuration.profile, "customer", true), href: "/customers", icon: Users, visible: true },
+    { label: labelFor(configuration.profile, "order", true), href: "/orders", icon: ClipboardList, visible: true },
+    { label: labelFor(configuration.profile, "staff", true), href: "/editors", icon: UserRound, visible: hasCapability(configuration.effectiveCapabilities, "work.staff") },
+    { label: "Invoices", href: "/invoices", icon: ReceiptText, visible: hasCapability(configuration.effectiveCapabilities, "billing.invoices") },
+    { label: "Sheets data", href: "/settings/sheets", icon: Sheet, visible: hasCapability(configuration.effectiveCapabilities, "integrations.googleSheets") },
+    { label: "Settings", href: "/settings", icon: Settings, visible: true },
+  ].filter((item) => item.visible));
+  const currentPageTitle = $derived(
+    page.url.pathname.startsWith("/orders/")
+      ? `${orderLabel} details`
+      : nav.find((item) => item.href === "/dashboard" ? page.url.pathname === "/dashboard" : page.url.pathname.startsWith(item.href))?.label || "Workspace",
+  );
+  const workflowPages = $derived([
     {
-      title: "Review queue",
-      subtitle: "Orders waiting for approval",
+      title: `${statusFor(configuration.profile, "Waiting Review").label} queue`,
+      subtitle: `${orderPlural} awaiting approval`,
       href: "/orders?status=Waiting%20Review",
       type: "Workflow",
     },
     {
-      title: "Ready for delivery",
-      subtitle: "Notify customers and collect balances",
+      title: statusFor(configuration.profile, "Ready Delivery").label,
+      subtitle: `Notify ${labelFor(configuration.profile, "customer", true).toLowerCase()} and collect balances`,
       href: "/orders?status=Ready%20Delivery",
       type: "Workflow",
     },
     {
-      title: "Delivered orders",
-      subtitle: "Completed customer deliveries",
+      title: `${statusFor(configuration.profile, "Delivered").label} ${orderPlural.toLowerCase()}`,
+      subtitle: `Completed ${labelFor(configuration.profile, "customer").toLowerCase()} handovers`,
       href: "/orders?status=Delivered",
       type: "Workflow",
     },
-  ];
+  ]);
   let searchOpen = $state(false);
   let notificationsOpen = $state(false);
   let notificationItems = $state<Notification[]>(untrack(() => notifications));
@@ -154,11 +171,11 @@
         href: `/customers?customer=${customer.id}`,
         type: "Customer",
       })),
-      ...editors.map((editor) => ({
+      ...(hasCapability(configuration.effectiveCapabilities, "work.staff") ? editors : []).map((editor) => ({
         title: editor.name,
         subtitle: editor.specialty || editor.phone,
         href: `/editors?editor=${editor.id}`,
-        type: "Editor",
+        type: labelFor(configuration.profile, "staff"),
       })),
     ]
       .filter((item) =>
@@ -233,18 +250,44 @@
     notificationItems = [];
   }
   onMount(() => {
+    consumeActionFlash();
+    const originalFetch = window.fetch.bind(window);
+    const trackedFetch: typeof window.fetch = async (input, init) => {
+      const method = String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const target = new URL(input instanceof Request ? input.url : String(input), location.href);
+      const track = target.origin === location.origin && !["GET", "HEAD", "OPTIONS"].includes(method) && target.pathname !== "/api/notifications";
+      if (!track) return originalFetch(input, init);
+      const label = target.pathname.includes("/whatsapp")
+        ? "Preparing WhatsApp message…"
+        : target.pathname.includes("/invoice") && method === "POST"
+          ? "Creating document…"
+          : method === "DELETE"
+            ? "Updating records…"
+            : "Saving changes…";
+      const finish = beginAction(label);
+      try {
+        return await originalFetch(input, init);
+      } finally {
+        finish();
+      }
+    };
+    window.fetch = trackedFetch;
     const timer = window.setInterval(refreshNotifications, 15000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      if (window.fetch === trackedFetch) window.fetch = originalFetch;
+    };
   });
 </script>
 
 <svelte:window onkeydown={keyboard} onpointerdown={closePopoversOutside} />
 <svelte:head
-  ><title>{settings.studioName} — StudioFlow</title><meta
+  ><title>{currentPageTitle} · {displayName} — NexaDesk</title><meta
     name="description"
-    content={`${settings.studioName} workflow for customers, editing, billing and delivery.`}
+          content={`${displayName} workflow for ${labelFor(configuration.profile, "customer", true).toLowerCase()}, ${labelFor(configuration.profile, "order", true).toLowerCase()} and operations.`}
   /></svelte:head
 >
+<ActionFeedback/>
 <div class="app-shell">
   {#if $sidebarOpen}<button
       class="scrim"
@@ -256,14 +299,14 @@
       <a
         href="/dashboard"
         class="brand"
-        aria-label={`${settings.studioName} home`}
+        aria-label={`${displayName} home`}
         ><span class="brand-logo" aria-hidden="true"
-          >{#if settings.logoUrl}<img src={settings.logoUrl} alt="" />{:else}<b
+          >{#if displayLogo}<img src={displayLogo} alt="" />{:else}<b
               style="height:100%;display:grid;place-items:center;color:#f5d36b;font-size:11px"
               >SF</b
             >{/if}</span
         ><span class="brand-name"
-          ><strong>{settings.studioName}</strong><small>StudioFlow</small></span
+          ><strong>{displayName}</strong><small>NexaDesk</small></span
         ></a
       ><button
         class="icon-btn mobile-close"
@@ -304,14 +347,14 @@
         </div></a
       ><a href="/logout" class="profile" onclick={confirmSignOut}
         ><span class="avatar"
-          >{settings.studioName
+          >{displayName
             .split(/\s+/)
             .map((part) => part[0])
             .join("")
             .slice(0, 2)
             .toUpperCase()}</span
         >
-        <div><strong>{settings.studioName}</strong><small>Sign out</small></div>
+        <div><strong>{displayName}</strong><small>Sign out</small></div>
         <span class="chev">→</span></a
       >
     </div>
@@ -323,7 +366,7 @@
         aria-label="Open menu"
         onclick={() => ($sidebarOpen = true)}><Menu size={20} /></button
       ><button class="search-button" onclick={openSearch}
-        ><Search size={16} /><span>Search anything...</span><kbd
+        ><Search size={16} /><span>Search workspace</span><kbd
           ><Command size={11} /> K</kbd
         ></button
       >
@@ -331,7 +374,7 @@
         <div class="notification-wrap" bind:this={notificationWrap}>
           <button
             class="icon-btn notification-button"
-            aria-label={`Editor notifications${notificationItems.length ? `, ${notificationItems.length} unread` : ""}`}
+            aria-label={`${workerPlural} notifications${notificationItems.length ? `, ${notificationItems.length} unread` : ""}`}
             aria-expanded={notificationsOpen}
             onclick={() => {
               notificationsOpen = !notificationsOpen;
@@ -346,7 +389,7 @@
           >{#if notificationsOpen}<div class="notification-popover">
               <div class="popover-head">
                 <span
-                  ><strong>Editor updates</strong><small
+                  ><strong>{workerLabel} updates</strong><small
                     >{notificationItems.length} unread</small
                   ></span
                 >{#if notificationItems.length}<button
@@ -377,7 +420,7 @@
               profileOpen = !profileOpen;
               notificationsOpen = false;
             }}
-            >{settings.studioName
+            >{displayName
               .split(/\s+/)
               .map((part) => part[0])
               .join("")
@@ -386,7 +429,7 @@
           >{#if profileOpen}<div class="profile-popover">
               <div class="profile-head">
                 <span class="profile-avatar"
-                  >{settings.studioName
+                  >{displayName
                     .split(/\s+/)
                     .map((part) => part[0])
                     .join("")
@@ -394,7 +437,7 @@
                     .toUpperCase()}</span
                 >
                 <div>
-                  <strong>{settings.studioName}</strong><small
+                  <strong>{displayName}</strong><small
                     >Administrator</small
                   >
                 </div>
@@ -410,7 +453,7 @@
                 <a href="/settings" onclick={() => (profileOpen = false)}
                   ><Settings size={14} /><span
                     ><strong>Profile settings</strong><small
-                      >Studio and account details</small
+                      >Workspace and account details</small
                     ></span
                   ><ArrowUpRight size={13} /></a
                 ><a href="/logout" class="sign-out" onclick={confirmSignOut}
@@ -459,7 +502,7 @@
         <Search size={18} /><input
           bind:this={searchInput}
           bind:value={query}
-          placeholder="Search orders, customers, editors and pages"
+          placeholder={`Search ${labelFor(configuration.profile, "order", true).toLowerCase()}, ${labelFor(configuration.profile, "customer", true).toLowerCase()} and pages`}
         /><button onclick={() => (searchOpen = false)}><X size={16} /></button>
       </div>
       <div class="search-results">
