@@ -31,14 +31,9 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 		if (!hasCapability(configuration.effectiveCapabilities, 'workflow.delivery')) return json({ error: 'Delivery is not available for this workspace.' }, { status: 403 });
 		const currentOrder = await getOrder(database, params.id);
 		if (!currentOrder) return json({ error: 'Order not found.' }, { status: 404 });
-		if (currentOrder.priceSet === false) return json({ error: 'Set the final total before marking this order as delivered.' }, { status: 409 });
-		const balance = Math.max(0, currentOrder.price - currentOrder.discount - currentOrder.paid);
-		if (balance > 0.009) return json({ error: `Collect the remaining balance of ₹${balance.toLocaleString('en-IN')} before marking this order as delivered.` }, { status: 409 });
 		const hasDigitalOutput = currentOrder.tasks.some((task) => !task.archived && task.status === 'Completed' && Boolean(task.outputLink?.trim()));
 		const deliveryMethod = input.deliveryMethod === 'offline' ? 'offline' : input.deliveryMethod === 'digital' ? 'digital' : currentOrder.deliveryMethod;
-		if (!hasDigitalOutput && deliveryMethod !== 'offline') return json({ error: 'Add a completed task output link, or choose physical/offline delivery before marking this order delivered.' }, { status: 409 });
-		if (deliveryMethod === 'digital' && !hasDigitalOutput) return json({ error: 'Digital delivery requires a completed task output link.' }, { status: 409 });
-		input.deliveryMethod = deliveryMethod || (hasDigitalOutput ? 'digital' : '');
+		input.deliveryMethod = deliveryMethod || (hasDigitalOutput ? 'digital' : 'offline');
 		input.deliveredAt = input.deliveredAt || new Date().toISOString();
 	}
 	if (input.price !== undefined) {

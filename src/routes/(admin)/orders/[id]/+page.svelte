@@ -106,7 +106,7 @@
   const discountPercent = $derived(
     order.price > 0 ? (order.discount / order.price) * 100 : 0,
   );
-  const deliveryBlocked = $derived(order.priceSet === false || balance > 0.009);
+  const deliveryBlocked = $derived(order.priceSet === false);
   const paidPercent = $derived(
     finalTotal > 0
       ? Math.min(100, Math.round((order.paid / finalTotal) * 100))
@@ -530,13 +530,10 @@
       {#if order.priceSet === false && (paymentsEnabled || invoicesEnabled)}<button
           class="primary"
           onclick={() => (billingModalOpen = true)}>Set final total</button
-        >{:else if balance > 0}<button
-          class="primary"
-          onclick={() => (paymentModalOpen = true)}>Add balance payment</button
         >{:else if deliveryEnabled}<button
           class="deliver-order"
           onclick={() => (deliveryModalOpen = true)}
-          ><CircleCheckBig size={15} /> Confirm delivery</button
+          ><CircleCheckBig size={15} /> Confirm delivery{balance > 0 ? ` (${money(balance)} pending)` : ""}</button
         >{/if}
     </div>
   </section>
@@ -761,7 +758,7 @@
             <CircleCheckBig size={15} /> Delivered {order.deliveredAt
               ? formatDate(order.deliveredAt)
               : ""}
-          </div>{:else}<select
+          </div>{/if}<select
             id="order-status"
             value={order.status}
             disabled={busy === "status" || order.archived}
@@ -770,12 +767,10 @@
                 (event.currentTarget as HTMLSelectElement)
                   .value as Order["status"],
               )}
-            >{#each ["Historical", "Received", "Assigned", "Editing", "Waiting Review", "Revision", "Ready Delivery", "Stopped", "Completed"] as status}<option
+            >{#each ["Historical", "Received", "Assigned", "Editing", "Waiting Review", "Revision", "Ready Delivery", "Delivered", "Stopped", "Completed"] as status}<option
                 value={status}>{statusFor(data.configuration?.profile, status).label}</option
               >{/each}</select
-          ><small
-            >Use the guided delivery confirmation to mark work Delivered.</small
-          >{/if}
+          >
       </div>
       <dl>
         <div>
@@ -1074,8 +1069,8 @@
     margin-bottom: 16px;
   }
   .detail-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 330px;
+    display: flex;
+    flex-direction: column;
     gap: 16px;
   }
   .main-col,
@@ -1083,6 +1078,27 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+    min-width: 0;
+    width: 100%;
+  }
+  @media (min-width: 1300px) {
+    .detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      align-items: start;
+    }
+    .side-col {
+      order: 0;
+    }
+  }
+  @media (max-width: 1299px) {
+    .side-col {
+      order: -1;
+    }
+  }
+  .status-control select {
+    width: auto;
+    max-width: 220px;
   }
   .section-head {
     padding: 17px 18px;
@@ -1633,11 +1649,10 @@
     gap: 12px;
     margin: 0 0 16px;
     padding: 9px 12px;
-    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+    border: 1.5px solid var(--accent);
     border-radius: 13px;
-    background: color-mix(in srgb, var(--card) 91%, transparent);
-    box-shadow: 0 12px 35px #00000016;
-    backdrop-filter: blur(16px);
+    background: var(--card);
+    box-shadow: 0 4px 24px #00000022, 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent);
   }
   .sticky-order-number {
     min-width: 34px;

@@ -16,6 +16,10 @@ export const GET = async ({ cookies, locals, url }) => {
 		query: url.searchParams.get('q') || '',
 		status: url.searchParams.get('status') || '',
 		event: url.searchParams.get('event') || '',
+		sort: (url.searchParams.get('sort') as 'newest' | 'oldest') || 'oldest',
+		dateFrom: url.searchParams.get('dateFrom') || '',
+		dateTo: url.searchParams.get('dateTo') || '',
+		pendingBalance: url.searchParams.get('pendingBalance') === 'true',
 		includeHistorical: url.searchParams.get('historical') !== 'false',
 		archived: url.searchParams.get('archived') === 'true'
 	}));

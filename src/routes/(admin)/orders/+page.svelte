@@ -25,6 +25,7 @@
     Clock3,
     PackageCheck,
     CircleCheckBig,
+    Download,
   } from "@lucide/svelte";
   import type { Order } from "$lib/types";
   import { labelFor, statusFor } from "$lib/capabilities";
@@ -40,13 +41,22 @@
   let query = $state(initialData.filters.query);
   let statusFilter = $state(initialData.filters.status);
   let eventFilter = $state(initialData.filters.event);
+  let sortOrder = $state(initialData.filters.sort || "oldest");
+  let dateFrom = $state(initialData.filters.dateFrom || "");
+  let dateTo = $state(initialData.filters.dateTo || "");
   let toast = $state("");
   let filtersOpen = $state(
-    Boolean(initialData.filters.status || initialData.filters.event),
+    Boolean(initialData.filters.status || initialData.filters.event || initialData.filters.dateFrom || initialData.filters.dateTo || (initialData.filters.sort && initialData.filters.sort !== "oldest")),
   );
   let archived = $state(Boolean(initialData.filters.archived));
   let archivedCount = $state(initialData.archivedCount);
   let busy = $state("");
+  let exportOpen = $state(false);
+  let exportMode = $state<"month" | "range">("month");
+  let exportMonth = $state(new Date().toISOString().slice(0, 7));
+  let exportFrom = $state("");
+  let exportTo = $state("");
+  let exportBusy = $state(false);
   let deliveryOrder = $state<Order | null>(null);
   let deliveryOpen = $state(false);
   const queueTitle = $derived(
@@ -78,6 +88,9 @@
     query = data.filters.query;
     statusFilter = data.filters.status;
     eventFilter = data.filters.event;
+    sortOrder = data.filters.sort || "oldest";
+    dateFrom = data.filters.dateFrom || "";
+    dateTo = data.filters.dateTo || "";
     archived = Boolean(data.filters.archived);
     archivedCount = data.archivedCount;
   });
@@ -87,10 +100,27 @@
     if (query.trim()) params.set("q", query.trim());
     if (statusFilter) params.set("status", statusFilter);
     if (eventFilter) params.set("event", eventFilter);
+    if (sortOrder && sortOrder !== "oldest") params.set("sort", sortOrder);
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
     if (archived) params.set("archived", "true");
     if (page > 1) params.set("page", String(page));
     const value = params.toString();
     return value ? `/orders?${value}` : "/orders";
+  }
+
+  async function downloadExcel() {
+    exportBusy = true;
+    const params = new URLSearchParams();
+    if (exportMode === "month") {
+      params.set("month", exportMonth);
+    } else {
+      if (exportFrom) params.set("dateFrom", exportFrom);
+      if (exportTo) params.set("dateTo", exportTo);
+    }
+    // Use window.location.assign to bypass SvelteKit's client router
+    window.location.assign(`/api/orders/export?${params.toString()}`);
+    setTimeout(() => { exportBusy = false; exportOpen = false; }, 1500);
   }
 
   async function notifyReady(order: Order) {
@@ -239,46 +269,112 @@
         class="secondary"
         onclick={() => (filtersOpen = !filtersOpen)}
         ><SlidersHorizontal size={13} /> Filter</button
+      ><button
+        type="button"
+        class="secondary export-btn"
+        onclick={() => (exportOpen = !exportOpen)}
+        ><Download size={13} /> Export</button
       >
     </div>
   </div>
   {#if archived}<input type="hidden" name="archived" value="true" />{/if}
   {#if filtersOpen}<div class="filter-panel">
-      <div class="field">
-        <label for="status-filter">Status</label><select
-          id="status-filter"
-          name="status"
-          bind:value={statusFilter}
-          ><option value="">All statuses</option
-          >{#each ["Historical", "Received", "Assigned", "Editing", "Waiting Review", "Revision", "Ready Delivery", "Delivered", "Stopped", "Completed"] as status}<option
-              value={status}>{statusFor(data.configuration?.profile, status).label}</option
-            >{/each}</select
+      <div class="filter-row">
+        <div class="field">
+          <label for="status-filter">Status</label><select
+            id="status-filter"
+            name="status"
+            bind:value={statusFilter}
+            ><option value="">All statuses</option
+            >{#each ["Historical", "Received", "Assigned", "Editing", "Waiting Review", "Revision", "Ready Delivery", "Delivered", "Stopped", "Completed"] as status}<option
+                value={status}>{statusFor(data.configuration?.profile, status).label}</option
+              >{/each}</select
+          >
+        </div>
+        <div class="field">
+          <label for="event-filter">{labelFor(data.configuration?.profile, "category")}</label><select
+            id="event-filter"
+            name="event"
+            bind:value={eventFilter}
+            ><option value="">All events</option
+            >{#each data.eventOptions as event}<option>{event}</option
+              >{/each}</select
+          >
+        </div>
+        <div class="field">
+          <label for="sort-filter">Sort by</label><select
+            id="sort-filter"
+            name="sort"
+            bind:value={sortOrder}
+            ><option value="newest">Newest first</option
+            ><option value="oldest">Oldest first</option></select
+          >
+        </div>
+      </div>
+      <div class="filter-row">
+        <div class="field">
+          <label for="date-from">From date</label><input
+            id="date-from"
+            name="dateFrom"
+            type="date"
+            bind:value={dateFrom}
+          />
+        </div>
+        <div class="field">
+          <label for="date-to">To date</label><input
+            id="date-to"
+            name="dateTo"
+            type="date"
+            bind:value={dateTo}
+          />
+        </div>
+        <button class="apply-filters" type="submit">Apply filters</button><a
+          class="clear-filters"
+          href={archived ? "/orders?archived=true" : "/orders"}
+          ><X size={13} /> Clear</a
         >
       </div>
-      <div class="field">
-        <label for="event-filter">{labelFor(data.configuration?.profile, "category")}</label><select
-          id="event-filter"
-          name="event"
-          bind:value={eventFilter}
-          ><option value="">All events</option
-          >{#each data.eventOptions as event}<option>{event}</option
-            >{/each}</select
-        >
-      </div>
-      <button class="apply-filters" type="submit">Apply filters</button><a
-        class="clear-filters"
-        href={archived ? "/orders?archived=true" : "/orders"}
-        ><X size={13} /> Clear</a
-      >
     </div>{/if}
 </form>
+
+{#if exportOpen}<div class="export-panel card">
+    <div class="export-header">
+      <strong><Download size={13} /> Export orders to Excel</strong>
+      <button type="button" class="close-export" onclick={() => (exportOpen = false)}><X size={14} /></button>
+    </div>
+    <div class="export-tabs">
+      <button type="button" class:export-tab-active={exportMode === "month"} onclick={() => (exportMode = "month")}>By month</button>
+      <button type="button" class:export-tab-active={exportMode === "range"} onclick={() => (exportMode = "range")}>Date range</button>
+    </div>
+    {#if exportMode === "month"}
+      <div class="export-field">
+        <label for="export-month">Select month</label>
+        <input id="export-month" type="month" bind:value={exportMonth} />
+      </div>
+    {:else}
+      <div class="export-row">
+        <div class="export-field">
+          <label for="export-from">From</label>
+          <input id="export-from" type="date" bind:value={exportFrom} />
+        </div>
+        <div class="export-field">
+          <label for="export-to">To</label>
+          <input id="export-to" type="date" bind:value={exportTo} />
+        </div>
+      </div>
+    {/if}
+    <button type="button" class="export-download" disabled={exportBusy} onclick={downloadExcel}>
+      {#if exportBusy}<span class="export-spinner"></span> Preparing…{:else}<Download size={13} /> Download Excel{/if}
+    </button>
+  </div>{/if}
+
 <div class="card table-wrap order-table-wrap">
   <table class="data-table order-table">
     <thead
       ><tr
         ><th style="width:34px"></th><th>{customerLabel}</th><th>{orderLabel}</th><th
           >Event</th
-        ><th>Due date</th><th>Status</th><th>Amount</th><th>Balance</th><th
+        ><th>Due date</th><th>Status</th><th>Assigned to</th><th>Amount</th><th>Balance</th><th
         ></th></tr
       ></thead
     ><tbody
@@ -306,7 +402,8 @@
             ></td
           ><td>{order.project}</td><td>{order.workType}</td><td
             >{order.due ? formatDate(order.due) : "—"}</td
-          ><td><StatusBadge status={order.status} /></td><td
+          ><td><StatusBadge status={order.status} /></td><td class="assigned-cell"
+            >{#if true}{@const assignedEditors = [...new Map(order.tasks.filter((t) => !t.archived && t.editorId).map((t) => [t.editorId, t.assignee])).entries()]}{#if assignedEditors.length}{#each assignedEditors as [editorId, name], i}<a class="editor-tag" href={`/editors?editor=${editorId}`}>{name}</a>{#if i < assignedEditors.length - 1}<span class="editor-sep">,</span>{/if}{/each}{:else}<span class="no-editor">—</span>{/if}{/if}</td><td
             >{order.priceSet === false
               ? "Not set"
               : money(Math.max(0, order.price - order.discount))}</td
@@ -332,20 +429,19 @@
                   title="Delete permanently"
                   onclick={() => changeArchive(order, "delete")}
                   ><Trash2 size={14} /></button
-                >{:else}{#if order.status === "Ready Delivery"}<button
+                  >{#if order.status === "Ready Delivery"}<button
                     class="whatsapp-ready"
                     disabled={busy === `notify-${order.id}` || !order.mobile}
                     title="WhatsApp customer: ready for delivery"
                     onclick={() => notifyReady(order)}
                     ><WhatsAppIcon size={14} /></button
-                  >{#if order.priceSet !== false && Math.max(0, order.price - order.discount - order.paid) === 0}<button
+                  ><button
                       class="deliver"
                       title="Confirm delivery"
                       aria-label={`Confirm delivery for ${order.project}`}
-                      style="border-color:#16a34a;background:#dcfce7;color:#15803d;box-shadow:0 6px 16px #16a34a2e"
                       onclick={() => openDelivery(order)}
                       ><PackageCheck size={16} strokeWidth={2.5} /></button
-                    >{/if}{/if}<button
+                    >{/if}<button
                   class="archive"
                   disabled={busy === order.id}
                   title="Archive order"
@@ -392,6 +488,109 @@
 {#if toast}<div class="toast"><Check size={15} />{toast}</div>{/if}
 
 <style>
+  .export-btn { color: #16a34a; border-color: #16a34a44; }
+  .export-panel {
+    padding: 16px;
+    margin-bottom: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 480px;
+  }
+  .export-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .export-header strong {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .close-export {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    padding: 2px;
+  }
+  .export-tabs {
+    display: flex;
+    gap: 6px;
+  }
+  .export-tabs button {
+    border: 1px solid var(--line);
+    background: transparent;
+    border-radius: 7px;
+    padding: 5px 12px;
+    font-size: 10px;
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .export-tabs button.export-tab-active {
+    border-color: var(--purple);
+    color: var(--purple);
+    background: var(--theme-soft);
+  }
+  .export-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .export-field label {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .export-field input {
+    height: 36px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--theme-text);
+    padding: 0 10px;
+    font-size: 10px;
+    width: 100%;
+  }
+  .export-row {
+    display: flex;
+    gap: 10px;
+  }
+  .export-download {
+    height: 38px;
+    border: 1px solid #16a34a;
+    border-radius: 8px;
+    background: #dcfce7;
+    color: #15803d;
+    font-size: 10px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .export-download:disabled { opacity: 0.6; cursor: default; }
+  .export-spinner {
+    width: 12px; height: 12px;
+    border: 2px solid #15803d44;
+    border-top-color: #15803d;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .order-table td,
+  .order-table th {
+    white-space: nowrap;
+  }
   .archive-context {
     display: flex;
     align-items: center;
@@ -501,7 +700,7 @@
   }
   .filter-panel {
     display: flex;
-    align-items: end;
+    flex-direction: column;
     gap: 12px;
     border: 1px solid var(--line);
     background: var(--card);
@@ -509,8 +708,25 @@
     padding: 13px;
     margin: -3px 0 14px;
   }
+  .filter-row {
+    display: flex;
+    align-items: end;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
   .filter-panel .field {
-    min-width: 180px;
+    min-width: 150px;
+    flex: 1;
+  }
+  .filter-panel input[type="date"] {
+    height: 38px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--theme-text);
+    padding: 0 10px;
+    font-size: 10px;
+    width: 100%;
   }
   .clear-filters,
   .apply-filters {
@@ -591,6 +807,27 @@
   }
   .clear {
     color: #63d38c !important;
+  }
+  .assigned-cell {
+    max-width: 160px;
+  }
+  .editor-tag {
+    color: var(--purple);
+    font-size: 9.5px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .editor-tag:hover {
+    text-decoration: underline;
+    color: #a78bfa;
+  }
+  .editor-sep {
+    color: var(--muted);
+    margin-right: 3px;
+  }
+  .no-editor {
+    color: var(--muted);
   }
   .empty-orders {
     text-align: center;
@@ -704,6 +941,9 @@
     }
     .filter-panel {
       align-items: stretch;
+      flex-direction: column;
+    }
+    .filter-row {
       flex-direction: column;
     }
     .filter-panel .field {

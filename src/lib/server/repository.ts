@@ -411,6 +411,10 @@ export interface OrderPageOptions {
 	query?: string;
 	status?: string;
 	event?: string;
+	sort?: 'newest' | 'oldest';
+	dateFrom?: string;
+	dateTo?: string;
+	pendingBalance?: boolean;
 	includeHistorical?: boolean;
 	archived?: boolean;
 }
@@ -428,13 +432,17 @@ export async function listOrdersPage(database: AppDatabase, options: OrderPageOp
 	}
 	if (options.status?.trim()) { conditions.push('status = ?'); values.push(options.status.trim()); }
 	if (options.event?.trim()) { conditions.push('event = ?'); values.push(options.event.trim()); }
+	if (options.dateFrom?.trim()) { conditions.push('created_at >= ?'); values.push(options.dateFrom.trim()); }
+	if (options.dateTo?.trim()) { conditions.push('created_at < ?'); values.push(options.dateTo.trim() + 'T23:59:59.999Z'); }
+	if (options.pendingBalance) { conditions.push('amount_set = 1 AND (amount - discount - advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = orders.id), 0)) > 0.009'); }
 	const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 	const count = await database.prepare(`SELECT COUNT(*) AS count FROM orders ${where}`).bind(...values).first<{ count: number | string }>();
 	const total = Number(count?.count || 0);
 	const totalPages = Math.max(1, Math.ceil(total / pageSize));
 	const page = Math.min(requestedPage, totalPages);
 	const offset = (page - 1) * pageSize;
-	const orderRows = await rows(database, `SELECT * FROM orders ${where} ORDER BY important DESC, serial DESC LIMIT ? OFFSET ?`, [...values, pageSize, offset]);
+	const sortDirection = options.sort === 'newest' ? 'DESC' : 'ASC';
+	const orderRows = await rows(database, `SELECT * FROM orders ${where} ORDER BY important DESC, serial ${sortDirection} LIMIT ? OFFSET ?`, [...values, pageSize, offset]);
 	return {
 		orders: await hydrateOrders(database, orderRows),
 		pagination: { page, pageSize, total, totalPages, from: total ? offset + 1 : 0, to: Math.min(offset + pageSize, total) }
