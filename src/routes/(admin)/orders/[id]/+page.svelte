@@ -48,6 +48,7 @@
   let editingTask = $state<Task | null>(null);
   let error = $state("");
   let busy = $state("");
+  let starAnimating = $state(false);
   let showArchivedTasks = $state(false);
   const messageCatalog = $derived(data.configuration?.moduleConfiguration?.["communications.whatsapp"]);
   let customerTemplateId = $state(untrack(() => data.configuration?.moduleConfiguration?.["communications.whatsapp"]?.defaultTemplateIds?.["status-update"] || ""));
@@ -139,21 +140,22 @@
   }
 
   async function toggleImportant() {
-    busy = "important";
-    error = "";
+    const newValue = !order.important;
+    starAnimating = true;
+    order = { ...order, important: newValue };
+    setTimeout(() => (starAnimating = false), 800);
     const response = await fetch(`/api/orders/${order.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ important: !order.important }),
+      body: JSON.stringify({ important: newValue }),
     });
     const result = await response.json();
-    busy = "";
     if (!response.ok) {
+      order = { ...order, important: !newValue };
       error = result.error || "Unable to update priority.";
       return;
     }
-    order = result.order;
-    notifyAction(order.important ? "Order marked as important." : "Important mark removed.");
+    notifyAction(newValue ? "Order marked as important." : "Important mark removed.");
   }
 
   function openTask(task: Task | null = null) {
@@ -438,19 +440,17 @@
   <div>
     <div class="title-line">
       <button
-        aria-label={order.important
-          ? "Remove important mark"
-          : "Mark order important"}
-        title={order.important
-          ? "Remove important mark"
-          : "Mark order important"}
-        disabled={busy === "important"}
+        class="star-btn-detail"
+        class:star-active={order.important}
+        class:star-pop={starAnimating}
+        aria-label={order.important ? "Remove important mark" : "Mark order important"}
+        title={order.important ? "Remove important mark" : "Mark order important"}
         onclick={toggleImportant}
-        style={`border:0;background:transparent;padding:2px;display:grid;place-items:center;color:${order.important ? "#ef4444" : "var(--muted)"}`}
         ><Star
-          size={19}
+          size={20}
           fill={order.important ? "currentColor" : "none"}
-        /></button
+          strokeWidth={order.important ? 0 : 1.8}
+        />{#if starAnimating && order.important}<span class="star-confetti c1"></span><span class="star-confetti c2"></span><span class="star-confetti c3"></span><span class="star-confetti c4"></span><span class="star-confetti c5"></span><span class="star-confetti c6"></span>{/if}</button
       >{#if customerRecord}<a
           class="studio-title"
           href={`/customers?customer=${customerRecord.id}`}>{order.customer}</a
@@ -1722,5 +1722,78 @@
     .sticky-detail {
       padding-left: 7px;
     }
+  }
+  /* ── Star button (detail page) ── */
+  .star-btn-detail {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: #4b5563;
+    cursor: pointer;
+    transition: color 0.25s, transform 0.25s cubic-bezier(.34,1.56,.64,1), border-color 0.25s, background 0.25s;
+  }
+  .star-btn-detail:hover {
+    color: #ef4444;
+    border-color: #ef444444;
+    background: #ef44440c;
+    transform: scale(1.18);
+  }
+  .star-btn-detail.star-active {
+    color: #ef4444;
+    filter: drop-shadow(0 0 6px #ef444488);
+    animation: detail-star-glow 2.2s ease-in-out infinite;
+  }
+  .star-btn-detail.star-active:hover {
+    color: #dc2626;
+    filter: drop-shadow(0 0 8px #dc262688);
+  }
+  .star-btn-detail.star-pop {
+    animation: detail-star-pop 0.7s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes detail-star-pop {
+    0%   { transform: scale(0.2) rotate(-25deg); }
+    30%  { transform: scale(1.6) rotate(10deg); }
+    50%  { transform: scale(0.85) rotate(-5deg); }
+    70%  { transform: scale(1.15) rotate(3deg); }
+    100% { transform: scale(1) rotate(0deg); }
+  }
+  @keyframes detail-star-glow {
+    0%, 100% { filter: drop-shadow(0 0 4px #ef444455); }
+    50%      { filter: drop-shadow(0 0 12px #ef4444aa) drop-shadow(0 0 22px #ef444444); }
+  }
+  /* confetti particles */
+  .star-confetti {
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    pointer-events: none;
+    animation: confetti-fly 0.7s ease-out forwards;
+  }
+  .star-confetti.c1 { background: #ef4444; --cx: -14px; --cy: -14px; }
+  .star-confetti.c2 { background: #f87171; --cx: 14px; --cy: -12px; animation-delay: 0.04s; }
+  .star-confetti.c3 { background: #fbbf24; --cx: -12px; --cy: 8px; animation-delay: 0.08s; }
+  .star-confetti.c4 { background: #fb923c; --cx: 12px; --cy: 10px; animation-delay: 0.06s; }
+  .star-confetti.c5 { background: #f43f5e; --cx: -6px; --cy: -16px; animation-delay: 0.1s; width: 4px; height: 4px; }
+  .star-confetti.c6 { background: #a78bfa; --cx: 8px; --cy: -16px; animation-delay: 0.12s; width: 4px; height: 4px; }
+  @keyframes confetti-fly {
+    0%   { opacity: 1; transform: translate(0, 0) scale(1.2); }
+    100% { opacity: 0; transform: translate(var(--cx), var(--cy)) scale(0); }
+  }
+  :global(html[data-theme="light"]) .star-btn-detail {
+    color: #cbd5e1;
+  }
+  :global(html[data-theme="light"]) .star-btn-detail:hover {
+    color: #ef4444;
+    background: #fef2f220;
+    border-color: #ef444433;
+  }
+  :global(html[data-theme="light"]) .star-btn-detail.star-active {
+    color: #ef4444;
   }
 </style>

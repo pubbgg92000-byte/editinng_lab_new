@@ -2,17 +2,17 @@
 import type { Customer, Editor, Order } from './types';
 
 export const customers: Customer[] = [
-	{ id: 'CUST-1042', name: 'Rahul Sharma', business: 'Rahul Photography', phone: '+91 98765 43210', email: 'rahul@photography.in', projects: 8, pending: 7000, token: 'rahul-secure-1042' },
-	{ id: 'CUST-1038', name: 'Ananya Mehta', business: 'AM Studios', phone: '+91 98220 11774', email: 'hello@amstudios.in', projects: 4, pending: 0, token: 'ananya-secure-1038' },
-	{ id: 'CUST-1031', name: 'Vikram Singh', business: 'Frame House', phone: '+91 99876 24510', email: 'vikram@framehouse.in', projects: 12, pending: 18500, token: 'vikram-secure-1031' },
-	{ id: 'CUST-1027', name: 'Priya Nair', business: 'Direct client', phone: '+91 99441 88291', email: 'priya.nair@gmail.com', projects: 2, pending: 3500, token: 'priya-secure-1027' }
+	{ id: 'CUST-1042', name: 'Rahul Sharma', business: 'Rahul Photography', phone: '9876543210', email: 'rahul@photography.in', projects: 8, pending: 7000, token: 'rahul-secure-1042' },
+	{ id: 'CUST-1038', name: 'Ananya Mehta', business: 'AM Studios', phone: '9822011774', email: 'hello@amstudios.in', projects: 4, pending: 0, token: 'ananya-secure-1038' },
+	{ id: 'CUST-1031', name: 'Vikram Singh', business: 'Frame House', phone: '9987624510', email: 'vikram@framehouse.in', projects: 12, pending: 18500, token: 'vikram-secure-1031' },
+	{ id: 'CUST-1027', name: 'Priya Nair', business: 'Direct client', phone: '9944188291', email: 'priya.nair@gmail.com', projects: 2, pending: 3500, token: 'priya-secure-1027' }
 ];
 
 export const editors: Editor[] = [
-	{ id: 'ED-018', name: 'Anil Kumar', initials: 'AK', specialty: 'Photo editing', phone: '+91 98710 44521', activeTasks: 3, available: true, token: 'anil-abc123xyz' },
-	{ id: 'ED-014', name: 'Megha Rao', initials: 'MR', specialty: 'Album design', phone: '+91 98450 12777', activeTasks: 2, available: true, token: 'megha-f8k4p2q' },
-	{ id: 'ED-009', name: 'Meera Das', initials: 'MD', specialty: 'Color correction', phone: '+91 99110 65332', activeTasks: 4, available: false, token: 'meera-m9n2r4s' },
-	{ id: 'ED-021', name: 'Kabir Shah', initials: 'KS', specialty: 'Video editing', phone: '+91 98920 44318', activeTasks: 1, available: true, token: 'kabir-v7c1x9z' }
+	{ id: 'ED-018', name: 'Anil Kumar', initials: 'AK', specialty: 'Photo editing', phone: '9871044521', activeTasks: 3, available: true, token: 'anil-abc123xyz' },
+	{ id: 'ED-014', name: 'Megha Rao', initials: 'MR', specialty: 'Album design', phone: '9845012777', activeTasks: 2, available: true, token: 'megha-f8k4p2q' },
+	{ id: 'ED-009', name: 'Meera Das', initials: 'MD', specialty: 'Color correction', phone: '9911065332', activeTasks: 4, available: false, token: 'meera-m9n2r4s' },
+	{ id: 'ED-021', name: 'Kabir Shah', initials: 'KS', specialty: 'Video editing', phone: '9892044318', activeTasks: 1, available: true, token: 'kabir-v7c1x9z' }
 ];
 
 export const orders: Order[] = [
@@ -46,7 +46,7 @@ function dateParts(value: string | Date, withTime = false) {
 	const date = new Date(dateOnly ? `${text}T00:00:00.000Z` : value);
 	if (Number.isNaN(date.getTime())) return text;
 	const parts = new Intl.DateTimeFormat('en-GB', {
-		day: '2-digit', month: 'short', year: 'numeric',
+		day: '2-digit', month: 'short', year: '2-digit',
 		...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: true } : {}),
 		timeZone: dateOnly ? 'UTC' : 'Asia/Kolkata'
 	}).formatToParts(date);
