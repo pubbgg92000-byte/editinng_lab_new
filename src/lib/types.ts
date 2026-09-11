@@ -5,7 +5,7 @@ export type TaskBillingMode = 'manual' | 'duration';
 export type EditorSettlement = 'not-set' | 'editor-bills-admin' | 'admin-issues-statement';
 export type EditorAvailability = 'available' | 'busy' | 'inactive';
 export type ThemeMode = 'light' | 'dark';
-export type ThemePalette = 'graphite-aqua' | 'ice-cyan' | 'forest-gold' | 'lime-cream' | 'meadow-amber' | 'coral-teal' | 'sky-sorbet' | 'nordic-stone' | 'midnight-violet' | 'obsidian-blue' | 'heritage-sage' | 'merlot-copper' | 'citrus-evergreen' | 'graphite-coral';
+export type ThemePalette = 'graphite-aqua' | 'ice-cyan' | 'forest-gold' | 'lime-cream' | 'meadow-amber' | 'coral-teal' | 'sky-sorbet' | 'nordic-stone' | 'midnight-violet' | 'obsidian-blue' | 'heritage-sage' | 'merlot-copper' | 'citrus-evergreen' | 'graphite-coral' | 'ink-paper' | 'noir-chalk';
 export type StorageWarningLevel = 'healthy' | 'notice' | 'warning' | 'critical';
 export type CapabilityKey =
 	| 'work.tasks'

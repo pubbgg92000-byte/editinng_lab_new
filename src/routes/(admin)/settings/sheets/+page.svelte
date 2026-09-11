@@ -7,6 +7,41 @@
 	const selected = $derived(data.sheets.find((sheet) => sheet.name === active) ?? data.sheets[0]);
 	const isPhoneColumn = (column: string) => /phone|mobile|whatsapp/i.test(column);
 
+	// ---- Month abbreviation map for parsing DD-MMM-YYYY dates from Google Sheets ----
+	const monthAbbreviations: Record<string, string> = {
+		jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+		jul: '07', aug: '08', sep: '09', sept: '09', oct: '10', nov: '11', dec: '12'
+	};
+
+	/**
+	 * Parse a date value from Google Sheets into YYYY-MM-DD.
+	 * Supports:
+	 *   - DD-MMM-YYYY  (e.g. "09-sept-2026", "01-Oct-2026")
+	 *   - ISO strings   (e.g. "2026-09-09T10:44:21.000Z")
+	 *   - YYYY-MM-DD    (e.g. "2026-09-09")
+	 * Returns empty string if unparseable.
+	 */
+	function parseSheetDate(raw: string): string {
+		const value = raw.trim();
+		if (!value) return '';
+
+		// Try DD-MMM-YYYY or DD-MMM-YYYY (with optional time after space)
+		const ddMmmYyyy = value.match(/^(\d{1,2})[\-\/\s]([\w]+)[\-\/\s](\d{4})/i);
+		if (ddMmmYyyy) {
+			const day = ddMmmYyyy[1].padStart(2, '0');
+			const monthKey = ddMmmYyyy[2].toLowerCase().replace(/\.$/, '');
+			const year = ddMmmYyyy[3];
+			const month = monthAbbreviations[monthKey];
+			if (month) return `${year}-${month}-${day}`;
+		}
+
+		// Try ISO or YYYY-MM-DD
+		const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+		if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+		return '';
+	}
+
 	// ---- Orders filter state ----
 	let filterMode = $state<'month' | 'range'>('month');
 	let filterMonth = $state(new Date().toISOString().slice(0, 7));
@@ -14,10 +49,23 @@
 	let filterTo = $state('');
 	let filtersActive = $state(false);
 
-	// Find the date column index in the Orders sheet
+	// Find the date column index in the Orders sheet.
+	// Prefer an exact "Date" column, then fall back to columns containing date-related keywords.
+	// Exclude columns like "Due Date" or "Delivery Date" which are not the order creation date.
 	const ordersDateCol = $derived(() => {
 		if (active !== 'Orders') return -1;
-		return selected.columns.findIndex((c: string) => /created|date|received/i.test(c));
+		// First: exact match on "Date" (the column header written by the sync)
+		const exactIdx = selected.columns.findIndex((c: string) => c.trim().toLowerCase() === 'date');
+		if (exactIdx >= 0) return exactIdx;
+		// Second: look for "Created At" or "Created Date" or "Received Date"
+		const createdIdx = selected.columns.findIndex((c: string) => /^(created|received)\b/i.test(c.trim()));
+		if (createdIdx >= 0) return createdIdx;
+		// Third: broader fallback — any column containing "date" but not "due" or "delivery"
+		return selected.columns.findIndex((c: string) => {
+			const lower = c.trim().toLowerCase();
+			if (/due|delivery/.test(lower)) return false;
+			return /created|date|received/i.test(lower);
+		});
 	});
 
 	// Filtered rows for display
@@ -38,10 +86,10 @@
 		}
 
 		return selected.rows.filter((row: string[]) => {
-			const val = (row[dateIdx] || '').slice(0, 10);
-			if (!val) return false;
-			if (from && val < from) return false;
-			if (to && val > to) return false;
+			const parsed = parseSheetDate(row[dateIdx] || '');
+			if (!parsed) return false;
+			if (from && parsed < from) return false;
+			if (to && parsed > to) return false;
 			return true;
 		});
 	});

@@ -11,12 +11,14 @@ export const themePalettes: { id: ThemePalette; name: string; mode: ThemeMode; c
 	{ id: 'coral-teal', name: 'Coral Teal', mode: 'light', colors: ['#FF165D', '#FF9A00', '#F6F7D7', '#3EC1D3'] },
 	{ id: 'sky-sorbet', name: 'Sky Sorbet', mode: 'light', colors: ['#FFFA8D', '#A8F1FF', '#6FE6FC', '#4ED7F1'] },
 	{ id: 'nordic-stone', name: 'Nordic Stone', mode: 'light', colors: ['#F1F0E8', '#E5E1DA', '#B3C8CF', '#89A8B2'], recommended: true },
+	{ id: 'ink-paper', name: 'Ink & Paper', mode: 'light', colors: ['#FFFFFF', '#F5F5F5', '#222222', '#000000'], recommended: true },
 	{ id: 'midnight-violet', name: 'Midnight Violet', mode: 'dark', colors: ['#0B1020', '#171B34', '#8B5CF6', '#EDE9FE'] },
 	{ id: 'obsidian-blue', name: 'Obsidian Blue', mode: 'dark', colors: ['#090E16', '#111827', '#38BDF8', '#E0F2FE'] },
 	{ id: 'heritage-sage', name: 'Heritage Sage', mode: 'dark', colors: ['#D99B7F', '#464858', '#0F3040', '#A56F63'], recommended: true },
 	{ id: 'merlot-copper', name: 'Merlot Copper', mode: 'dark', colors: ['#F05941', '#BE3144', '#872341', '#22092C'] },
 	{ id: 'citrus-evergreen', name: 'Citrus Evergreen', mode: 'dark', colors: ['#F3FF90', '#9BEC00', '#06D001', '#059212'] },
-	{ id: 'graphite-coral', name: 'Graphite Coral', mode: 'dark', colors: ['#EAEAEA', '#FF2E63', '#252A34', '#08D9D6'], recommended: true }
+	{ id: 'graphite-coral', name: 'Graphite Coral', mode: 'dark', colors: ['#EAEAEA', '#FF2E63', '#252A34', '#08D9D6'], recommended: true },
+	{ id: 'noir-chalk', name: 'Noir Chalk', mode: 'dark', colors: ['#000000', '#1A1A1A', '#E5E5E5', '#FFFFFF'], recommended: true }
 ];
 
 const storageKey = (name: 'palette' | 'theme', scope: string) =>

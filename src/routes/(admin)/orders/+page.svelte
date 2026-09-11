@@ -59,6 +59,20 @@
   let exportBusy = $state(false);
   let deliveryOrder = $state<Order | null>(null);
   let deliveryOpen = $state(false);
+  let starAnimating = $state<string>("");
+
+  async function toggleImportant(order: Order) {
+    const newValue = !order.important;
+    starAnimating = order.id;
+    order.important = newValue;
+    orders = [...orders];
+    setTimeout(() => (starAnimating = ""), 700);
+    await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ important: newValue }),
+    });
+  }
   const queueTitle = $derived(
     archived
       ? `Archived ${labelFor(data.configuration?.profile, "order", true).toLowerCase()}`
@@ -374,18 +388,25 @@
       ><tr
         ><th style="width:34px"></th><th>{customerLabel}</th><th>{orderLabel}</th><th
           >Event</th
-        ><th>Due date</th><th>Status</th><th>Assigned to</th><th>Amount</th><th>Balance</th><th
+        ><th>Received</th><th>Due date</th><th>Status</th><th>Assigned to</th><th>Amount</th><th>Balance</th><th
         ></th></tr
       ></thead
     ><tbody
       >{#each orders as order}<tr class:archived-row={order.archived}
           ><td class="priority-cell"
-            >{#if order.important}<Star
-                size={14}
-                fill="currentColor"
-                color="#ef4444"
-                aria-label="Important order"
-              />{/if}</td
+            ><button
+                class="star-btn"
+                class:star-active={order.important}
+                class:star-pop={starAnimating === order.id}
+                title={order.important ? "Remove priority" : "Mark as important"}
+                aria-label={order.important ? "Remove priority" : "Mark as important"}
+                onclick={() => toggleImportant(order)}
+              ><Star
+                  size={15}
+                  fill={order.important ? "currentColor" : "none"}
+                  strokeWidth={order.important ? 0 : 1.8}
+                />{#if starAnimating === order.id && order.important}<span class="star-confetti c1"></span><span class="star-confetti c2"></span><span class="star-confetti c3"></span><span class="star-confetti c4"></span><span class="star-confetti c5"></span><span class="star-confetti c6"></span>{/if}</button
+            ></td
           ><td
             ><a class="project-link" href={"/orders/" + order.id}
               ><strong>{order.customer}</strong><small
@@ -401,6 +422,8 @@
               ></a
             ></td
           ><td>{order.project}</td><td>{order.workType}</td><td
+            >{order.createdAt ? formatDate(order.createdAt) : "—"}</td
+          ><td
             >{order.due ? formatDate(order.due) : "—"}</td
           ><td><StatusBadge status={order.status} /></td><td class="assigned-cell"
             >{#if true}{@const assignedEditors = [...new Map(order.tasks.filter((t) => !t.archived && t.editorId).map((t) => [t.editorId, t.assignee])).entries()]}{#if assignedEditors.length}{#each assignedEditors as [editorId, name], i}<a class="editor-tag" href={`/editors?editor=${editorId}`}>{name}</a>{#if i < assignedEditors.length - 1}<span class="editor-sep">,</span>{/if}{/each}{:else}<span class="no-editor">—</span>{/if}{/if}</td><td
@@ -590,6 +613,79 @@
   .order-table td,
   .order-table th {
     white-space: nowrap;
+  }
+  /* ── Star button ── */
+  .star-btn {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #4b5563;
+    cursor: pointer;
+    transition: color 0.25s, transform 0.25s cubic-bezier(.34,1.56,.64,1), border-color 0.25s, background 0.25s;
+  }
+  .star-btn:hover {
+    color: #ef4444;
+    border-color: #ef444444;
+    background: #ef44440c;
+    transform: scale(1.15);
+  }
+  .star-btn.star-active {
+    color: #ef4444;
+    filter: drop-shadow(0 0 6px #ef444488);
+    animation: star-glow 2.2s ease-in-out infinite;
+  }
+  .star-btn.star-active:hover {
+    color: #dc2626;
+    filter: drop-shadow(0 0 8px #dc262688);
+  }
+  .star-btn.star-pop {
+    animation: star-pop-in 0.7s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes star-pop-in {
+    0%   { transform: scale(0.2) rotate(-25deg); }
+    30%  { transform: scale(1.6) rotate(10deg); }
+    50%  { transform: scale(0.85) rotate(-5deg); }
+    70%  { transform: scale(1.15) rotate(3deg); }
+    100% { transform: scale(1) rotate(0deg); }
+  }
+  @keyframes star-glow {
+    0%, 100% { filter: drop-shadow(0 0 4px #ef444455); }
+    50%      { filter: drop-shadow(0 0 10px #ef4444aa) drop-shadow(0 0 20px #ef444444); }
+  }
+  /* confetti particles */
+  .star-confetti {
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    pointer-events: none;
+    animation: confetti-fly 0.7s ease-out forwards;
+  }
+  .star-confetti.c1 { background: #ef4444; --cx: -10px; --cy: -11px; }
+  .star-confetti.c2 { background: #f87171; --cx: 10px; --cy: -10px; animation-delay: 0.04s; }
+  .star-confetti.c3 { background: #fbbf24; --cx: -9px; --cy: 7px; animation-delay: 0.08s; }
+  .star-confetti.c4 { background: #fb923c; --cx: 9px; --cy: 8px; animation-delay: 0.06s; }
+  .star-confetti.c5 { background: #f43f5e; --cx: -5px; --cy: -13px; animation-delay: 0.1s; width: 4px; height: 4px; }
+  .star-confetti.c6 { background: #a78bfa; --cx: 6px; --cy: -13px; animation-delay: 0.12s; width: 4px; height: 4px; }
+  @keyframes confetti-fly {
+    0%   { opacity: 1; transform: translate(0, 0) scale(1.2); }
+    100% { opacity: 0; transform: translate(var(--cx), var(--cy)) scale(0); }
+  }
+  :global(html[data-theme="light"]) .star-btn {
+    color: #cbd5e1;
+  }
+  :global(html[data-theme="light"]) .star-btn:hover {
+    color: #ef4444;
+    background: #fef2f220;
+    border-color: #ef444433;
+  }
+  :global(html[data-theme="light"]) .star-btn.star-active {
+    color: #ef4444;
   }
   .archive-context {
     display: flex;

@@ -47,7 +47,7 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 	try { order = await updateOrder(database, params.id, input); }
 	catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to update order.' }, { status: 400 }); }
 	if (!order) return json({ error: 'Order not found' }, { status: 404 });
-	await flushSheetSync(database, locals.tenant!);
+	flushSheetSync(database, locals.tenant!).catch(() => {});
 	return json({ ok: true, order });
 };
 
