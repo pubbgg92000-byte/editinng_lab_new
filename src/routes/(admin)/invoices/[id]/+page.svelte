@@ -1,5 +1,8 @@
 <!-- Printable invoice, status control, historical message, and current WhatsApp send. -->
 <script lang="ts">
+  import { confirmDanger } from "$lib/stores/confirm";
+  import Breadcrumbs from "$lib/components/Breadcrumbs.svelte";
+  import { safeFetch } from "$lib/http";
   import { untrack } from "svelte";
   import {
     ArrowLeft,
@@ -90,10 +93,30 @@
   const customerMobile = $derived(
     data.customer?.phone || data.order?.mobile || "",
   );
+  const isReceipt = $derived(data.invoice.kind === "advance" || data.invoice.kind === "payment");
+  const currentBalance = $derived(data.order && data.order.priceSet !== false ? Math.max(0, data.order.price - data.order.discount - data.order.paid) : 0);
+  // Plain-language state from real payments (the manual status can't contradict the ledger).
+  const paymentState = $derived(
+    status === "cancelled" ? { label: "Cancelled", tone: "cancelled" }
+    : isReceipt ? { label: "Payment received", tone: "paid" }
+    : !data.order || data.order.priceSet === false ? { label: status === "sent" ? "Sent" : "Draft", tone: "muted" }
+    : currentBalance <= 0.009 ? { label: "Paid", tone: "paid" }
+    : { label: `${money(currentBalance)} due`, tone: "due" },
+  );
+  const statusLabels = { draft: "Draft", sent: "Sent", paid: "Marked as paid", cancelled: "Cancelled" } as const;
+  async function changeStatus(select: HTMLSelectElement) {
+    const next = select.value as "draft" | "sent" | "paid" | "cancelled";
+    if (next === "cancelled" && !await confirmDanger(`Cancel ${data.invoice.number}?\n\nIt stays in history but no longer counts. Any work it billed can be invoiced again.`)) {
+      select.value = savedStatus;
+      status = savedStatus;
+      return;
+    }
+    await updateStatus(next);
+  }
   async function updateStatus(next: "draft" | "sent" | "paid" | "cancelled") {
     busy = true;
     error = "";
-    const response = await fetch(`/api/invoices/${data.invoice.id}`, {
+    const response = await safeFetch(`/api/invoices/${data.invoice.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: next }),
@@ -107,7 +130,7 @@
     }
     status = next;
     savedStatus = next;
-    notifyAction(`Invoice status changed to ${next}.`);
+    notifyAction(`Invoice marked: ${statusLabels[next]}.`);
     return true;
   }
   async function sendWhatsApp() {
@@ -116,7 +139,7 @@
     sending = true;
     error = "";
     try {
-      const response = await fetch(`/api/invoices/${data.invoice.id}/whatsapp`, {
+      const response = await safeFetch(`/api/invoices/${data.invoice.id}/whatsapp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ templateId: selectedTemplateId }),
@@ -140,12 +163,13 @@
   }
 </script>
 
+<div class="no-print"><Breadcrumbs items={[{ label: "Invoices", href: "/invoices" }, { label: data.invoice.number }]} /></div>
 <div class="detail-top no-print">
-  <a href="/invoices"><ArrowLeft size={15} /> Invoices</a>
+  <span></span>
   <div class="actions">
     <button class="secondary" onclick={() => window.print()}
       ><Printer size={15} /> Print / save PDF</button
-    >{#if customerMobile}<div class="whatsapp-choice"><select bind:value={selectedTemplateId} disabled={sending} aria-label="Invoice WhatsApp template">{#each invoiceTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select><button class="primary whatsapp" disabled={sending} aria-busy={sending} onclick={sendWhatsApp}
+    >{#if customerMobile}<div class="whatsapp-choice">{#if invoiceTemplates.length > 1}<select bind:value={selectedTemplateId} disabled={sending} aria-label="Which WhatsApp message to send">{#each invoiceTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select>{/if}<button class="primary whatsapp" disabled={sending} aria-busy={sending} onclick={sendWhatsApp}
         >{#if sending}<LoaderCircle class="button-spinner" size={16}/>{:else}<WhatsAppIcon size={16}/>{/if}{sending ? "Preparing…" : "Open in WhatsApp"}</button
       ></div>{/if}
   </div>
@@ -154,11 +178,11 @@
   <span><FileText size={20} /></span>
   <div>
     <p>Customer</p>
-    <h1>{data.customer?.business || data.order?.customer || "Customer studio"}</h1>
+    <h1>{data.customer?.business || data.order?.customer || "Customer"}</h1>
     <small>{data.invoice.number} · {data.order?.project || "Order"} · Generated {formatDateTime(data.invoice.openedAt)}</small>
   </div>
-  <div class:cancelled={status === "cancelled"} class="status-pill">
-    {status}
+  <div class:cancelled={status === "cancelled"} class:paid={paymentState.tone === "paid"} class="status-pill">
+    {paymentState.label}
   </div>
 </div>
 {#if error}<p class="error no-print">{error}</p>{/if}
@@ -281,16 +305,10 @@
       <select
         bind:value={status}
         disabled={busy}
-        onchange={(event) =>
-          updateStatus(
-            (event.currentTarget as HTMLSelectElement).value as
-              | "draft"
-              | "sent"
-              | "paid"
-              | "cancelled",
-          )}
-        ><option value="draft">Draft</option><option value="sent">Sent</option
-        ><option value="paid">Paid</option><option value="cancelled"
+        aria-label="Invoice status"
+        onchange={(event) => changeStatus(event.currentTarget as HTMLSelectElement)}
+        ><option value="draft">Draft (not sent yet)</option><option value="sent">Sent to customer</option
+        ><option value="paid">Marked as paid</option><option value="cancelled"
           >Cancelled</option
         ></select
       >
@@ -306,7 +324,8 @@
     <section class="card summary-card">
       <div><IndianRupee size={15} /><span>Billing snapshot</span></div>
       <strong>{money(total)}</strong>
-      <p>{money(balance)} balance at generation</p>
+      <p>{money(balance)} balance when this was created</p>
+      {#if data.order && !isReceipt && status !== "cancelled"}<p class="balance-now" class:clear={currentBalance <= 0.009}>{data.order.priceSet === false ? "Order total not set yet" : currentBalance <= 0.009 ? "Paid in full now" : `${money(currentBalance)} still due now`}</p>{/if}
     </section>
     <section class="card summary-card">
       <h2>History</h2>
@@ -326,22 +345,17 @@
     align-items: center;
     margin-bottom: 24px;
   }
-  .detail-top > a,
   .actions {
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-  .detail-top > a {
-    color: var(--muted);
-    font-size: 11px;
   }
   .actions button {
     display: flex;
     align-items: center;
     gap: 7px;
   }
-  .whatsapp-choice{display:flex;align-items:center;gap:6px}.whatsapp-choice select{width:auto;min-width:150px;height:36px}:global(.button-spinner),.status-saving :global(svg){animation:invoice-spin .75s linear infinite}.status-saving{display:flex;align-items:center;gap:6px;margin-top:7px;color:var(--purple);font-size:8px;font-weight:700}@keyframes invoice-spin{to{transform:rotate(360deg)}}
+  .whatsapp-choice{display:flex;align-items:center;gap:6px}.whatsapp-choice select{width:auto;min-width:150px;height:36px}:global(.button-spinner),.status-saving :global(svg){animation:invoice-spin .75s linear infinite}.status-saving{display:flex;align-items:center;gap:6px;margin-top:7px;color:var(--purple);font-size:11px;font-weight:700}@keyframes invoice-spin{to{transform:rotate(360deg)}}
   @media(max-width:650px){.detail-top{align-items:flex-start;flex-direction:column;gap:12px}.actions,.whatsapp-choice{width:100%;flex-wrap:wrap}.whatsapp-choice select,.whatsapp-choice button{flex:1;min-width:0}}
   .invoice-heading {
     display: flex;
@@ -362,13 +376,13 @@
   .invoice-heading small {
     margin: 0;
     color: var(--muted);
-    font-size: 10px;
+    font-size:12px;
   }
   .invoice-heading h1 {
     margin: 3px 0;
     font-size: 24px;
   }
-  .customer-document-heading{margin:20px 0 14px;padding:15px 17px;border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.customer-document-heading small{color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.08em}.customer-document-heading h2{margin:4px 0;font-size:18px}.customer-document-heading p,.customer-document-heading span{margin:0;color:var(--muted);font-size:9px;line-height:1.6}.customer-document-heading p strong{color:var(--theme-text)}
+  .customer-document-heading{margin:20px 0 14px;padding:15px 17px;border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.customer-document-heading small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.customer-document-heading h2{margin:4px 0;font-size:18px}.customer-document-heading p,.customer-document-heading span{margin:0;color:var(--muted);font-size:11px;line-height:1.6}.customer-document-heading p strong{color:var(--theme-text)}
   .status-pill {
     margin-left: auto;
     padding: 7px 10px;
@@ -376,7 +390,7 @@
     background: #22c55e12;
     color: #16a34a;
     text-transform: capitalize;
-    font-size: 10px;
+    font-size:12px;
     font-weight: 700;
   }
   .status-pill.cancelled {
@@ -406,7 +420,7 @@
   .printable-invoice p {
     margin: 3px 0;
     color: #526075;
-    font-size: 10px;
+    font-size:12px;
     line-height: 1.5;
   }
   .document-title {
@@ -419,13 +433,13 @@
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: #64748b;
-    font-size: 10px;
+    font-size:12px;
   }
   .document-title strong {
     font-size: 20px;
   }
   .document-title small {
-    font-size: 10px;
+    font-size:12px;
     color: #64748b;
   }
   .bill-grid {
@@ -443,10 +457,10 @@
     color: #64748b;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 9px;
+    font-size:11px;
   }
   .bill-grid strong {
-    font-size: 13px;
+    font-size:14px;
   }
   .printable-invoice table {
     width: 100%;
@@ -457,14 +471,14 @@
     background: #172033;
     color: #fff;
     text-align: left;
-    font-size: 9px;
+    font-size:11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
   .printable-invoice td {
     padding: 12px 10px;
     border-bottom: 1px solid #dbe2ea;
-    font-size: 11px;
+    font-size:12.5px;
   }
   .printable-invoice td small {
     display: block;
@@ -487,7 +501,7 @@
     display: flex;
     justify-content: space-between;
     padding: 7px 0;
-    font-size: 10px;
+    font-size:12px;
   }
   .totals dd {
     margin: 0;
@@ -496,7 +510,7 @@
   .totals .grand {
     border-top: 1px solid #172033;
     border-bottom: 1px solid #172033;
-    font-size: 13px;
+    font-size:14px;
   }
   .printable-invoice footer {
     display: flex;
@@ -508,7 +522,7 @@
     border-top: 1px solid #dbe2ea;
   }
   .printable-invoice footer span {
-    font-size: 8px;
+    font-size:11px;
     color: #64748b;
   }
   .detail-grid {
@@ -522,13 +536,13 @@
   }
   .message-card h2,
   .summary-card h2 {
-    font-size: 12px;
+    font-size:13px;
     margin: 0;
   }
   .message-card > p,
   .summary-card > p {
     color: var(--muted);
-    font-size: 9px;
+    font-size:11px;
   }
   .message-card pre {
     margin: 18px 0 0;
@@ -539,7 +553,7 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font:
-      10px/1.7 ui-monospace,
+      12px/1.7 ui-monospace,
       SFMono-Regular,
       Menlo,
       monospace;
@@ -554,7 +568,7 @@
     align-items: center;
     gap: 7px;
     color: var(--purple);
-    font-size: 9px;
+    font-size:11px;
     margin-bottom: 10px;
   }
   .summary-card select {
@@ -572,10 +586,10 @@
     border-bottom: 1px solid var(--line);
   }
   .activity strong {
-    font-size: 9px;
+    font-size:11px;
   }
   .activity small {
-    font-size: 8px;
+    font-size:11px;
     color: var(--muted);
   }
   @media (max-width: 760px) {
@@ -626,4 +640,8 @@
       display: none !important;
     }
   }
+
+  .status-pill.paid { border-color: color-mix(in srgb, #16a34a 40%, transparent); background: color-mix(in srgb, #16a34a 12%, transparent); color: #15803d; }
+  .balance-now { margin-top: 6px !important; font-weight: 650; color: #b45309 !important; }
+  .balance-now.clear { color: #15803d !important; }
 </style>

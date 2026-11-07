@@ -1,5 +1,6 @@
 <!-- Creates an order connected to a customer and optional initial billing values. -->
 <script lang="ts">
+  import { confirmDanger } from '$lib/stores/confirm';
 	import Modal from './Modal.svelte';
 	import CustomFields from './CustomFields.svelte';
 	import NewCustomerModal from './NewCustomerModal.svelte';
@@ -19,7 +20,7 @@
 		amount?: number; advance?: number; source: string; due: string; remarks: string; important: boolean; tasks: TaskDraft[]; customFields: Record<string, CustomFieldValue>;
 	};
 
-	let { open = $bindable(), onsaved = () => {} }: { open: boolean; onsaved?: (order: Order, synced: boolean) => void } = $props();
+	let { open = $bindable(), onsaved = () => {}, initialCustomerId = '' }: { open: boolean; onsaved?: (order: Order, synced: boolean) => void; initialCustomerId?: string } = $props();
 	const editingProfile = $derived(page.data.configuration?.profile?.presetId === 'editing-studio');
 	const sourceOptions = $derived(editingProfile ? ['HD-1', 'HD-2', 'Customer drive', 'Online transfer', 'Other'] : ['Walk-in', 'Phone', 'WhatsApp', 'Referral', 'Online', 'Other']);
 	const configuredCategories = $derived(page.data.configuration?.profile?.optionLists?.categories || ['General']);
@@ -51,7 +52,18 @@
 	$effect(() => {
 		if ((!customerId || !$customerStore.some((item) => item.id === customerId)) && $customerStore.length > 0) customerId = $customerStore[0].id;
 	});
-	$effect(() => { if (selectedCustomer) mobile = selectedCustomer.phone; });
+	// Preselect the customer when opened from a customer record.
+	$effect(() => {
+		if (open && initialCustomerId && $customerStore.some((item) => item.id === initialCustomerId)) customerId = initialCustomerId;
+	});
+	// Fill the mobile number only when the chosen customer changes, so a typed number isn't wiped by store refreshes.
+	let mobileFilledFor = '';
+	$effect(() => {
+		if (selectedCustomer && selectedCustomer.id !== mobileFilledFor) {
+			mobileFilledFor = selectedCustomer.id;
+			mobile = selectedCustomer.phone;
+		}
+	});
 	$effect(() => {
 		if (open && !loadedForOpen) {
 			loadedForOpen = true;
@@ -106,7 +118,7 @@
 	}
 
 	async function deleteCustomEvent(name: string) {
-		if (!confirm(`Remove “${name}” from future event choices? Existing orders will not change.`)) return;
+		if (!await confirmDanger(`Remove “${name}” from future event choices? Existing orders will not change.`)) return;
 		try {
 			const result = await requestJson<{ options: EventOption[] }>('/api/event-options', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }, 'Unable to remove event type.');
 			eventOptions = result.options;
@@ -182,5 +194,5 @@
 <NewCustomerModal bind:open={showCustomer} onsaved={customerSaved}/>
 
 <style>
-	.sheet-note{margin:0 0 16px;color:var(--muted);font-size:10px}.customer-fields{padding-bottom:16px;border-bottom:1px solid var(--line)}.customer-select,.custom-event>div{display:grid;grid-template-columns:1fr auto;gap:7px}.select-control{position:relative;min-width:0}.select-control select{appearance:none;-webkit-appearance:none;padding-right:48px}.select-chevron{position:absolute;right:10px;top:50%;width:28px;height:28px;display:grid;place-items:center;transform:translateY(-50%);border:1px solid color-mix(in srgb,var(--purple) 24%,transparent);border-radius:8px;background:var(--theme-soft);color:var(--purple);pointer-events:none;transition:border-color .18s,background .18s,color .18s}.select-control:focus-within .select-chevron{border-color:var(--purple);background:color-mix(in srgb,var(--theme-soft) 75%,var(--purple) 25%)}.select-control select:disabled+.select-chevron{opacity:.45}.orders-stack{display:grid;gap:14px;margin-top:16px}.order-draft{border:1px solid var(--line);border-radius:14px;padding:16px;background:color-mix(in srgb,var(--card) 93%,var(--theme-soft))}.draft-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.draft-head>div{display:flex;align-items:baseline;gap:9px}.draft-head strong{font-size:12px}.draft-head span{font-size:9px;color:var(--muted)}.remove-order{border:1px solid #fb718555;background:#fb718512;color:#fb7185;border-radius:7px;padding:6px;display:grid;place-items:center}.field label span{color:var(--muted);font-size:8px;font-weight:400}.task-input{margin-top:14px}.task-heading{display:flex;align-items:center;justify-content:space-between}.task-heading button{display:flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--purple);font-size:9px}.task-drafts{display:grid;gap:7px;margin-top:7px}.task-draft{display:grid;grid-template-columns:minmax(0,1fr) 120px 30px;gap:7px}.task-draft button{display:grid;place-items:center;border:1px solid #fb718555;border-radius:8px;background:#fb718512;color:#fb7185}.task-input small{display:block;color:var(--muted);font-size:8px;margin-top:5px}.note-heading{display:flex;align-items:center;justify-content:space-between;margin-top:14px}.note-heading>label{font-size:10px;color:var(--muted);font-weight:600}.important-toggle{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;padding:6px 9px;display:flex;align-items:center;gap:6px;font-size:9px}.important-toggle.important{color:#dc2626;border-color:#fca5a5;background:#fff1f2}.note{margin-top:7px}.note textarea{min-height:56px}.add-order{width:100%;margin-top:12px;border:1px dashed var(--purple);background:var(--theme-soft);color:var(--purple);border-radius:11px;padding:11px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:10px;font-weight:650}.custom-options{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;color:var(--muted);font-size:8px}.custom-options button{display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--text);padding:5px 8px;font-size:8px}.error{color:#e11d48;background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:8px 10px;font-size:10px;margin:12px 0 0}@media(max-width:600px){.order-draft{padding:13px}.task-draft{grid-template-columns:minmax(0,1fr) 86px 30px}}
+	.sheet-note{margin:0 0 16px;color:var(--muted);font-size:12px}.customer-fields{padding-bottom:16px;border-bottom:1px solid var(--line)}.customer-select,.custom-event>div{display:grid;grid-template-columns:1fr auto;gap:7px}.select-control{position:relative;min-width:0}.select-control select{appearance:none;-webkit-appearance:none;padding-right:48px}.select-chevron{position:absolute;right:10px;top:50%;width:28px;height:28px;display:grid;place-items:center;transform:translateY(-50%);border:1px solid color-mix(in srgb,var(--purple) 24%,transparent);border-radius:8px;background:var(--theme-soft);color:var(--purple);pointer-events:none;transition:border-color .18s,background .18s,color .18s}.select-control:focus-within .select-chevron{border-color:var(--purple);background:color-mix(in srgb,var(--theme-soft) 75%,var(--purple) 25%)}.select-control select:disabled+.select-chevron{opacity:.45}.orders-stack{display:grid;gap:14px;margin-top:16px}.order-draft{border:1px solid var(--line);border-radius:14px;padding:16px;background:color-mix(in srgb,var(--card) 93%,var(--theme-soft))}.draft-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.draft-head>div{display:flex;align-items:baseline;gap:9px}.draft-head strong{font-size:13px}.draft-head span{font-size:11px;color:var(--muted)}.remove-order{border:1px solid #fb718555;background:#fb718512;color:#fb7185;border-radius:7px;padding:6px;display:grid;place-items:center}.field label span{color:var(--muted);font-size:11px;font-weight:400}.task-input{margin-top:14px}.task-heading{display:flex;align-items:center;justify-content:space-between}.task-heading button{display:flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--purple);font-size:11px}.task-drafts{display:grid;gap:7px;margin-top:7px}.task-draft{display:grid;grid-template-columns:minmax(0,1fr) 120px 30px;gap:7px}.task-draft button{display:grid;place-items:center;border:1px solid #fb718555;border-radius:8px;background:#fb718512;color:#fb7185}.task-input small{display:block;color:var(--muted);font-size:11px;margin-top:5px}.note-heading{display:flex;align-items:center;justify-content:space-between;margin-top:14px}.note-heading>label{font-size:12px;color:var(--muted);font-weight:600}.important-toggle{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;padding:6px 9px;display:flex;align-items:center;gap:6px;font-size:11px}.important-toggle.important{color:#dc2626;border-color:#fca5a5;background:#fff1f2}.note{margin-top:7px}.note textarea{min-height:56px}.add-order{width:100%;margin-top:12px;border:1px dashed var(--purple);background:var(--theme-soft);color:var(--purple);border-radius:11px;padding:11px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12px;font-weight:650}.custom-options{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;color:var(--muted);font-size:11px}.custom-options button{display:flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--text);padding:5px 8px;font-size:11px}.error{color:#e11d48;background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:8px 10px;font-size:12px;margin:12px 0 0}@media(max-width:600px){.order-draft{padding:13px}.task-draft{grid-template-columns:minmax(0,1fr) 86px 30px}}
 </style>

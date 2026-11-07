@@ -1,7 +1,8 @@
 <!-- Private customer invoice/receipt viewer with print/PDF support. -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { FileText, Printer } from "@lucide/svelte";
+  import { ArrowLeft, Printer } from "@lucide/svelte";
+  import { page } from "$app/state";
   import PortalHeader from "$lib/components/PortalHeader.svelte";
   import { formatDate, formatDateTime, money } from "$lib/data";
   import { orderCode } from "$lib/identifiers";
@@ -20,8 +21,13 @@
           ? "Partial work invoice"
           : "Invoice",
   );
+  const isReceipt = $derived(data.invoice.kind === "advance" || data.invoice.kind === "payment");
+  const portalHref = $derived(`/portal/${page.params.slug}/customer/${page.params.token}`);
+  // In-app browsers (WhatsApp, Instagram, Facebook) usually ignore window.print(), so explain the workaround.
+  let inAppBrowser = $state(false);
   onMount(() => {
-    if (new URL(location.href).searchParams.get("print") === "1") setTimeout(() => window.print(), 250);
+    inAppBrowser = /WhatsApp|FBAN|FBAV|Instagram|; wv\)/i.test(navigator.userAgent);
+    if (new URL(location.href).searchParams.get("print") === "1" && !inAppBrowser) setTimeout(() => window.print(), 250);
   });
 </script>
 
@@ -36,15 +42,10 @@
 </div>
 <main>
   <div class="invoice-toolbar no-print">
-    <div>
-      <FileText size={18} /><span
-        ><small>{data.invoice.number} · {title}</small><strong>{data.customer.business || data.order.customer}</strong><em>{data.order.project}</em></span
-      >
-    </div>
-    <button onclick={() => window.print()}
-      ><Printer size={15} /> Print / save PDF</button
-    >
+    <a class="back" href={portalHref}><ArrowLeft size={16} aria-hidden="true" />Back to my orders</a>
+    <button type="button" class="print" onclick={() => window.print()}><Printer size={16} aria-hidden="true" />Print / Save PDF</button>
   </div>
+  {#if inAppBrowser}<p class="in-app-note no-print">To save this as a PDF, open the page in Chrome or Safari: tap the ⋮ or share menu, then <b>Open in browser</b>.</p>{/if}
   <section class="invoice-paper">
     <header>
       <div>
@@ -63,11 +64,6 @@
         >
       </div>
     </header>
-    <div class="customer-document-heading">
-      <small>Invoice for</small><h2>{data.customer.business || data.order.customer}</h2>
-      <p><strong>{data.invoice.number}</strong> · {data.order.project}{#if data.order.tasks?.length} · {data.order.tasks.filter((task) => !task.archived).map((task) => task.name).join(", ")}{/if}</p>
-      {#if data.customer.name}<span>Customer contact: {data.customer.name}</span>{/if}
-    </div>
     <div class="bill-grid">
       <div>
         <small>Customer</small><strong
@@ -83,9 +79,6 @@
         <small>Order details</small><strong>{data.order.project}</strong>
         <p>{data.order.workType}</p>
         <p>Order {orderCode(data.settings, data.order.serial)}</p>
-        {#if data.order.tasks?.length}<p>
-            {data.order.tasks.filter((task) => !task.archived).length} task(s)
-          </p>{/if}
       </div>
     </div>
     <table>
@@ -100,11 +93,7 @@
               ><td>{money(item.amount)}</td></tr
             >{/each}{:else}<tr
             ><td>{data.order.project}</td><td
-              >{data.order.workType}{#if data.order.tasks?.length}
-                · {data.order.tasks
-                  .filter((task) => !task.archived)
-                  .map((task) => task.name)
-                  .join(", ")}{/if}</td
+              >{isReceipt ? `Payment towards ${orderCode(data.settings, data.order.serial)}` : data.order.workType || "Work as agreed"}</td
             ><td>{money(data.invoice.subtotal)}</td></tr
           >{/if}</tbody
       >
@@ -151,40 +140,6 @@
     margin: 0 auto;
     padding: 38px 20px 70px;
   }
-  .invoice-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 14px;
-  }
-  .invoice-toolbar > div,
-  .invoice-toolbar span {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .invoice-toolbar span {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .invoice-toolbar small {
-    color: var(--muted);
-    font-size: 8px;
-  }
-  .invoice-toolbar strong {
-    font-size: 14px;
-  }
-  .invoice-toolbar button {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    border: 0;
-    border-radius: 9px;
-    background: var(--purple);
-    color: #fff;
-    padding: 10px 13px;
-  }
   .invoice-paper {
     border: 1px solid #dbe2ea;
     border-radius: 15px;
@@ -207,7 +162,7 @@
   .invoice-paper p {
     margin: 3px 0;
     color: #526075;
-    font-size: 10px;
+    font-size:12px;
     line-height: 1.5;
   }
   .document {
@@ -220,7 +175,7 @@
   .document span,
   .bill-grid small {
     color: #64748b;
-    font-size: 9px;
+    font-size:11px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
   }
@@ -229,7 +184,7 @@
   }
   .document small {
     color: #64748b;
-    font-size: 9px;
+    font-size:11px;
   }
   .bill-grid {
     display: grid;
@@ -243,7 +198,7 @@
     gap: 4px;
   }
   .bill-grid strong {
-    font-size: 13px;
+    font-size:14px;
   }
   table {
     width: 100%;
@@ -254,7 +209,7 @@
     background: #172033;
     color: #fff;
     text-align: left;
-    font-size: 9px;
+    font-size:11px;
   }
   th:last-child,
   td:last-child {
@@ -263,7 +218,7 @@
   td {
     padding: 12px 10px;
     border-bottom: 1px solid #dbe2ea;
-    font-size: 10px;
+    font-size:12px;
   }
   .totals {
     display: grid;
@@ -278,7 +233,7 @@
     display: flex;
     justify-content: space-between;
     padding: 7px 0;
-    font-size: 10px;
+    font-size:12px;
   }
   .totals dd {
     margin: 0;
@@ -286,7 +241,7 @@
   }
   .totals .grand {
     border-block: 1px solid #172033;
-    font-size: 13px;
+    font-size:14px;
   }
   .invoice-paper footer {
     display: flex;
@@ -298,7 +253,7 @@
   }
   .invoice-paper footer span {
     color: #64748b;
-    font-size: 8px;
+    font-size:11px;
   }
   @media (max-width: 650px) {
     main {
@@ -320,36 +275,20 @@
     .totals {
       grid-template-columns: 1fr;
     }
-    .invoice-toolbar {
-      gap: 12px;
-    }
-    .invoice-toolbar button {
-      font-size: 8px;
-    }
   }
   @media print {
-    @page {
-      size: A4;
-      margin: 12mm;
-    }
-    :global(body *) {
-      visibility: hidden !important;
-    }
-    .invoice-paper,
-    .invoice-paper * {
-      visibility: visible !important;
-    }
-    .invoice-paper {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      box-sizing: border-box;
-      border: 0;
-      box-shadow: none;
-      padding: 0;
-    }
-    .no-print {
-      display: none !important;
-    }
+    @page { size: A4; margin: 12mm; }
+    .no-print, :global(.action-feedback) { display: none !important; }
+    main { max-width: none; padding: 0; margin: 0; }
+    .invoice-paper { position: static; width: 100%; box-sizing: border-box; border: 0; box-shadow: none; padding: 0; }
+    /* Keep header fills and the grand total visible even when "background graphics" is off. */
+    th, .grand { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    tr, .totals, footer { break-inside: avoid; }
   }
+
+  .invoice-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .invoice-toolbar .back, .invoice-toolbar .print { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: 12px; font-size: 15px; font-weight: 650; text-decoration: none; cursor: pointer; }
+  .invoice-toolbar .back { border: 1px solid var(--line); background: var(--card); color: var(--theme-text); }
+  .invoice-toolbar .print { border: 0; background: var(--purple); color: var(--accent-text, #fff); }
+  .in-app-note { margin: 0 0 14px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, #d97706 12%, var(--card)); font-size: 14px; line-height: 1.5; }
 </style>

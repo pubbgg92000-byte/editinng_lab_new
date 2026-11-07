@@ -390,7 +390,7 @@ export interface StudioSettings {
 }
 
 export type TenantStatus = 'draft' | 'active' | 'suspended';
-export type AccountRole = 'owner' | 'client_admin';
+export type AccountRole = 'owner' | import('./permissions.ts').TenantRole;
 
 export interface Tenant {
 	id: string;

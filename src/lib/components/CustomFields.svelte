@@ -37,5 +37,5 @@
 {/if}
 
 <style>
-	.custom-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}.wide{grid-column:1/-1}.check{height:42px;display:flex!important;align-items:center;gap:7px}.check input{width:auto}.check span{font-size:9px}@media(max-width:620px){.custom-field-grid{grid-template-columns:1fr}.wide{grid-column:auto}}
+	.custom-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}.wide{grid-column:1/-1}.check{height:42px;display:flex!important;align-items:center;gap:7px}.check input{width:auto}.check span{font-size:11px}@media(max-width:620px){.custom-field-grid{grid-template-columns:1fr}.wide{grid-column:auto}}
 </style>

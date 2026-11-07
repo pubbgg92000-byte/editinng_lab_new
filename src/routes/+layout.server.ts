@@ -4,8 +4,9 @@ import { getSettings } from '$lib/server/repository';
 import { getTenantConfiguration } from '$lib/server/configuration';
 import { allCapabilities, defaultPackage, resolveCapabilities } from '$lib/capabilities';
 import { env } from '$env/dynamic/public';
-import type { StudioSettings } from '$lib/types';
+import type { StudioSettings, TenantConfiguration } from '$lib/types';
 import { findLegacyTenant, findTenantBySlug } from '$lib/server/control';
+import { publicConfiguration } from '$lib/server/portals';
 export const load = async ({ locals, url }) => {
 	let settings: StudioSettings = { studioName: 'NexaDesk', orderPrefix: 'ORD', editorPrefix: 'ED', logoUrl: '', address: '', phone: '', email: '', gstin: '', paymentNote: '', invoiceFooter: '', assignmentTemplate: '', invoiceTemplate: '', themePalette: 'graphite-aqua', themeDefaultMode: 'light' };
 	let configuration = { profile: defaultPackage.profile, allowedCapabilities: allCapabilities, preferences: defaultPackage.enabled, effectiveCapabilities: resolveCapabilities(allCapabilities, defaultPackage.enabled) };
@@ -25,7 +26,8 @@ export const load = async ({ locals, url }) => {
 	const tenantSlug = themeTenant?.slug || '';
 	return {
 		settings,
-		configuration,
+		// Signed-out (portal) pages only get the public slice of the workspace configuration.
+		configuration: locals.tenant ? configuration : publicConfiguration(configuration as TenantConfiguration),
 		appUrl: String(env.PUBLIC_APP_URL || url.origin).replace(/\/$/, ''),
 		pageUrl: `${url.origin}${url.pathname}`,
 		tenantSlug,

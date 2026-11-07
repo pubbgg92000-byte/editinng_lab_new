@@ -1,10 +1,14 @@
 <!-- Authenticated client shell: navigation, search, notifications, profile, and mobile menu. -->
 <script lang="ts">
+    import { allowed } from '$lib/stores/permissions';
+import { safeFetch } from "$lib/http";
   import { page } from "$app/state";
   import { onMount, untrack } from "svelte";
   import { sidebarOpen } from "$lib/stores/app";
   import ActionFeedback from "$lib/components/ActionFeedback.svelte";
-  import { beginAction, consumeActionFlash } from "$lib/stores/actionFeedback";
+  import { beginAction, consumeActionFlash, notifyAction } from "$lib/stores/actionFeedback";
+  import { goto } from "$app/navigation";
+  import { askConfirm } from "$lib/stores/confirm";
   import type {
     ActivityLog,
     Customer,
@@ -34,6 +38,7 @@
     Mail,
     Phone,
     Database,
+    ChartColumn,
   } from "@lucide/svelte";
   type Notification = ActivityLog & {
     path: string;
@@ -75,6 +80,9 @@
     };
   } = $props();
   const displayName = $derived(hasCapability(configuration.effectiveCapabilities, "branding.whiteLabel") ? settings.studioName : "NexaDesk");
+  // Initials for the logo fallback, e.g. "Demo Business" → "DB".
+  const brandInitials = $derived(displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join("").toUpperCase() || "N");
+  const sheetsEnabled = $derived(hasCapability(configuration.effectiveCapabilities, "integrations.googleSheets"));
   const displayLogo = $derived(hasCapability(configuration.effectiveCapabilities, "branding.whiteLabel") ? settings.logoUrl : "");
   const workerLabel = $derived(labelFor(configuration.profile, "staff"));
   const workerPlural = $derived(labelFor(configuration.profile, "staff", true));
@@ -82,17 +90,21 @@
   const orderPlural = $derived(labelFor(configuration.profile, "order", true));
   const nav = $derived([
     { label: "Overview", href: "/dashboard", icon: LayoutDashboard, visible: true },
-    { label: labelFor(configuration.profile, "customer", true), href: "/customers", icon: Users, visible: true },
     { label: labelFor(configuration.profile, "order", true), href: "/orders", icon: ClipboardList, visible: true },
-    { label: labelFor(configuration.profile, "staff", true), href: "/editors", icon: UserRound, visible: hasCapability(configuration.effectiveCapabilities, "work.staff") },
-    { label: "Invoices", href: "/invoices", icon: ReceiptText, visible: hasCapability(configuration.effectiveCapabilities, "billing.invoices") },
-    { label: "Sheets data", href: "/settings/sheets", icon: Sheet, visible: hasCapability(configuration.effectiveCapabilities, "integrations.googleSheets") },
-    { label: "Settings", href: "/settings", icon: Settings, visible: true },
+    { label: labelFor(configuration.profile, "customer", true), href: "/customers", icon: Users, visible: true },
+    { label: labelFor(configuration.profile, "staff", true), href: "/editors", icon: UserRound, visible: hasCapability(configuration.effectiveCapabilities, "work.staff") && allowed("staff.view") },
+    { label: "Invoices", href: "/invoices", icon: ReceiptText, visible: hasCapability(configuration.effectiveCapabilities, "billing.invoices") && allowed("invoices.view") },
+    { label: "Analytics", href: "/analytics", icon: ChartColumn, visible: allowed("analytics.view") },
+  ].filter((item) => item.visible));
+  // Setup pages live at the bottom of the sidebar, apart from day-to-day work.
+  const manageNav = $derived([
+    { label: "Google Sheets", href: "/settings/sheets", icon: Sheet, visible: hasCapability(configuration.effectiveCapabilities, "integrations.googleSheets") && allowed("settings.manage") },
+    { label: "Settings", href: "/settings", icon: Settings, visible: allowed("settings.manage") },
   ].filter((item) => item.visible));
   const currentPageTitle = $derived(
     page.url.pathname.startsWith("/orders/")
       ? `${orderLabel} details`
-      : nav.find((item) => item.href === "/dashboard" ? page.url.pathname === "/dashboard" : page.url.pathname.startsWith(item.href))?.label || "Workspace",
+      : [...nav, ...manageNav].filter((item) => isNavActive(item.href))[0]?.label || "Workspace",
   );
   const workflowPages = $derived([
     {
@@ -191,9 +203,9 @@
     setTimeout(() => searchInput?.focus());
   }
   function isNavActive(href: string) {
-    return href === "/settings"
-      ? page.url.pathname === href
-      : page.url.pathname.startsWith(href);
+    const path = page.url.pathname;
+    if (href === "/settings") return path === href;
+    return path === href || path.startsWith(`${href}/`);
   }
   function keyboard(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -220,34 +232,35 @@
     )
       profileOpen = false;
   }
-  function confirmSignOut(event: MouseEvent) {
-    if (!window.confirm("Are you sure you want to sign out?"))
-      event.preventDefault();
+  async function confirmSignOut(event: MouseEvent) {
+    event.preventDefault();
+    if (await askConfirm({ title: "Sign out?", message: "You'll need your email and password to sign in again.", confirmLabel: "Sign out" })) location.assign("/logout");
   }
   async function refreshNotifications() {
-    const response = await fetch("/api/notifications");
+    // Skip while the tab is hidden, or when the workspace has no team (the endpoint needs work.staff).
+    if (document.hidden || !hasCapability(configuration.effectiveCapabilities, "work.staff")) return;
+    const response = await safeFetch("/api/notifications");
     if (!response.ok) return;
     const result = await response.json();
     notificationItems = result.notifications || [];
   }
   async function openNotificationGroup(group: NotificationGroup) {
-    await fetch("/api/notifications", {
+    const response = await safeFetch("/api/notifications", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ editorId: group.editorId }),
     });
-    notificationItems = notificationItems.filter(
-      (item) => item.editorId !== group.editorId,
-    );
-    location.href = group.path;
+    if (response.ok) notificationItems = notificationItems.filter((item) => item.editorId !== group.editorId);
+    await goto(group.path);
   }
   async function markAllNotificationsRead() {
-    await fetch("/api/notifications", {
+    const response = await safeFetch("/api/notifications", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
     });
-    notificationItems = [];
+    if (response.ok) notificationItems = [];
+    else notifyAction("Couldn't mark notifications as read. Try again.", "error");
   }
   onMount(() => {
     consumeActionFlash();
@@ -302,8 +315,8 @@
         aria-label={`${displayName} home`}
         ><span class="brand-logo" aria-hidden="true"
           >{#if displayLogo}<img src={displayLogo} alt="" />{:else}<b
-              style="height:100%;display:grid;place-items:center;color:#f5d36b;font-size:11px"
-              >SF</b
+              style="height:100%;display:grid;place-items:center;color:#f5d36b;font-size:12.5px"
+              >{brandInitials}</b
             >{/if}</span
         ><span class="brand-name"
           ><strong>{displayName}</strong><small>NexaDesk</small></span
@@ -314,11 +327,22 @@
         onclick={() => ($sidebarOpen = false)}><X size={18} /></button
       >
     </div>
-    <nav>
+    <nav aria-label="Workspace">
       <p class="nav-label">Workspace</p>
       {#each nav as item}<a
           href={item.href}
           class:active={isNavActive(item.href)}
+          aria-current={isNavActive(item.href) ? "page" : undefined}
+          onclick={() => ($sidebarOpen = false)}
+          ><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span></a
+        >{/each}
+    </nav>
+    <nav class="nav-manage" aria-label="Setup">
+      <p class="nav-label">Setup</p>
+      {#each manageNav as item}<a
+          href={item.href}
+          class:active={isNavActive(item.href)}
+          aria-current={isNavActive(item.href) ? "page" : undefined}
           onclick={() => ($sidebarOpen = false)}
           ><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span></a
         >{/each}
@@ -328,24 +352,24 @@
         class:pending={sheetSync.pending > 0}
         class:error={Boolean(sheetSync.lastError)}
         class="sync"
-        href="/settings"
+        href={sheetsEnabled ? "/settings/sheets" : "/settings"}
         ><span class="sync-dot"></span>
         <div>
           <strong
             >{sheetSync.lastError
-              ? "Sheets needs attention"
+              ? "Google Sheets isn't updating"
               : sheetSync.pending
-                ? `${sheetSync.pending} changes pending`
-                : "Sheets up to date"}</strong
+                ? `${sheetSync.pending} ${sheetSync.pending === 1 ? "change" : "changes"} waiting to copy`
+                : "Google Sheets is up to date"}</strong
           ><small
             >{sheetSync.lastError
-              ? "Open settings to retry"
+              ? "Open to see what's wrong and retry"
               : sheetSync.pending
-                ? "Automatic retry is active"
-                : "No pending changes"}</small
+                ? "Will copy to Google Sheets automatically"
+                : "All changes are copied"}</small
           >
         </div></a
-      ><a href="/logout" class="profile" onclick={confirmSignOut}
+      ><a href="/logout" data-sveltekit-reload class="profile" onclick={confirmSignOut}
         ><span class="avatar"
           >{displayName
             .split(/\s+/)
@@ -450,13 +474,13 @@
                   </p>{/if}
               </div>
               <div class="profile-menu">
-                <a href="/settings" onclick={() => (profileOpen = false)}
+                {#if allowed("settings.manage")}<a href="/settings" onclick={() => (profileOpen = false)}
                   ><Settings size={14} /><span
                     ><strong>Profile settings</strong><small
                       >Workspace and account details</small
                     ></span
                   ><ArrowUpRight size={13} /></a
-                ><a href="/logout" class="sign-out" onclick={confirmSignOut}
+                >{/if}<a href="/logout" data-sveltekit-reload class="sign-out" onclick={confirmSignOut}
                   ><LogOut size={14} /><span
                     ><strong>Sign out</strong><small>End this session</small
                     ></span
@@ -467,7 +491,7 @@
         </div>
       </div>
     </div>
-    {#if storage && storage.level !== "healthy"}<a
+    {#if storage && storage.level !== "healthy" && allowed("settings.manage")}<a
         class:critical={storage.level === "critical"}
         class:warning={storage.level === "warning"}
         class="storage-warning"
@@ -547,17 +571,17 @@
     padding: 9px 10px 12px;
   }
   .popover-head strong {
-    font-size: 12px;
+    font-size:13px;
   }
   .popover-head span {
-    font-size: 8px;
+    font-size:11px;
     color: var(--muted);
   }
   .notification-popover > p,
   .search-results > p {
     text-align: center;
     color: var(--muted);
-    font-size: 10px;
+    font-size:12px;
     padding: 24px;
   }
   .top-avatar {
@@ -569,7 +593,6 @@
   }
   .top-avatar:hover,
   .top-avatar[aria-expanded="true"] {
-    transform: translateY(-1px);
     box-shadow:
       0 0 0 3px color-mix(in srgb, var(--purple) 16%, transparent),
       inset 0 0 0 1px color-mix(in srgb, var(--purple) 45%, var(--line));
@@ -597,7 +620,7 @@
       color-mix(in srgb, var(--purple) 60%, #38bdf8)
     );
     color: #fff;
-    font-size: 12px;
+    font-size:13px;
     font-weight: 750;
     box-shadow: 0 8px 22px color-mix(in srgb, var(--purple) 24%, transparent);
   }
@@ -610,12 +633,12 @@
   .profile-head strong {
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 12px;
+    font-size:13px;
     white-space: nowrap;
   }
   .profile-head small {
     color: var(--muted);
-    font-size: 9px;
+    font-size:11px;
   }
   .profile-details {
     margin: 0 4px 7px;
@@ -631,7 +654,7 @@
     margin: 0;
     padding: 4px 0;
     color: var(--muted);
-    font-size: 9px;
+    font-size:11px;
   }
   .profile-details p span {
     overflow: hidden;
@@ -667,11 +690,11 @@
     gap: 2px;
   }
   .profile-menu strong {
-    font-size: 10px;
+    font-size:12px;
   }
   .profile-menu small {
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
   }
   .profile-menu a > :global(svg):last-child {
     color: var(--muted);
@@ -717,7 +740,7 @@
     outline: 0;
     background: transparent;
     color: inherit;
-    font-size: 13px;
+    font-size:14px;
   }
   .search-input button {
     border: 0;
@@ -748,12 +771,12 @@
     gap: 3px;
   }
   .search-results strong {
-    font-size: 11px;
+    font-size:12.5px;
   }
   .search-results small,
   .search-results > a > span {
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
   }
   .search-results :global(svg) {
     color: var(--purple);

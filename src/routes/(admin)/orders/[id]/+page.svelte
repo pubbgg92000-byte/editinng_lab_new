@@ -1,6 +1,10 @@
 <!-- Order workspace: sticky identity, tasks, billing, delivery, customer history, and activity. -->
 <script lang="ts">
+    import { allowed } from '$lib/stores/permissions';
+import { confirmDanger } from "$lib/stores/confirm";
+  import Breadcrumbs from "$lib/components/Breadcrumbs.svelte";
   import { onMount, untrack } from "svelte";
+  import { requestJson, safeFetch } from "$lib/http";
   import {
     ArrowLeft,
     Archive,
@@ -19,6 +23,9 @@
     Settings2,
     PackageCheck,
     CircleCheckBig,
+    MoreHorizontal,
+    UserPlus,
+    Clock3,
   } from "@lucide/svelte";
   import { formatVideoDuration } from "$lib/duration";
   import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
@@ -48,8 +55,25 @@
   let editingTask = $state<Task | null>(null);
   let error = $state("");
   let busy = $state("");
-  let starAnimating = $state(false);
   let showArchivedTasks = $state(false);
+  // SvelteKit reuses this component when only the order id changes (e.g. clicking another order
+  // in the customer card or Cmd-K). Re-sync local copies from fresh route data so actions never
+  // target the previously viewed order.
+  $effect.pre(() => {
+    const next = { order: data.order, editors: data.editors, devices: data.devices, activity: data.activity };
+    untrack(() => {
+      if (next.order.id !== order.id) {
+        taskModalOpen = paymentModalOpen = billingModalOpen = invoiceModalOpen = deliveryModalOpen = false;
+        editingTask = null;
+        error = "";
+        busy = "";
+      }
+      order = next.order;
+      editors = next.editors;
+      devices = next.devices;
+      activities = next.activity;
+    });
+  });
   const messageCatalog = $derived(data.configuration?.moduleConfiguration?.["communications.whatsapp"]);
   let customerTemplateId = $state(untrack(() => data.configuration?.moduleConfiguration?.["communications.whatsapp"]?.defaultTemplateIds?.["status-update"] || ""));
   let staffTemplateId = $state(untrack(() => data.configuration?.moduleConfiguration?.["communications.whatsapp"]?.defaultTemplateIds?.["work-assignment"] || ""));
@@ -94,6 +118,10 @@
     ),
   );
   const archivedTasks = $derived(order.tasks.filter((task) => task.archived));
+  const unassignedTasks = $derived(activeTasks.filter((task) => !task.editorId && task.status !== "Completed"));
+  let moreOpen = $state(false);
+  // "an editor", "a technician": pick the article from the workspace's own wording.
+  const withArticle = (word: string) => `${/^[aeiou]/i.test(word) ? "an" : "a"} ${word}`;
   const visibleTasks = $derived(
     showArchivedTasks ? archivedTasks : activeTasks,
   );
@@ -132,7 +160,7 @@
   };
 
   async function refresh() {
-    const response = await fetch(`/api/orders/${order.id}`);
+    const response = await safeFetch(`/api/orders/${order.id}`);
     if (!response.ok) return;
     const result = await response.json();
     order = result.order;
@@ -141,10 +169,8 @@
 
   async function toggleImportant() {
     const newValue = !order.important;
-    starAnimating = true;
     order = { ...order, important: newValue };
-    setTimeout(() => (starAnimating = false), 800);
-    const response = await fetch(`/api/orders/${order.id}`, {
+    const response = await safeFetch(`/api/orders/${order.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ important: newValue }),
@@ -170,7 +196,7 @@
   ) {
     error = "";
     busy = task.id;
-    const response = await fetch(`/api/tasks/${task.id}`, {
+    const response = await safeFetch(`/api/tasks/${task.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status, progress }),
@@ -187,11 +213,11 @@
 
   async function archiveTask(task: Task) {
     if (
-      !confirm(`Archive “${task.name}”? It will remain in Sheets and exports.`)
+      !await confirmDanger(`Archive “${task.name}”? It will remain in Sheets and exports.`)
     )
       return;
     busy = task.id;
-    const response = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
+    const response = await safeFetch(`/api/tasks/${task.id}`, { method: "DELETE" });
     busy = "";
     if (!response.ok) {
       error = "Unable to archive task.";
@@ -203,7 +229,7 @@
 
   async function restoreTask(task: Task) {
     busy = task.id;
-    const response = await fetch(`/api/tasks/${task.id}`, {
+    const response = await safeFetch(`/api/tasks/${task.id}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "restore" }),
@@ -222,7 +248,7 @@
     error = "";
     busy = editor.id;
     try {
-      const response = await fetch(`/api/editors/${editor.id}/whatsapp`, {
+      const response = await safeFetch(`/api/editors/${editor.id}/whatsapp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ orderId: order.id, templateId: staffTemplateId }),
@@ -251,7 +277,7 @@
     error = "";
     busy = "partial-invoice";
     try {
-      const response = await fetch(`/api/orders/${order.id}/invoice`, {
+      const response = await safeFetch(`/api/orders/${order.id}/invoice`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -278,7 +304,7 @@
     error = "";
     busy = "customer-whatsapp";
     try {
-      const response = await fetch(
+      const response = await safeFetch(
         `/api/orders/${order.id}/customer-whatsapp`,
         { method: "POST" },
       );
@@ -307,7 +333,7 @@
     error = "";
     busy = "customer-message";
     try {
-      const response = await fetch(`/api/orders/${order.id}/whatsapp`, {
+      const response = await safeFetch(`/api/orders/${order.id}/whatsapp`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ templateId: customerTemplateId })
@@ -327,36 +353,44 @@
     }
   }
 
-  async function setOrderStatus(status: Order["status"]) {
-    busy = "status";
-    error = "";
-    const response = await fetch(`/api/orders/${order.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        status,
-        progress: status === "Delivered" ? 100 : order.progress,
-      }),
-    });
-    const result = await response.json();
-    busy = "";
-    if (!response.ok) {
-      error = result.error || "Unable to update status.";
+  async function setOrderStatus(status: Order["status"], select?: HTMLSelectElement) {
+    // Delivery has balance and handover checks, so "Delivered" always goes through the delivery dialog.
+    if (status === "Delivered" && deliveryEnabled) {
+      if (select) select.value = order.status;
+      deliveryModalOpen = true;
       return;
     }
-    order = result.order;
-    notifyAction(`Order status changed to ${statusFor(data.configuration?.profile, status).label}.`);
+    busy = "status";
+    error = "";
+    try {
+      const result = await requestJson<{ order: Order }>(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status,
+          progress: status === "Delivered" ? 100 : order.progress,
+        }),
+      }, "Unable to update status.");
+      order = result.order;
+      notifyAction(`Order status changed to ${statusFor(data.configuration?.profile, status).label}.`);
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : "Unable to update status.";
+      // Keep the select showing the saved status when the update fails.
+      if (select) select.value = order.status;
+    } finally {
+      busy = "";
+    }
   }
 
   async function archiveCurrentOrder() {
     if (
-      !confirm(
+      !await confirmDanger(
         `Archive “${order.project}”? You can restore it from the archived orders box.`,
       )
     )
       return;
     busy = "archive";
-    const response = await fetch(`/api/orders/${order.id}`, {
+    const response = await safeFetch(`/api/orders/${order.id}`, {
       method: "DELETE",
     });
     const result = await response.json();
@@ -375,7 +409,7 @@
   ) {
     busy = paymentId;
     error = "";
-    const response = await fetch(`/api/orders/${order.id}/invoice`, {
+    const response = await safeFetch(`/api/orders/${order.id}/invoice`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ kind, paymentId }),
@@ -409,40 +443,38 @@
   ><title>{order.customer} · {order.project} — {data.settings.studioName}</title></svelte:head
 >
 
+<svelte:window
+  onclick={(event) => { if (moreOpen && !(event.target as Element).closest?.(".more-menu")) moreOpen = false; }}
+  onkeydown={(event) => { if (event.key === "Escape") moreOpen = false; }}
+/>
+<Breadcrumbs items={[
+  { label: labelFor(data.configuration?.profile, "order", true), href: "/orders" },
+  ...(order.archived ? [{ label: "Archived", href: "/orders?archived=true" }] : []),
+  { label: `${orderCode(data.settings, order.serial)} · ${order.project || "Untitled"}` },
+]} />
 <div class="detail-top">
-  <a href="/orders" class="back"><ArrowLeft size={16} /> {labelFor(data.configuration?.profile, "order", true)}</a>
   <div class="actions">
-    {#if !order.archived && whatsappEnabled && customerOrderTemplates.length}<div class="message-action"><select bind:value={customerTemplateId} aria-label="Customer WhatsApp template">{#each customerOrderTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select><button class="secondary" disabled={busy === "customer-message" || !order.mobile} onclick={openCustomerWhatsApp}><WhatsAppIcon size={14}/>{busy === "customer-message" ? "Preparing…" : "Message customer"}</button></div>{/if}
-    {#if !order.archived}{#if paymentsEnabled || invoicesEnabled}<button
-        class="secondary"
-        onclick={() => (billingModalOpen = true)}
-        ><Settings2 size={14} /> Set {orderLabel.toLowerCase()} total</button>{/if}
-      {#if paymentsEnabled}<button class="secondary" onclick={() => (paymentModalOpen = true)}
-        ><IndianRupee size={14} /> Record customer payment</button
-      >{/if}
-      {#if invoicesEnabled}
-      <button class="primary" disabled={busy === "invoice"} onclick={openBill}
-        ><FileText size={15} />
-        {busy === "invoice"
-          ? "Creating final invoice…"
-          : "Create final invoice"}</button>{/if}
-      <button
-        class="archive-order"
-        disabled={busy === "archive"}
-        onclick={archiveCurrentOrder}
-        ><Archive size={14} /> Archive this {orderLabel.toLowerCase()}</button
-      >{/if}
+    {#if !order.archived && whatsappEnabled && customerOrderTemplates.length}<div class="message-action">{#if customerOrderTemplates.length > 1}<select bind:value={customerTemplateId} aria-label="Which WhatsApp message to send">{#each customerOrderTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select>{/if}<button class="secondary" disabled={busy === "customer-message" || !order.mobile} onclick={openCustomerWhatsApp}><WhatsAppIcon size={14}/>{busy === "customer-message" ? "Preparing…" : "Message customer"}</button></div>{/if}
+    {#if !order.archived}
+      {#if paymentsEnabled && allowed("payments.record")}<button class="secondary" onclick={() => (paymentModalOpen = true)}><IndianRupee size={14} aria-hidden="true" /> Record payment</button>{/if}
+      {#if invoicesEnabled && allowed("invoices.manage")}<button class="primary" disabled={busy === "invoice"} aria-busy={busy === "invoice"} onclick={openBill}><FileText size={15} aria-hidden="true" /> {busy === "invoice" ? "Creating invoice…" : "Create invoice"}</button>{/if}
+      <details class="more-menu" bind:open={moreOpen}>
+        <summary class="secondary"><MoreHorizontal size={16} aria-hidden="true" /> More</summary>
+        <div class="menu">
+          {#if (paymentsEnabled || invoicesEnabled) && allowed("invoices.manage")}<button type="button" onclick={() => { moreOpen = false; billingModalOpen = true; }}><Settings2 size={15} aria-hidden="true" /> Set total and discount</button>{/if}
+          {#if allowed("orders.delete")}<button type="button" class="danger" disabled={busy === "archive"} onclick={() => { moreOpen = false; archiveCurrentOrder(); }}><Archive size={15} aria-hidden="true" /> Archive this {orderLabel.toLowerCase()}</button>{/if}
+        </div>
+      </details>
+    {/if}
   </div>
 </div>
 
 <header class="order-heading">
-  <div class="project-icon">{orderCode(data.settings, order.serial)}</div>
   <div>
     <div class="title-line">
       <button
         class="star-btn-detail"
         class:star-active={order.important}
-        class:star-pop={starAnimating}
         aria-label={order.important ? "Remove important mark" : "Mark order important"}
         title={order.important ? "Remove important mark" : "Mark order important"}
         onclick={toggleImportant}
@@ -450,7 +482,7 @@
           size={20}
           fill={order.important ? "currentColor" : "none"}
           strokeWidth={order.important ? 0 : 1.8}
-        />{#if starAnimating && order.important}<span class="star-confetti c1"></span><span class="star-confetti c2"></span><span class="star-confetti c3"></span><span class="star-confetti c4"></span><span class="star-confetti c5"></span><span class="star-confetti c6"></span>{/if}</button
+        /></button
       >{#if customerRecord}<a
           class="studio-title"
           href={`/customers?customer=${customerRecord.id}`}>{order.customer}</a
@@ -547,6 +579,36 @@
     </div>
     <a href="/orders?status=Delivered">View delivered orders</a>
   </section>
+{:else if !order.archived && tasksEnabled && !activeTasks.length}
+  <section class="workflow-card">
+    <span class="workflow-icon"><Plus size={19} aria-hidden="true" /></span>
+    <div>
+      <small>Next step</small>
+      <h2>Add the work to be done</h2>
+      <p>Split this {orderLabel.toLowerCase()} into {taskLabel.toLowerCase()}s{staffEnabled ? ` and choose ${withArticle(staffLabel.toLowerCase())} for each` : ""}.</p>
+    </div>
+    <div class="workflow-actions">{#if allowed("orders.edit")}<button class="primary" onclick={() => openTask()}><Plus size={15} aria-hidden="true" /> Add {taskLabel.toLowerCase()}</button>{/if}</div>
+  </section>
+{:else if !order.archived && tasksEnabled && staffEnabled && unassignedTasks.length}
+  <section class="workflow-card">
+    <span class="workflow-icon"><UserPlus size={19} aria-hidden="true" /></span>
+    <div>
+      <small>Next step</small>
+      <h2>Assign {unassignedTasks.length === 1 ? `“${unassignedTasks[0].name}”` : `${unassignedTasks.length} ${taskLabel.toLowerCase()}s`}</h2>
+      <p>Choose who will do the work. They get a private link to update progress and share the result.</p>
+    </div>
+    <div class="workflow-actions"><button class="primary" onclick={() => openTask(unassignedTasks[0])}><UserPlus size={15} aria-hidden="true" /> Assign {staffLabel.toLowerCase()}</button></div>
+  </section>
+{:else if !order.archived && tasksEnabled && ["Received", "Assigned", "Editing", "Revision"].includes(order.status)}
+  <section class="workflow-card">
+    <span class="workflow-icon"><Clock3 size={19} aria-hidden="true" /></span>
+    <div>
+      <small>In progress</small>
+      <h2>{order.status === "Revision" ? `Changes requested. Waiting for the ${staffLabel.toLowerCase()}.` : "Work is in progress"}</h2>
+      <p>You'll see a review step here as soon as work is submitted.</p>
+    </div>
+    <strong>{approvedTasks} of {activeTasks.length} approved</strong>
+  </section>
 {/if}
 
 <div class="detail-grid">
@@ -586,7 +648,7 @@
                   ? "Generating…"
                   : `Invoice completed · ${money(partialInvoiceAmount)}`
                 : "Set completed work value"}</button
-            >{/if}{#if !showArchivedTasks}<button
+            >{/if}{#if !showArchivedTasks && allowed("orders.edit")}<button
               class="secondary"
               onclick={() => openTask()}><Plus size={13} /> Add {taskLabel.toLowerCase()}</button
             >{/if}
@@ -637,35 +699,36 @@
               <div class="task-actions">
                 {#if task.archived}<button
                     class="task-restore"
-                    title="Restore task"
+                    title="Restore"
+                    aria-label={`Restore ${task.name}`}
                     disabled={busy === task.id}
                     onclick={() => restoreTask(task)}
                     ><RotateCcw size={14} /></button
                   >{:else}
                   <button
                     class="task-edit"
-                    title="Edit task"
+                    title="Edit"
+                    aria-label={`Edit ${task.name}`}
                     onclick={() => openTask(task)}><Edit3 size={14} /></button
                   >
                   {#if task.status === "Ready for review"}
                     <button
-                      class="approve"
-                      title="Approve"
+                      class="approve labelled"
                       disabled={busy === task.id}
                       onclick={() => updateTask(task, "Completed", 100)}
-                      ><Check size={14} /></button
+                      ><Check size={14} aria-hidden="true" /> Approve</button
                     >
                     <button
-                      class="revision"
-                      title="Request revision"
+                      class="revision labelled"
                       disabled={busy === task.id}
                       onclick={() => updateTask(task, "Revision required")}
-                      ><RotateCcw size={14} /></button
+                      ><RotateCcw size={14} aria-hidden="true" /> Request changes</button
                     >
                   {/if}
                   <button
                     class="task-archive"
-                    title="Archive task"
+                    title="Archive"
+                    aria-label={`Archive ${task.name}`}
                     disabled={busy === task.id}
                     onclick={() => archiveTask(task)}
                     ><Archive size={14} /></button
@@ -766,6 +829,7 @@
               setOrderStatus(
                 (event.currentTarget as HTMLSelectElement)
                   .value as Order["status"],
+                event.currentTarget as HTMLSelectElement,
               )}
             >{#each ["Historical", "Received", "Assigned", "Editing", "Waiting Review", "Revision", "Ready Delivery", "Delivered", "Stopped", "Completed"] as status}<option
                 value={status}>{statusFor(data.configuration?.profile, status).label}</option
@@ -833,7 +897,7 @@
               title="Open WhatsApp"><WhatsAppIcon size={15} /></button>{/if}
           </div>
         {/each}
-      {:else}<p class="muted">Assign a {taskLabel.toLowerCase()} to add a {staffLabel.toLowerCase()}.</p>{/if}
+      {:else}<p class="muted">No one is assigned yet. Add {withArticle(taskLabel.toLowerCase())} and choose who does it.</p>{/if}
       <button class="add-person" onclick={() => openTask()}
         ><Plus size={13} /> Assign {staffLabel.toLowerCase()} or {taskLabel.toLowerCase()}</button
       >
@@ -909,7 +973,7 @@
           {order.priceSet === false
             ? "Set order total"
             : "Edit order total"}</button
-        >{#if paymentsEnabled}<button
+        >{#if paymentsEnabled && allowed("payments.record")}<button
           class="invoice-button"
           onclick={() => (paymentModalOpen = true)}
           ><IndianRupee size={13} /> Record payment</button>{/if}
@@ -996,45 +1060,15 @@
     border-radius: 8px;
     padding: 8px 10px;
   }
-  .archive-order {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid #f59e0b55;
-    border-radius: 8px;
-    background: #f59e0b10;
-    color: #f59e0b;
-    padding: 8px 10px;
-  }
   .section-actions .active {
     border-color: var(--purple);
     color: var(--purple);
-  }
-  .back {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--muted);
-    font-size: 12px;
   }
   .order-heading {
     display: flex;
     align-items: center;
     gap: 14px;
     margin-bottom: 22px;
-  }
-  .project-icon {
-    min-width: 48px;
-    height: 44px;
-    padding: 0 10px;
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--accent);
-    display: grid;
-    place-items: center;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 700;
   }
   .title-line {
     gap: 10px;
@@ -1057,7 +1091,7 @@
   }
   .customer-heading span {
     color: var(--muted);
-    font-size: 10px;
+    font-size:12px;
   }
   .error {
     border: 1px solid #ef444455;
@@ -1065,7 +1099,7 @@
     color: #ef7777;
     border-radius: 10px;
     padding: 11px 14px;
-    font-size: 11px;
+    font-size:12.5px;
     margin-bottom: 16px;
   }
   .detail-grid {
@@ -1105,11 +1139,11 @@
     border-bottom: 1px solid var(--border);
   }
   h2 {
-    font-size: 12px;
+    font-size:13px;
     margin: 0;
   }
   .section-head p {
-    font-size: 10px;
+    font-size:12px;
     color: var(--muted);
     margin: 4px 0 0;
   }
@@ -1138,11 +1172,11 @@
     gap: 4px;
   }
   .task-title strong {
-    font-size: 11px;
+    font-size:12.5px;
   }
   .task-title small,
   .task-progress small {
-    font-size: 9px;
+    font-size:11px;
     color: var(--muted);
   }
   .task-title .task-billing {
@@ -1161,7 +1195,7 @@
     border-radius: 99px;
     background: var(--surface-2);
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
   }
   .task-progress {
     display: grid;
@@ -1193,7 +1227,6 @@
     border-color: color-mix(in srgb, var(--accent) 78%, #fff);
     background: color-mix(in srgb, var(--accent) 20%, var(--surface-2));
     box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 15%, transparent);
-    transform: translateY(-1px);
   }
   .task-actions button:disabled,
   .person button:disabled {
@@ -1224,7 +1257,7 @@
   .output {
     grid-column: 1/-1;
     margin: 0;
-    font-size: 10px;
+    font-size:12px;
   }
   .instructions {
     color: var(--muted);
@@ -1240,7 +1273,7 @@
     padding: 28px;
     text-align: center;
     color: var(--muted);
-    font-size: 11px;
+    font-size:12.5px;
   }
   .activity-list {
     padding: 4px 18px 12px;
@@ -1256,11 +1289,11 @@
     border: 0;
   }
   .activity-list strong {
-    font-size: 10px;
+    font-size:12px;
   }
   .activity-list span,
   .activity-list small {
-    font-size: 9px;
+    font-size:11px;
     color: var(--muted);
   }
   .activity-list small {
@@ -1282,7 +1315,7 @@
     margin-bottom: 10px;
   }
   .status-control label {
-    font-size: 9px;
+    font-size:11px;
     color: var(--muted);
   }
   .info-card dl {
@@ -1294,7 +1327,7 @@
     gap: 12px;
     padding: 9px 0;
     border-bottom: 1px solid var(--border);
-    font-size: 10px;
+    font-size:12px;
   }
   .info-card dt {
     color: var(--muted);
@@ -1305,7 +1338,7 @@
   }
   .remarks,
   .muted {
-    font-size: 10px;
+    font-size:12px;
     color: var(--muted);
     line-height: 1.6;
   }
@@ -1325,7 +1358,7 @@
     color: var(--accent);
     display: grid;
     place-items: center;
-    font-size: 9px;
+    font-size:11px;
     font-weight: 700;
   }
   .person > div {
@@ -1335,18 +1368,18 @@
     flex: 1;
   }
   .person strong {
-    font-size: 10px;
+    font-size:12px;
   }
   .person small,
   .invoice-title small {
-    font-size: 9px;
+    font-size:11px;
     color: var(--muted);
   }
   .add-person {
     border: 0;
     background: transparent;
     color: var(--accent);
-    font-size: 10px;
+    font-size:12px;
     display: flex;
     gap: 6px;
     padding: 8px 0 0;
@@ -1364,7 +1397,7 @@
   }
   .amount small {
     color: var(--muted);
-    font-size: 10px;
+    font-size:12px;
   }
   .amount strong {
     font-size: 18px;
@@ -1375,7 +1408,7 @@
     gap: 8px;
     margin: -5px 0 10px;
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
   }
   .discount-line strong {
     color: #16a34a;
@@ -1393,7 +1426,7 @@
   }
   .paid-row {
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
     margin-top: 7px;
   }
   .payment-entry {
@@ -1411,11 +1444,11 @@
   }
   .payment-entry strong,
   .payment-entry b {
-    font-size: 9px;
+    font-size:11px;
   }
   .payment-entry small {
     color: var(--muted);
-    font-size: 7px;
+    font-size:11px;
     line-height: 1.4;
   }
   .payment-entry button {
@@ -1445,7 +1478,7 @@
     color: var(--accent);
     border-radius: 8px;
     padding: 9px;
-    font-size: 9px;
+    font-size:11px;
     transition:
       border-color 0.18s ease,
       background 0.18s ease,
@@ -1454,7 +1487,6 @@
   .invoice-button:hover {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
-    transform: translateY(-1px);
   }
   .delivered-state {
     display: flex;
@@ -1465,7 +1497,7 @@
     color: #16a34a;
     border-radius: 9px;
     padding: 10px;
-    font-size: 10px;
+    font-size:12px;
   }
   .status-control select {
     color-scheme: dark;
@@ -1480,11 +1512,6 @@
   }
   :global(html[data-theme="light"]) .status-control select {
     color-scheme: light;
-  }
-  .status-control small {
-    color: var(--muted);
-    font-size: 9px;
-    line-height: 1.5;
   }
   .activity-list {
     max-height: 420px;
@@ -1517,7 +1544,7 @@
   }
   .customer-card-head small {
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -1533,7 +1560,7 @@
   .customer-card-head p {
     margin: 0;
     color: var(--muted);
-    font-size: 9px;
+    font-size:11px;
   }
   .customer-order-list {
     display: grid;
@@ -1564,13 +1591,13 @@
   .customer-order-list strong {
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 9px;
+    font-size:11px;
     white-space: nowrap;
   }
   .customer-order-list small,
   .order-state {
     color: var(--muted);
-    font-size: 7.5px;
+    font-size:11px;
   }
   .customer-order-list a.current .order-state {
     color: var(--accent);
@@ -1604,16 +1631,18 @@
     .actions {
       width: 100%;
       display: grid;
-      grid-auto-rows: 1fr;
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
     }
     .actions button {
       width: 100%;
-      height: 100%;
-      min-height: 70px;
-      padding: 10px;
+      min-height: 44px;
+      padding: 8px 10px;
       white-space: normal;
     }
+    .actions .more-menu { grid-column: 1 / -1; }
+    .actions .more-menu > summary { width: 100%; min-height: 44px; justify-content: center; }
+    .actions .more-menu .menu { left: 0; right: 0; }
     .message-action{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.message-action select{width:100%;height:100%;min-height:44px}
     .task-row {
       grid-template-columns: 1fr auto;
@@ -1663,7 +1692,7 @@
     border-radius: 9px;
     background: var(--surface-2);
     color: var(--accent);
-    font-size: 9px;
+    font-size:11px;
     font-weight: 800;
   }
   .sticky-order-name {
@@ -1677,14 +1706,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
+    font-size:12.5px;
   }
   .sticky-order-name small {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
   }
   .sticky-detail {
     display: flex;
@@ -1695,11 +1724,11 @@
   }
   .sticky-detail small {
     color: var(--muted);
-    font-size: 7px;
+    font-size:11px;
     text-transform: uppercase;
   }
   .sticky-detail strong {
-    font-size: 9px;
+    font-size:11px;
     white-space: nowrap;
   }
   @media (max-width: 600px) {
@@ -1741,49 +1770,14 @@
     color: #ef4444;
     border-color: #ef444444;
     background: #ef44440c;
-    transform: scale(1.18);
   }
   .star-btn-detail.star-active {
     color: #ef4444;
     filter: drop-shadow(0 0 6px #ef444488);
-    animation: detail-star-glow 2.2s ease-in-out infinite;
   }
   .star-btn-detail.star-active:hover {
     color: #dc2626;
     filter: drop-shadow(0 0 8px #dc262688);
-  }
-  .star-btn-detail.star-pop {
-    animation: detail-star-pop 0.7s cubic-bezier(.34,1.56,.64,1);
-  }
-  @keyframes detail-star-pop {
-    0%   { transform: scale(0.2) rotate(-25deg); }
-    30%  { transform: scale(1.6) rotate(10deg); }
-    50%  { transform: scale(0.85) rotate(-5deg); }
-    70%  { transform: scale(1.15) rotate(3deg); }
-    100% { transform: scale(1) rotate(0deg); }
-  }
-  @keyframes detail-star-glow {
-    0%, 100% { filter: drop-shadow(0 0 4px #ef444455); }
-    50%      { filter: drop-shadow(0 0 12px #ef4444aa) drop-shadow(0 0 22px #ef444444); }
-  }
-  /* confetti particles */
-  .star-confetti {
-    position: absolute;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    pointer-events: none;
-    animation: confetti-fly 0.7s ease-out forwards;
-  }
-  .star-confetti.c1 { background: #ef4444; --cx: -14px; --cy: -14px; }
-  .star-confetti.c2 { background: #f87171; --cx: 14px; --cy: -12px; animation-delay: 0.04s; }
-  .star-confetti.c3 { background: #fbbf24; --cx: -12px; --cy: 8px; animation-delay: 0.08s; }
-  .star-confetti.c4 { background: #fb923c; --cx: 12px; --cy: 10px; animation-delay: 0.06s; }
-  .star-confetti.c5 { background: #f43f5e; --cx: -6px; --cy: -16px; animation-delay: 0.1s; width: 4px; height: 4px; }
-  .star-confetti.c6 { background: #a78bfa; --cx: 8px; --cy: -16px; animation-delay: 0.12s; width: 4px; height: 4px; }
-  @keyframes confetti-fly {
-    0%   { opacity: 1; transform: translate(0, 0) scale(1.2); }
-    100% { opacity: 0; transform: translate(var(--cx), var(--cy)) scale(0); }
   }
   :global(html[data-theme="light"]) .star-btn-detail {
     color: #cbd5e1;
@@ -1795,5 +1789,32 @@
   }
   :global(html[data-theme="light"]) .star-btn-detail.star-active {
     color: #ef4444;
+  }
+
+  /* "More" menu for less common order actions. */
+  .more-menu { position: relative; }
+  .more-menu > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .more-menu > summary::-webkit-details-marker { display: none; }
+  .more-menu .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 230px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 12px 32px #0000001f; display: grid; gap: 2px; }
+  .more-menu .menu button { display: flex; align-items: center; gap: 9px; width: 100%; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--theme-text); font-size: 13.5px; font-weight: 500; text-align: left; cursor: pointer; }
+  .more-menu .menu button:hover { background: var(--theme-soft); }
+  .more-menu .menu button.danger { color: #b91c1c; }
+  .more-menu .menu button:disabled { opacity: .5; cursor: not-allowed; }
+  /* Review buttons carry text so the choice is obvious. */
+  .task-actions .labelled { width: auto !important; padding: 0 10px !important; gap: 6px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+  /* Header wraps on narrow screens instead of pushing the page sideways. */
+  .order-heading { flex-wrap: wrap; min-width: 0; }
+  .order-heading > div { min-width: 0; flex: 1 1 auto; }
+  .title-line { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; min-width: 0; }
+  .title-line :global(h1), .title-line .studio-title { overflow-wrap: anywhere; min-width: 0; }
+  .customer-heading { flex-wrap: wrap; row-gap: 2px; min-width: 0; }
+  .customer-heading strong { overflow-wrap: anywhere; }
+  .detail-top { flex-wrap: wrap; }
+  .detail-top .actions { flex-wrap: wrap; }
+
+  /* Phones: the sticky summary keeps only number, status and balance so nothing gets squeezed. */
+  @media (max-width: 560px) {
+    .sticky-order-name, .sticky-detail:not(:last-child) { display: none; }
   }
 </style>

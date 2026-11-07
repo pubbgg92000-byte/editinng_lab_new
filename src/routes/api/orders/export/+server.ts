@@ -2,7 +2,10 @@
 import ExcelJS from 'exceljs';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
-import { listOrdersPage } from '$lib/server/repository';
+import { getSettings, listOrdersPage } from '$lib/server/repository';
+import { getTenantConfiguration } from '$lib/server/configuration';
+import { hasCapability } from '$lib/capabilities';
+import { orderCode } from '$lib/identifiers';
 
 export const GET = async ({ cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) {
@@ -27,15 +30,19 @@ export const GET = async ({ cookies, locals, url }) => {
 
 	const database = await readyDatabase(locals.tenant);
 
-	// Fetch ALL matching orders (large page size, loop if needed)
-	const { orders } = await listOrdersPage(database, {
-		pageSize: 1000,
-		page: 1,
-		status,
-		event,
-		dateFrom,
-		dateTo,
-	});
+	const configuration = await getTenantConfiguration(database, locals.tenant!);
+	const paymentsEnabled = hasCapability(configuration.effectiveCapabilities, 'billing.payments');
+	const { orderPrefix } = await getSettings(database);
+
+	// listOrdersPage caps pageSize at 100, so walk every page to export all matching orders.
+	const filters = { pageSize: 100, status, event, dateFrom, dateTo };
+	const firstPage = await listOrdersPage(database, { ...filters, page: 1 });
+	const orders = [...firstPage.orders];
+	for (let page = 2; page <= firstPage.pagination.totalPages; page++) {
+		orders.push(...(await listOrdersPage(database, { ...filters, page })).orders);
+	}
+	// Workspaces without payments must not export payment data (matches /api/export masking).
+	if (!paymentsEnabled) for (const order of orders) order.paid = 0;
 
 	// Build Excel workbook
 	const workbook = new ExcelJS.Workbook();
@@ -90,7 +97,7 @@ export const GET = async ({ cookies, locals, url }) => {
 		].join(', ');
 
 		const row = sheet.addRow({
-			serial:      `ORD-${String(order.serial).padStart(4, '0')}`,
+			serial:      orderCode({ orderPrefix }, order.serial),
 			customer:    order.customer,
 			mobile:      order.mobile,
 			project:     order.project,

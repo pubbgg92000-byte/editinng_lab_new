@@ -6,6 +6,7 @@ import { flushSheetSync } from '$lib/server/googleSheets';
 import { taskLinkError } from '$lib/server/validation';
 import { parseVideoDurationMinutes } from '$lib/duration';
 import { getTenantConfiguration } from '$lib/server/configuration';
+import { toEditorTask } from '$lib/server/portals';
 import { hasCapability } from '$lib/capabilities';
 import { staffPortalSections } from '$lib/moduleConfiguration';
 import type { Task, TaskStatus } from '$lib/types';
@@ -50,5 +51,5 @@ export const PATCH = async ({ params, request }) => {
 	catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to update task.' }, { status: 400 }); }
 	if (!task) return json({ error: 'Task not found or not assigned to this editor.' }, { status: 404 });
 	await flushSheetSync(database, tenant);
-	return json({ ok: true, task });
+	return json({ ok: true, task: toEditorTask(task, configuration) });
 };

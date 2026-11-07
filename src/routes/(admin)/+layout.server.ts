@@ -15,5 +15,5 @@ export const load = async ({ locals }) => {
 		getDatabaseStorageUsage(database),
 		syncQueueStatus(database)
 	]);
-	return { settings, configuration, customers, editors, orders, notifications, storage, sheetSync };
+	return { role: locals.account?.role ?? null, settings, configuration, customers, editors, orders, notifications, storage, sheetSync };
 };

@@ -12,5 +12,5 @@
 {/if}
 
 <style>
-	.custom-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:14px 0 0;padding-top:14px;border-top:1px solid var(--line)}.custom-values div{display:grid;gap:3px}.custom-values dt{font-size:7px;color:var(--muted)}.custom-values dd{margin:0;font-size:9px;overflow-wrap:anywhere}.custom-values a{color:var(--purple)}@media(max-width:520px){.custom-values{grid-template-columns:1fr}}
+	.custom-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:14px 0 0;padding-top:14px;border-top:1px solid var(--line)}.custom-values div{display:grid;gap:3px}.custom-values dt{font-size:11px;color:var(--muted)}.custom-values dd{margin:0;font-size:11px;overflow-wrap:anywhere}.custom-values a{color:var(--purple)}@media(max-width:520px){.custom-values{grid-template-columns:1fr}}
 </style>

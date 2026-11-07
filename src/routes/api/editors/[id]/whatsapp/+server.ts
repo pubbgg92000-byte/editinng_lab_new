@@ -10,7 +10,7 @@ import { templateForScenario } from '$lib/moduleConfiguration';
 
 export const POST = async ({ params, request, cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	const database = await readyDatabase(locals.tenant);
 	let editor = (await listEditors(database, true)).find((item) => item.id === params.id);
 	if (!editor || editor.archived) return json({ error: 'Active editor not found' }, { status: 404 });

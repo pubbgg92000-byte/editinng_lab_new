@@ -37,7 +37,13 @@ export const orders: Order[] = [
 	] }
 ];
 
-export const money = (amount: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+// Whole rupees normally; show paise only when the amount really has them (e.g. duration billing or a
+// percentage discount), so a ₹0.40 balance never displays as "₹0" while still blocking delivery.
+export const money = (amount: number) => {
+	const value = Math.round((Number(amount) || 0) * 100) / 100;
+	const fraction = Number.isInteger(value) ? 0 : 2;
+	return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: fraction, maximumFractionDigits: fraction }).format(value);
+};
 
 function dateParts(value: string | Date, withTime = false) {
 	if (!value) return '';

@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { capabilityRegistry, hasCapability, resolveCapabilities, validatePreferences } from '$lib/capabilities';
 import type { BusinessProfile, CapabilityKey, Tenant, TenantConfiguration, TenantPreferences, WorkspaceModuleConfiguration } from '$lib/types';
 import { getTenantPackage } from './control';
+import { cached, clearCache } from './cache';
 import { getBusinessProfile, getCapabilityPreferences, getModuleConfigurationOverrides, getSettings, updateModuleConfigurationOverrides, updateTenantProfile } from './repository';
 import {
 	legacyModuleOverrides,
@@ -11,7 +12,12 @@ import {
 	validateModuleConfiguration
 } from '$lib/moduleConfiguration';
 
-export async function getTenantConfiguration(database: AppDatabase, tenant: Tenant): Promise<TenantConfiguration> {
+/** Workspace configuration (cached briefly; cleared on any write request and after saves below). */
+export function getTenantConfiguration(database: AppDatabase, tenant: Tenant): Promise<TenantConfiguration> {
+	return cached(`config:${tenant.id}`, () => loadTenantConfiguration(database, tenant));
+}
+
+async function loadTenantConfiguration(database: AppDatabase, tenant: Tenant): Promise<TenantConfiguration> {
 	const [profile, preferences, assignment, savedOverrides, settings] = await Promise.all([
 		getBusinessProfile(database),
 		getCapabilityPreferences(database),
@@ -39,6 +45,7 @@ export async function saveTenantPreferences(database: AppDatabase, tenant: Tenan
 		...validatePreferences(input, configuration.allowedCapabilities)
 	} as TenantPreferences;
 	await updateTenantProfile(database, configuration.profile, preferences);
+	clearCache();
 	return getTenantConfiguration(database, tenant);
 }
 
@@ -59,6 +66,7 @@ export async function saveBusinessProfile(database: AppDatabase, tenant: Tenant,
 		region: configuration.profile.region
 	};
 	await updateTenantProfile(database, normalized, configuration.preferences);
+	clearCache();
 	return getTenantConfiguration(database, tenant);
 }
 
@@ -67,6 +75,7 @@ export async function saveModuleConfiguration(database: AppDatabase, tenant: Ten
 	const submitted = validateModuleConfiguration(input, configuration.profile, configuration.allowedCapabilities);
 	const overrides = moduleOverridesFromEffective(configuration.packageModuleConfiguration, submitted);
 	await updateModuleConfigurationOverrides(database, overrides);
+	clearCache();
 	return getTenantConfiguration(database, tenant);
 }
 

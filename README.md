@@ -105,7 +105,7 @@ Keys are stable identities. Deactivating or omitting a definition keeps it inact
 
 | User | Entry URL | Access |
 | --- | --- | --- |
-| Master owner | `/owner/login` | Add clients, change client login/connections/status, reset demo |
+| Master owner | `/login` (old `/owner/login` redirects) | Add clients, change client login/connections/status, reset demo |
 | Client administrator | `/login` | Customers, editors, orders, tasks, billing, invoices, settings, Sheets |
 | Customer | `/portal/{slug}/customer/{token}` | Own active orders, billing, invoices, receipts, approved output |
 | Editor | `/portal/{slug}/editor/{token}` | Assigned active tasks, links, device, progress, duration, output |
@@ -415,7 +415,7 @@ Important: changing `CONFIG_ENCRYPTION_KEY` makes existing encrypted tenant data
     npm run dev
     ```
 
-11. Open <http://localhost:5173/owner/login> or <http://localhost:5173/login>.
+11. Open <http://localhost:5173/login>. Owner accounts go to `/owner`; workspace admins go to `/dashboard`.
 
 Local may use the production `main` databases for a true live view, but every local action then changes production client data. Use a Neon branch/database when testing destructive operations or demo resets.
 
@@ -440,7 +440,7 @@ npm run control:migrate
 npm run control:bootstrap
 ```
 
-Sign in at `/owner/login`. Once the master login works, remove `OWNER_BOOTSTRAP_PASSWORD` from local/production environments. Change the master password inside the owner panel when needed.
+Sign in at `/login`. Once the master login works, remove `OWNER_BOOTSTRAP_PASSWORD` from local/production environments. Change the master password inside the owner panel when needed.
 
 `OWNER_BOOTSTRAP_EMAIL` and `OWNER_BOOTSTRAP_PASSWORD` do not overwrite an existing owner. If credentials already exist, use the owner panel or update the intended control account safely.
 

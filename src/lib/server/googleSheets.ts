@@ -1,9 +1,10 @@
 import { env } from '$env/dynamic/private';
-import { archiveEditor, createCustomer, getBusinessProfile, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResult, pendingSyncItems } from './repository';
+import { archiveEditor, createCustomer, getBusinessProfile, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders, markSyncResults, pendingSyncItems } from './repository';
 import type { BusinessProfile, CustomFieldEntity, EffectiveCapabilities, Tenant } from '$lib/types';
 import { getTenantConfiguration } from './configuration';
 import { hasCapability } from '$lib/capabilities';
 import { editorCode, orderCode } from '$lib/identifiers';
+import { normalizeIndianMobile } from '$lib/phone';
 
 /**
  * GOOGLE SHEETS MIRROR
@@ -269,16 +270,16 @@ export async function flushSheetSync(database: AppDatabase, tenant: Pick<Tenant,
 		await ensureWorkbookTabs(tenant, workbookTabsFor(capabilities));
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : 'Google Sheets setup failed';
-		for (const item of items) await markSyncResult(database, item.id, message);
+		await markSyncResults(database, items.map((item) => String(item.id)), message);
 		return { configured: true, processed: 0, failed: items.length, error: message };
 	}
 	try {
 		const orderCount = await writeWorkbookSnapshot(database, tenant, capabilities);
-		for (const item of items) await markSyncResult(database, item.id);
+		await markSyncResults(database, items.map((item) => String(item.id)));
 		return { configured: true, processed: items.length, failed: 0, orders: orderCount };
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : 'Unknown sync error';
-		for (const item of items) await markSyncResult(database, item.id, message);
+		await markSyncResults(database, items.map((item) => String(item.id)), message);
 		return { configured: true, processed: 0, failed: items.length, error: message };
 	}
 }
@@ -295,47 +296,72 @@ export async function importHistoricalOrders(database: AppDatabase, tenant: Pick
 		const index = names.map((name) => headers.indexOf(name)).find((value) => value >= 0);
 		return index === undefined ? '' : row[index];
 	};
+	// Sheet cells arrive formatted ("₹1,200.00", "10%"); strip symbols before converting, and never store NaN.
+	const amount = (value: unknown) => {
+		const parsed = Number(String(value ?? '').replace(/[₹,%\s]/g, ''));
+		return Number.isFinite(parsed) ? parsed : 0;
+	};
 	let imported = 0;
 	let skipped = 0;
+	const problems: string[] = [];
 	for (const row of values.slice(1)) {
+		try {
 		const serial = Number(cell(row, 'S', 'S.No.', 'Serial'));
 		const business = String(cell(row, 'Studio Name') || '').trim();
-		const phone = String(cell(row, 'Mobile No.', 'Phone') || '').trim();
+		// Customers are stored with normalized 10-digit numbers, so match on the same form.
+		const phone = normalizeIndianMobile(String(cell(row, 'Mobile No.', 'Phone') || '').trim());
 		const event = String(cell(row, 'Event') || '').trim();
 		const project = String(cell(row, 'Names', 'Project / Names', 'Project') || '').trim();
 		if (!serial || !business || (!event && !project)) { skipped++; continue; }
 		const existing = await database.prepare('SELECT id FROM orders WHERE serial = ?').bind(serial).first();
 		if (existing) { skipped++; continue; }
-		let customer = await database.prepare('SELECT id FROM customers WHERE lower(business) = lower(?) AND phone = ?').bind(business, phone).first<{ id: string }>();
+		let customer = await database.prepare('SELECT id FROM customers WHERE lower(business) = lower(?) AND phone = ?').bind(business, phone).first<{ id: string }>()
+			|| (phone ? await database.prepare('SELECT id FROM customers WHERE phone = ? AND archived_at IS NULL LIMIT 1').bind(phone).first<{ id: string }>() : null);
 		if (!customer) customer = await createCustomer(database, { name: business, business, phone }) as unknown as { id: string };
 		const orderId = String(cell(row, 'Record ID', 'Order ID') || '') || `ORD-IMPORT-${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
 		const timestamp = nowIso();
-		const subtotal = Number(cell(row, 'Subtotal', 'Amount') || 0);
+		const subtotal = amount(cell(row, 'Subtotal', 'Amount'));
 		const discountValue = cell(row, 'Discount Amount', 'Discount');
-		const discount = discountValue === '' ? Math.round(subtotal * Number(cell(row, 'Discount %') || 0) / 100) : Number(discountValue || 0);
-		await database.prepare("INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, source, remarks, due_date, status, progress, historical, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'Historical', 100, 1, ?, ?)").bind(orderId, serial, customer.id, business, phone, event || 'Imported', project || event, String(cell(row, 'Receiving') || ''), String(cell(row, 'Duration') || ''), subtotal, discount, Number(cell(row, 'Collected', 'Advance') || 0), String(cell(row, 'Source') || ''), [String(cell(row, 'Remark') || ''), cell(row, 'Assigned Name', 'Assigned Names') ? `Legacy assignee: ${cell(row, 'Assigned Name', 'Assigned Names')}` : ''].filter(Boolean).join(' · '), timestamp, timestamp).run();
+		const discount = discountValue === '' ? Math.round(subtotal * amount(cell(row, 'Discount %')) / 100) : amount(discountValue);
+		await database.prepare("INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, source, remarks, due_date, status, progress, historical, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'Historical', 100, 1, ?, ?)").bind(orderId, serial, customer.id, business, phone, event || 'Imported', project || event, String(cell(row, 'Receiving') || ''), String(cell(row, 'Duration') || ''), subtotal, discount, amount(cell(row, 'Collected', 'Advance')), String(cell(row, 'Source') || ''), [String(cell(row, 'Remark') || ''), cell(row, 'Assigned Name', 'Assigned Names') ? `Legacy assignee: ${cell(row, 'Assigned Name', 'Assigned Names')}` : ''].filter(Boolean).join(' · '), timestamp, timestamp).run();
 		imported++;
+		} catch (cause) {
+			// One bad row (e.g. missing or invalid phone) is skipped instead of stopping the whole import.
+			skipped++;
+			if (problems.length < 5) problems.push(cause instanceof Error ? cause.message : 'Row could not be imported.');
+		}
 	}
-	return { imported, skipped };
+	return { imported, skipped, ...(problems.length ? { warning: `Some rows were skipped: ${[...new Set(problems)].join(' ')}` } : {}) };
 }
 
-export async function reconcileEditorsFromSheet(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId'>) {
+/**
+ * Archive active editors that are missing from the Editors tab. Archiving cuts off portal
+ * links, so this refuses to run against a sheet that may be stale (unsynced outbox rows) or
+ * empty, and supports a dry run so the admin can confirm the exact list first.
+ */
+export async function reconcileEditorsFromSheet(database: AppDatabase, tenant: Pick<Tenant, 'googleSheetId'>, options: { dryRun?: boolean } = {}) {
 	if (!configured(tenant)) throw new Error('Google Sheets service account is not configured.');
+	if ((await pendingSyncItems(database)).length) {
+		return { editorsArchived: 0, editorRows: 0, missing: [] as string[], warning: 'Google Sheets has unsynced changes, so the Editors tab may be out of date. Nothing was archived. Sync again, then retry.' };
+	}
 	const values = await readSheetValues(tenant, 'Editors') || [];
-	if (!values.length) return { editorsArchived: 0, editorRows: 0 };
+	if (!values.length) return { editorsArchived: 0, editorRows: 0, missing: [] as string[] };
 	const headers = values[0].map((value) => String(value || '').trim());
 	const recordIdIndex = headers.indexOf('Record ID');
 	const publicIdIndex = headers.indexOf('Editor ID');
 	const idIndex = recordIdIndex >= 0 ? recordIdIndex : publicIdIndex;
-	if (idIndex < 0 || !headers.includes('Name')) return { editorsArchived: 0, editorRows: 0, warning: 'Editors tab headers were not recognized.' };
+	if (idIndex < 0 || !headers.includes('Name')) return { editorsArchived: 0, editorRows: 0, missing: [] as string[], warning: 'Editors tab headers were not recognized.' };
 	const sheetIds = new Set(values.slice(1).map((row) => String(row[idIndex] || '').trim()).filter(Boolean));
+	if (!sheetIds.size) return { editorsArchived: 0, editorRows: 0, missing: [] as string[], warning: 'The Editors tab has no editor rows. Nothing was archived.' };
 	const activeEditors = (await listEditors(database, true)).filter((editor) => !editor.archived);
+	const missingEditors = activeEditors.filter((editor) => !sheetIds.has(editor.id) && !(editor.code && sheetIds.has(editor.code)));
+	const missing = missingEditors.map((editor) => editor.name);
+	if (options.dryRun) return { editorsArchived: 0, editorRows: sheetIds.size, missing };
 	let editorsArchived = 0;
-	for (const editor of activeEditors) {
-		if (sheetIds.has(editor.id) || Boolean(editor.code && sheetIds.has(editor.code))) continue;
+	for (const editor of missingEditors) {
 		if (await archiveEditor(database, editor.id)) editorsArchived++;
 	}
-	return { editorsArchived, editorRows: sheetIds.size };
+	return { editorsArchived, editorRows: sheetIds.size, missing };
 }
 
 export async function validateSheetConnection(tenant: Pick<Tenant, 'googleSheetId' | 'ordersTab'>) {

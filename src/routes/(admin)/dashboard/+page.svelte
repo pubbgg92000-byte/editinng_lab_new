@@ -1,104 +1,200 @@
-<!-- Production overview: workflow totals and the most relevant active orders. -->
+<!-- Overview: workflow totals, what needs attention today, and the active work queue. -->
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { ClipboardList, Clock3, PackageCheck, CircleCheckBig, ArrowUpRight, Check, Star, UserRound } from '@lucide/svelte';
+	  import { allowed } from '$lib/stores/permissions';
+	import { page } from '$app/state';
+import { untrack } from 'svelte';
+	import { ClipboardList, Clock3, PackageCheck, CircleCheckBig, ArrowRight, Star, UserRound, CircleAlert, CalendarClock, Wallet, UserPlus } from '@lucide/svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import NewOrderModal from '$lib/components/NewOrderModal.svelte';
-	import { formatDate } from '$lib/data';
+	import { formatDate, money } from '$lib/data';
 	import { hasCapability, labelFor } from '$lib/capabilities';
+	import { notifyAction } from '$lib/stores/actionFeedback';
 	import type { Order } from '$lib/types';
+
 	let { data } = $props();
 	const initialData = untrack(() => data);
 	let liveOrders = $state<Order[]>(initialData.orders);
 	let stats = $state(initialData.stats);
+	let showNewOrder = $state(false);
+
 	const currentDate = new Date(initialData.currentDateIso);
-	const dateLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: '2-digit', month: 'long', timeZone: 'Asia/Kolkata' }).format(currentDate);
+	const dateLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kolkata' }).format(currentDate);
+	const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(currentDate);
 	const hour = Number(new Intl.DateTimeFormat('en-IN', { hour: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).format(currentDate).slice(0, 2));
 	const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
 	const orderLabel = $derived(labelFor(data.configuration?.profile, 'order'));
 	const orderPlural = $derived(labelFor(data.configuration?.profile, 'order', true));
 	const workerLabel = $derived(labelFor(data.configuration?.profile, 'staff'));
 	const staffEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, 'work.staff'));
-	const activeOrders = $derived(liveOrders.filter((order) => !['Historical', 'Completed'].includes(order.status)).sort((left, right) => Number(Boolean(right.important)) - Number(Boolean(left.important))));
+	const paymentsEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, 'billing.payments'));
+	const activeOrders = $derived(liveOrders
+		.filter((order) => !['Historical', 'Completed'].includes(order.status))
+		.sort((left, right) => Number(Boolean(right.important)) - Number(Boolean(left.important))));
 
-	let showNewOrder = $state(false);
-	let toast = $state('');
 	function assignedEditors(order: Order) {
 		const names = [...new Set(order.tasks.filter((task) => !task.archived && task.editorId).map((task) => task.assignee).filter(Boolean))];
-		return names.length ? names.join(', ') : 'Not assigned';
+		return names.length ? names.join(', ') : '';
 	}
+	const balanceOf = (order: Order) => (order.priceSet === false ? 0 : Math.max(0, order.price - order.discount - order.paid));
+
+	// Plain-language to-do list built from the loaded queue: the few things that need a person today.
+	type Attention = { order: Order; kind: 'overdue' | 'review' | 'balance' | 'unassigned'; text: string };
+	const attention = $derived.by(() => {
+		const items: Attention[] = [];
+		for (const order of activeOrders) {
+			const name = order.project || order.customer;
+			if (order.due && order.due.slice(0, 10) < todayIso && !['Delivered', 'Stopped'].includes(order.status)) items.push({ order, kind: 'overdue', text: `${name} was due ${formatDate(order.due)}` });
+			else if (order.status === 'Waiting Review') items.push({ order, kind: 'review', text: `${name} is waiting for your review` });
+			else if (order.status === 'Ready Delivery' && paymentsEnabled && balanceOf(order) > 0) items.push({ order, kind: 'balance', text: `${name} is ready, but ${money(balanceOf(order))} is still due` });
+			else if (staffEnabled && order.status === 'Received' && !assignedEditors(order)) items.push({ order, kind: 'unassigned', text: `${name} has no ${workerLabel.toLowerCase()} assigned yet` });
+		}
+		const rank = { overdue: 0, review: 1, balance: 2, unassigned: 3 };
+		return items.sort((a, b) => rank[a.kind] - rank[b.kind]).slice(0, 6);
+	});
+	const attentionIcon = { overdue: CalendarClock, review: Clock3, balance: Wallet, unassigned: UserPlus };
+
+	const statCards = $derived([
+		{ href: '/orders', icon: ClipboardList, value: stats.active, label: `Active ${orderPlural.toLowerCase()}`, hint: 'In progress right now' },
+		{ href: '/orders?status=Waiting%20Review', icon: Clock3, value: stats.waitingReview, label: 'Waiting for review', hint: 'Work submitted, needs your check' },
+		{ href: '/orders?status=Ready%20Delivery', icon: PackageCheck, value: stats.readyDelivery, label: 'Ready to deliver', hint: 'Finished, not handed over yet' },
+		{ href: '/orders?status=Delivered', icon: CircleCheckBig, value: stats.delivered, label: 'Delivered', hint: 'Handed over to the customer' }
+	]);
+
 	function saved(order: Order, synced: boolean) {
 		liveOrders = [order, ...liveOrders].slice(0, 20);
 		stats = { ...stats, active: stats.active + 1 };
-		toast = synced ? `${orderLabel} created and synced to Sheets` : `${orderLabel} created; Sheet sync is pending or not configured`;
-		setTimeout(() => (toast = ''), 2600);
+		notifyAction(synced ? `${orderLabel} created.` : `${orderLabel} created. Google Sheets will update when the connection is available.`);
 	}
 </script>
 
-<PageHeader eyebrow={`${greeting} · ${dateLabel}`} title="Operations overview" action={`New ${orderLabel.toLowerCase()}`} onclick={() => (showNewOrder = true)} />
+<PageHeader eyebrow={`${greeting} · ${dateLabel}`} title="Overview" action={allowed('orders.edit') ? `New ${orderLabel.toLowerCase()}` : undefined} onclick={() => (showNewOrder = true)} />
+{#if page.url.searchParams.get('denied')}<p class="denied" role="status">You don't have access to that page. Ask your workspace admin if you need it.</p>{/if}
 
-<section class="stat-grid">
-	<a href="/orders" class="card stat-card active-stat"><div class="stat-top"><span class="stat-icon"><ClipboardList size={19}/></span><small><i></i>Workflow</small></div><div class="stat-row"><strong>{stats.active}</strong><div><span>Active {orderPlural.toLowerCase()}</span><p>Currently moving through the workflow</p></div></div><div class="stat-footer"><span>Open all {orderPlural.toLowerCase()}</span><ArrowUpRight size={14}/></div></a>
-	<a href="/orders?status=Waiting%20Review" class="card stat-card review-stat"><div class="stat-top"><span class="stat-icon"><Clock3 size={19}/></span><small><i></i>Approval</small></div><div class="stat-row"><strong>{stats.waitingReview}</strong><div><span>Waiting review</span><p>Submitted and awaiting approval</p></div></div><div class="stat-footer"><span>Review submitted work</span><ArrowUpRight size={14}/></div></a>
-	<a href="/orders?status=Ready%20Delivery" class="card stat-card ready-stat"><div class="stat-top"><span class="stat-icon"><PackageCheck size={19}/></span><small><i></i>Delivery</small></div><div class="stat-row"><strong>{stats.readyDelivery}</strong><div><span>Ready to deliver</span><p>Notify customer and collect balance</p></div></div><div class="stat-footer"><span>Open delivery queue</span><ArrowUpRight size={14}/></div></a>
-	<a href="/orders?status=Delivered" class="card stat-card delivered-stat"><div class="stat-top"><span class="stat-icon"><CircleCheckBig size={19}/></span><small><i></i>Completed</small></div><div class="stat-row"><strong>{stats.delivered}</strong><div><span>Delivered</span><p>Completed customer handovers</p></div></div><div class="stat-footer"><span>View delivery history</span><ArrowUpRight size={14}/></div></a>
-</section>
-
-	<section class="card active-orders">
-	<div class="card-header"><h2>Active {orderPlural.toLowerCase()}</h2><a href="/orders">View all <ArrowUpRight size={12}/></a></div>
-	<div class="order-list">
-		{#each activeOrders as order}
-		<a class="order-row" href={'/orders/' + order.id}>
-			<span class="order-mark" style:background={order.color}></span>
-			<div class="order-main"><strong>{#if order.important}<Star class="important-star" size={13} fill="currentColor" aria-label={`Important ${orderLabel.toLowerCase()}`}/>{/if}{order.project}</strong><small>{order.customer} · {order.workType}</small>{#if staffEnabled}<small class:unassigned={assignedEditors(order) === 'Not assigned'} class="editor-summary"><UserRound size={11}/> <span>{workerLabel}: {assignedEditors(order)}</span></small>{/if}</div>
-			<StatusBadge status={order.status}/>
-			<div class="order-progress"><div class="progress-label"><span>Progress</span><b>{order.progress}%</b></div><div class="progress"><span style:width={order.progress + '%'}></span></div></div>
-			<span class="due">{order.due ? `Due ${formatDate(order.due)}` : 'No due date'}</span>
-			<ArrowUpRight size={15}/>
+<section class="stats" aria-label="Summary">
+	{#each statCards as stat}
+		{@const Icon = stat.icon}
+		<a class="card stat" href={stat.href}>
+			<span class="stat-label"><Icon size={16} aria-hidden="true" />{stat.label}</span>
+			<strong>{stat.value}</strong>
+			<span class="stat-hint">{stat.hint}</span>
 		</a>
-		{:else}
-			<div class="empty-orders">
-				<span><ClipboardList size={22}/></span>
-				<div><strong>No active {orderPlural.toLowerCase()}</strong><p>Create your first {orderLabel.toLowerCase()} to start tracking the workflow.</p></div>
-				<button type="button" class="secondary" onclick={() => (showNewOrder = true)}>Create {orderLabel.toLowerCase()}</button>
-			</div>
-		{/each}
-	</div>
+	{/each}
 </section>
 
-<NewOrderModal bind:open={showNewOrder} onsaved={saved}/>
-{#if toast}<div class="toast" role="status" aria-live="polite"><Check size={15}/> {toast}</div>{/if}
+<div class="columns">
+	<section class="card panel attention" aria-labelledby="attention-title">
+		<header class="panel-head"><h2 id="attention-title">Needs attention</h2></header>
+		{#if attention.length}
+			<ul class="attention-list">
+				{#each attention as item (item.order.id + item.kind)}
+					{@const Icon = attentionIcon[item.kind]}
+					<li><a href={'/orders/' + item.order.id} class={`attention-item ${item.kind}`}>
+						<span class="attention-icon"><Icon size={16} aria-hidden="true" /></span>
+						<span class="attention-text">{item.text}</span>
+						<ArrowRight size={15} aria-hidden="true" />
+					</a></li>
+				{/each}
+			</ul>
+		{:else}
+			<div class="all-clear"><CircleCheckBig size={20} aria-hidden="true" /><p><strong>All clear.</strong> Nothing is overdue or waiting on you.</p></div>
+		{/if}
+	</section>
+
+	<section class="card panel queue" aria-labelledby="queue-title">
+		<header class="panel-head"><h2 id="queue-title">Active {orderPlural.toLowerCase()}</h2><a href="/orders">See all <ArrowRight size={14} aria-hidden="true" /></a></header>
+		{#if activeOrders.length}
+			<ul class="queue-list">
+				{#each activeOrders as order (order.id)}
+					<li><a class="queue-row" href={'/orders/' + order.id}>
+						<span class="queue-main">
+							<strong>{#if order.important}<Star class="important-star" size={13} fill="currentColor" aria-label="Important" />{/if}{order.project}</strong>
+							<small>{order.customer}{order.workType ? ` · ${order.workType}` : ''}</small>
+							{#if staffEnabled}<small class="queue-staff" class:unassigned={!assignedEditors(order)}><UserRound size={12} aria-hidden="true" />{assignedEditors(order) ? `${workerLabel}: ${assignedEditors(order)}` : `No ${workerLabel.toLowerCase()} assigned`}</small>{/if}
+						</span>
+						<span class="queue-status"><StatusBadge status={order.status} /></span>
+						<span class="queue-progress" aria-label={`Progress ${order.progress}%`}>
+							<span class="bar"><span style:width={order.progress + '%'}></span></span>
+							<small>{order.progress}%</small>
+						</span>
+						<span class="queue-due" class:late={order.due && order.due.slice(0, 10) < todayIso}>{order.due ? `Due ${formatDate(order.due)}` : 'No due date'}</span>
+					</a></li>
+				{/each}
+			</ul>
+		{:else}
+			<div class="empty">
+				<ClipboardList size={22} aria-hidden="true" />
+				<p><strong>No active {orderPlural.toLowerCase()} yet.</strong> Create one to start tracking work.</p>
+				{#if allowed('orders.edit')}<button type="button" class="secondary" onclick={() => (showNewOrder = true)}>New {orderLabel.toLowerCase()}</button>{/if}
+			</div>
+		{/if}
+	</section>
+</div>
+
+<NewOrderModal bind:open={showNewOrder} onsaved={saved} />
 
 <style>
-	.card-header a { display: flex; gap: 5px; align-items: center; }
-	.stat-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.stat-card{position:relative;overflow:hidden;padding:18px;min-height:164px;border:1px solid color-mix(in srgb,var(--stat-color) 28%,var(--line));background:linear-gradient(150deg,color-mix(in srgb,var(--stat-color) 8%,var(--card)),var(--card) 56%);color:inherit;display:flex;flex-direction:column;transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}.stat-card::before{content:'';position:absolute;inset:0 auto 0 0;width:3px;background:var(--stat-color)}.stat-card::after{content:'';position:absolute;width:120px;height:120px;border-radius:50%;right:-58px;top:-62px;background:color-mix(in srgb,var(--stat-color) 11%,transparent);pointer-events:none}.stat-card:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--stat-color) 62%,var(--line));box-shadow:0 18px 38px color-mix(in srgb,var(--stat-color) 14%,transparent)}.stat-card:focus-visible{outline:3px solid color-mix(in srgb,var(--stat-color) 38%,transparent);outline-offset:3px}
-	.active-stat{--stat-color:#6366f1}.review-stat{--stat-color:#f59e0b}.ready-stat{--stat-color:#14b8a6}.delivered-stat{--stat-color:#22c55e}
-	.stat-top{display:flex;align-items:center;justify-content:space-between}.stat-top small{color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.11em;display:flex;align-items:center;gap:6px;font-weight:700}.stat-top small i{width:6px;height:6px;border-radius:50%;background:var(--stat-color);box-shadow:0 0 0 4px color-mix(in srgb,var(--stat-color) 12%,transparent)}.stat-icon{width:39px;height:39px;border-radius:10px;background:color-mix(in srgb,var(--stat-color) 13%,transparent);border:1px solid color-mix(in srgb,var(--stat-color) 22%,transparent);color:var(--stat-color);display:grid;place-items:center}.stat-row{display:flex;align-items:center;gap:13px;margin-top:17px}.stat-row strong{font-size:32px;line-height:1;font-variant-numeric:tabular-nums}.stat-row>div{min-width:0}.stat-row span{display:block;font-size:11px;font-weight:720}.stat-row p{margin:4px 0 0;color:var(--muted);font-size:8.5px;line-height:1.45}.stat-footer{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:13px;border-top:1px solid color-mix(in srgb,var(--stat-color) 18%,var(--line));color:color-mix(in srgb,var(--stat-color) 78%,var(--text));font-size:8.5px;font-weight:650}.stat-footer :global(svg){transition:transform .18s ease}.stat-card:hover .stat-footer :global(svg){transform:translate(2px,-2px)}
-	.active-orders { overflow: hidden; }
-	.order-list { max-height: 420px; overflow-y: auto; scrollbar-gutter: stable; }
-	.order-row { display: grid; grid-template-columns: 4px minmax(150px, 1.5fr) 120px 160px 80px 18px; gap: 18px; align-items: center; padding: 18px 20px; border-bottom: 1px solid #252832; transition: .15s; }
-	.order-row:last-child { border: 0; }
-	.order-row:hover { background: #ffffff05; }
-	.order-mark { height: 33px; width: 3px; border-radius: 2px; }
-	.order-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-	.order-main strong { font-size: 12px; font-weight: 600; display:flex;align-items:center;gap:6px; }
-	.order-main strong :global(.important-star){color:#ef4444;flex:0 0 auto}
-	.order-main small, .due { font-size: 10px; color: var(--muted); }
-	.editor-summary{display:flex!important;align-items:center;gap:5px;color:var(--purple)!important}.editor-summary.unassigned{color:var(--muted)!important}.editor-summary :global(svg){flex:0 0 auto}
-	.order-progress b { font-weight: 600; color: var(--theme-text); }
-	.order-row > :global(svg) { color: var(--muted); }
-	.empty-orders{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;padding:28px 20px}.empty-orders>span{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:var(--theme-soft);color:var(--purple)}.empty-orders strong{font-size:12px}.empty-orders p{margin:5px 0 0;color:var(--muted);font-size:10px}.empty-orders button{white-space:nowrap}
-	.toast { position: fixed; right: 24px; bottom: 24px; z-index: 100; display: flex; align-items: center; gap: 9px; border: 1px solid #22c55e40; background: #17231d; color: #8ee3ad; padding: 12px 15px; border-radius: 9px; font-size: 11px; box-shadow: 0 15px 50px #0008; }
-	@media (max-width: 1080px) { .stat-grid{grid-template-columns:repeat(2,1fr)}.order-row { grid-template-columns: 4px minmax(150px, 1fr) 110px 120px 18px; } .due { display: none; } }
-	@media (max-width: 820px) { .stat-grid{grid-template-columns:repeat(2,1fr)}.stat-card{min-height:150px;padding:15px 16px}.stat-row{margin-top:13px} }
-	@media (max-width: 650px) { .stat-grid{gap:10px}.stat-card{min-height:122px;padding:13px}.stat-top small{font-size:7px}.stat-icon{width:32px;height:32px}.stat-row{gap:8px;margin-top:11px}.stat-row strong{font-size:25px}.stat-row span{font-size:10px}.stat-row p,.stat-footer{display:none}.order-row { grid-template-columns: 4px minmax(0,1fr) auto 16px; gap:10px;padding: 15px; } .order-progress { display: none; } .order-row :global(.badge){display:inline-flex;font-size:8px}.editor-summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.empty-orders{grid-template-columns:auto 1fr;padding:22px 15px}.empty-orders button{grid-column:1/-1;width:100%} }
-	@media (max-width: 470px) { .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.active-stat{grid-column:auto}.stat-card{min-height:118px}.stat-row{align-items:flex-end;flex-direction:column;gap:4px}.stat-row strong{align-self:flex-start}.stat-row>div{width:100%} }
-	:global(html[data-theme="dark"]) .stat-card{background:linear-gradient(145deg,color-mix(in srgb,var(--stat-color) 17%,var(--card)),var(--card) 58%,color-mix(in srgb,var(--stat-color) 7%,var(--card)))!important;border-color:color-mix(in srgb,var(--stat-color) 42%,var(--line))!important;box-shadow:0 16px 38px color-mix(in srgb,var(--stat-color) 11%,#000),inset 0 1px color-mix(in srgb,var(--stat-color) 14%,transparent)!important}
-	:global(html[data-theme="dark"]) .stat-icon{background:color-mix(in srgb,var(--stat-color) 23%,var(--card));border:1px solid color-mix(in srgb,var(--stat-color) 38%,transparent);box-shadow:0 8px 22px color-mix(in srgb,var(--stat-color) 14%,transparent)}
-	:global(html[data-theme="dark"]) .active-orders{background:linear-gradient(155deg,color-mix(in srgb,var(--purple) 7%,var(--card)),var(--card) 62%,color-mix(in srgb,#38bdf8 4%,var(--card)))}
-	:global(html[data-theme="dark"]) .order-row{border-bottom-color:color-mix(in srgb,var(--purple) 17%,var(--line));transition:background .22s ease,transform .22s ease,box-shadow .22s ease}
-	:global(html[data-theme="dark"]) .order-row:hover{background:linear-gradient(90deg,color-mix(in srgb,var(--purple) 14%,transparent),color-mix(in srgb,#38bdf8 5%,transparent));box-shadow:inset 3px 0 var(--purple);transform:translateX(3px)}
-	:global(html[data-theme="dark"]) .order-mark{box-shadow:0 0 12px color-mix(in srgb,var(--purple) 42%,transparent)}
-	 :global(html[data-theme="light"]) .stat-card{color:#0f172a!important;background:linear-gradient(145deg,color-mix(in srgb,var(--stat-color) 9%,#fff),#fff 64%)!important;border:1px solid color-mix(in srgb,var(--stat-color) 22%,#e2e8f0)!important;border-top:3px solid var(--stat-color)!important;box-shadow:0 12px 34px color-mix(in srgb,var(--stat-color) 13%,transparent)!important} :global(html[data-theme="light"]) .stat-card::after{display:none} :global(html[data-theme="light"]) .stat-row strong{color:#0f172a;text-shadow:none} :global(html[data-theme="light"]) .stat-row span{color:#334155} :global(html[data-theme="light"]) .stat-icon{background:color-mix(in srgb,var(--stat-color) 12%,#fff)!important;color:var(--stat-color)!important;border-color:color-mix(in srgb,var(--stat-color) 22%,transparent)!important} :global(html[data-theme="light"]) .active-orders{ background: #ffffffeb; } :global(html[data-theme="light"]) .order-row{ border-bottom-color: #e2e8f0; transition: background .22s ease, transform .22s ease, box-shadow .22s ease; } :global(html[data-theme="light"]) .order-row:hover{ background: linear-gradient(90deg, #eef2ff91, #f0f9ff91); transform: translateX(3px); box-shadow: inset 3px 0 #6366f1; } :global(html[data-theme="light"]) .order-mark{ box-shadow: 0 0 0 4px #6366f112; } :global(html[data-theme="light"]) .order-main strong{ color: #0f172a; } :global(html[data-theme="light"]) .order-main small,:global(html[data-theme="light"]) .due{ color: #64748b; } :global(html[data-theme="light"]) .order-progress b{ color: #334155; } :global(html[data-theme="light"]) .order-row > :global(svg){ color: #818cf8; } :global(html[data-theme="light"]) .toast{ border-color: #10b98133; background: linear-gradient(135deg, #ecfdf5, #ffffff); color: #047857; box-shadow: 0 18px 55px #10b98120; }
+	.denied { margin: 0 0 16px; padding: 10px 14px; border: 1px solid color-mix(in srgb, #d97706 40%, var(--line)); border-radius: 10px; background: color-mix(in srgb, #f59e0b 10%, var(--card)); color: var(--theme-text); font-size: 14px; }
+	.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+	.stat { display: flex; flex-direction: column; gap: 6px; padding: 18px; color: inherit; text-decoration: none; transition: border-color .15s ease; }
+	.stat:hover { border-color: color-mix(in srgb, var(--purple) 45%, var(--line)); }
+	.stat:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+	.stat-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--theme-text); }
+	.stat-label :global(svg) { color: var(--purple); }
+	.stat strong { font-size: 30px; line-height: 1.1; font-weight: 700; color: var(--theme-text); letter-spacing: -.02em; }
+	.stat-hint { font-size: 12.5px; color: var(--muted); }
+
+	.columns { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); gap: 14px; align-items: start; }
+	.panel { padding: 0; overflow: hidden; }
+	.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+	.panel-head h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--theme-text); }
+	.panel-head a { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--purple); text-decoration: none; }
+	.panel-head a:hover { text-decoration: underline; }
+	ul { list-style: none; margin: 0; padding: 0; }
+
+	.attention-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); color: var(--theme-text); text-decoration: none; font-size: 13.5px; line-height: 1.4; transition: background-color .15s ease; }
+	li:last-child .attention-item { border-bottom: 0; }
+	.attention-item:hover { background: var(--theme-soft); }
+	.attention-item > :global(svg) { color: var(--muted); }
+	.attention-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tone); }
+	.overdue { --tone: #dc2626; }
+	.review { --tone: #d97706; }
+	.balance { --tone: #2563eb; }
+	.unassigned { --tone: #7c3aed; }
+	.all-clear, .empty { display: flex; align-items: center; gap: 12px; padding: 22px 18px; color: var(--muted); font-size: 13.5px; }
+	.all-clear :global(svg) { color: #16a34a; flex: 0 0 auto; }
+	.all-clear p, .empty p { margin: 0; }
+	.all-clear strong, .empty strong { color: var(--theme-text); }
+	.empty { flex-wrap: wrap; }
+
+	.queue-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 120px 110px; align-items: center; gap: 16px; padding: 13px 18px; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; transition: background-color .15s ease; }
+	li:last-child .queue-row { border-bottom: 0; }
+	.queue-row:hover { background: var(--theme-soft); }
+	.queue-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+	.queue-main strong { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--theme-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.queue-main :global(.important-star) { color: #e11d48; flex: 0 0 auto; }
+	.queue-main small { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.queue-staff { display: inline-flex; align-items: center; gap: 5px; }
+	.queue-staff.unassigned { color: #b45309; }
+	.queue-progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
+	.queue-progress small { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+	.bar { height: 6px; border-radius: 6px; background: var(--theme-soft); overflow: hidden; }
+	.bar span { display: block; height: 100%; background: var(--purple); border-radius: inherit; }
+	.queue-due { font-size: 12.5px; color: var(--muted); text-align: right; white-space: nowrap; }
+	.queue-due.late { color: #dc2626; font-weight: 600; }
+
+	@media (max-width: 1100px) {
+		.columns { grid-template-columns: 1fr; }
+	}
+	@media (max-width: 900px) {
+		.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.queue-row { grid-template-columns: minmax(0, 1fr) auto; }
+		.queue-progress, .queue-due { grid-column: 1 / -1; }
+		.queue-due { text-align: left; }
+	}
+	@media (max-width: 480px) {
+		.stat { padding: 14px; }
+		.stat strong { font-size: 26px; }
+	}
 </style>

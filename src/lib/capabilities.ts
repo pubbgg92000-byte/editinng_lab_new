@@ -193,7 +193,65 @@ export const builtInPackages: NichePackage[] = [
 		field('order', 'property_location', 'Property location', 'url', 1),
 		field('order', 'unit_reference', 'Unit / property reference', 'text', 2, true)
 	], { categories: ['Plumbing', 'Electrical', 'Cleaning', 'Inspection', 'General maintenance'] }), ['billing.duration']),
-	pkg('general-service', 'General Service Business', 'Flexible customers, jobs, staff, work items and billing.', baseProfile('general-service', terms({ order: ['Job', 'Jobs'], staff: ['Staff Member', 'Staff'], task: ['Work Item', 'Work Items'], category: ['Service Type', 'Service Types'], project: ['Job Name', 'Job Names'], dueDate: ['Due date', 'Due dates'], delivery: ['Completion', 'Completions'], assignedAsset: ['Asset', 'Assets'] })), ['billing.duration'])
+	pkg('general-service', 'General Service Business', 'Flexible customers, jobs, staff, work items and billing.', baseProfile('general-service', terms({ order: ['Job', 'Jobs'], staff: ['Staff Member', 'Staff'], task: ['Work Item', 'Work Items'], category: ['Service Type', 'Service Types'], project: ['Job Name', 'Job Names'], dueDate: ['Due date', 'Due dates'], delivery: ['Completion', 'Completions'], assignedAsset: ['Asset', 'Assets'] })), ['billing.duration']),
+	// Starter niches (N3). Data only; they reuse the same workflow and capabilities.
+	pkg('car-garage', 'Car Garage (Detailed)', 'Detailed job cards with vehicle intake, mechanics, work items, billing and pickup.', baseProfile('car-garage', terms({ order: ['Job Card', 'Job Cards'], staff: ['Mechanic', 'Mechanics'], task: ['Work Item', 'Work Items'], category: ['Service Type', 'Service Types'], project: ['Vehicle', 'Vehicles'], dueDate: ['Promised date', 'Promised dates'], delivery: ['Pickup', 'Pickups'], assignedAsset: ['Bay', 'Bays'] }), [
+		field('order', 'vehicle_registration', 'Vehicle registration', 'text', 1, true),
+		field('order', 'vehicle_make_model', 'Make / model', 'text', 2),
+		field('order', 'odometer', 'Odometer (km)', 'number', 3),
+		field('order', 'fuel_level', 'Fuel level', 'select', 4, false, ['Empty', 'Quarter', 'Half', 'Three quarters', 'Full']),
+		field('order', 'customer_complaint', 'Customer complaint', 'textarea', 5),
+		field('order', 'insurance_claim', 'Insurance claim', 'checkbox', 6)
+	], { categories: ['Periodic service', 'Repair', 'Denting & painting', 'AC service', 'Tyres & alignment', 'Inspection'] }), ['billing.duration']),
+	pkg('bike-service', 'Bike Service', 'Two-wheeler job cards, mechanics, service items, billing and pickup.', baseProfile('bike-service', terms({ order: ['Job Card', 'Job Cards'], staff: ['Mechanic', 'Mechanics'], task: ['Service Item', 'Service Items'], category: ['Service Type', 'Service Types'], project: ['Bike', 'Bikes'], dueDate: ['Promised date', 'Promised dates'], delivery: ['Pickup', 'Pickups'], assignedAsset: ['Tool', 'Tools'] }), [
+		field('order', 'bike_registration', 'Bike registration', 'text', 1, true),
+		field('order', 'bike_model', 'Bike model', 'text', 2),
+		field('order', 'odometer', 'Odometer (km)', 'number', 3),
+		field('order', 'customer_complaint', 'Customer complaint', 'textarea', 4)
+	], { categories: ['General service', 'Repair', 'Oil change', 'Brakes', 'Electrical'] }), ['billing.duration']),
+	pkg('hospital-front-desk', 'Hospital Front Desk (OPD)', 'OPD visits, doctors, appointments and billing. Front desk only; not for medical records.', baseProfile('hospital-front-desk', terms({ customer: ['Patient', 'Patients'], order: ['Visit', 'Visits'], staff: ['Doctor', 'Doctors'], task: ['Service', 'Services'], category: ['Department', 'Departments'], project: ['Visit reason', 'Visit reasons'], dueDate: ['Visit date', 'Visit dates'], delivery: ['Checkout', 'Checkouts'], assignedAsset: ['Room', 'Rooms'] }), [
+		field('order', 'appointment_at', 'Appointment date and time', 'datetime', 1, true),
+		field('order', 'visit_type', 'Visit type', 'select', 2, false, ['First visit', 'Follow-up', 'Review']),
+		field('customer', 'patient_age', 'Age', 'number', 3),
+		field('order', 'referred_by', 'Referred by', 'text', 4)
+	], { categories: ['General medicine', 'Paediatrics', 'Orthopaedics', 'Gynaecology', 'ENT', 'Other'] }), ['workflow.delivery', 'billing.partialInvoices', 'billing.duration']),
+	pkg('dental-clinic', 'Dental Clinic', 'Appointments, dentists, procedures, payments and follow-up visits.', baseProfile('dental-clinic', terms({ customer: ['Patient', 'Patients'], order: ['Appointment', 'Appointments'], staff: ['Dentist', 'Dentists'], task: ['Procedure', 'Procedures'], category: ['Treatment Type', 'Treatment Types'], project: ['Treatment', 'Treatments'], dueDate: ['Appointment date', 'Appointment dates'], delivery: ['Checkout', 'Checkouts'], assignedAsset: ['Chair', 'Chairs'] }), [
+		field('order', 'appointment_at', 'Appointment date and time', 'datetime', 1, true),
+		field('order', 'tooth_reference', 'Tooth / area', 'text', 2),
+		field('order', 'next_visit', 'Next visit', 'date', 3)
+	], { categories: ['Consultation', 'Cleaning', 'Filling', 'Root canal', 'Extraction', 'Braces'] }), ['workflow.delivery', 'billing.duration']),
+	pkg('diagnostic-lab', 'Diagnostic Lab (Sample Tracking)', 'Test orders, sample tracking, technicians, billing and report handover.', baseProfile('diagnostic-lab', terms({ customer: ['Patient', 'Patients'], order: ['Test Order', 'Test Orders'], staff: ['Technician', 'Technicians'], task: ['Test', 'Tests'], category: ['Test Category', 'Test Categories'], project: ['Sample', 'Samples'], dueDate: ['Report date', 'Report dates'], delivery: ['Report Handover', 'Report Handovers'], assignedAsset: ['Analyzer', 'Analyzers'] }), [
+		field('order', 'sample_id', 'Sample ID', 'text', 1, true),
+		field('order', 'sample_type', 'Sample type', 'select', 2, false, ['Blood', 'Urine', 'Swab', 'Other']),
+		field('order', 'collected_at', 'Collected at', 'datetime', 3),
+		field('order', 'referred_by', 'Referred by', 'text', 4)
+	], { categories: ['Blood tests', 'Urine tests', 'Imaging', 'Health package', 'Other'] }), ['billing.partialInvoices', 'billing.duration']),
+	pkg('tailoring', 'Tailoring / Boutique', 'Stitching orders, measurements, tailors, trials, billing and pickup.', baseProfile('tailoring', terms({ order: ['Stitching Order', 'Stitching Orders'], staff: ['Tailor', 'Tailors'], task: ['Garment', 'Garments'], category: ['Garment Type', 'Garment Types'], project: ['Outfit', 'Outfits'], dueDate: ['Ready date', 'Ready dates'], delivery: ['Pickup', 'Pickups'], assignedAsset: ['Machine', 'Machines'] }), [
+		field('customer', 'measurements', 'Measurements', 'textarea', 1),
+		field('order', 'trial_date', 'Trial date', 'date', 2),
+		field('order', 'fabric_provided', 'Customer gave fabric', 'checkbox', 3)
+	], { categories: ['Blouse', 'Kurta', 'Suit', 'Lehenga', 'Shirt', 'Alteration'] }), ['billing.duration']),
+	pkg('photo-studio', 'Photo Studio', 'Shoots, photographers, shoot tasks, prints, billing and delivery.', baseProfile('photo-studio', terms({ customer: ['Client', 'Clients'], order: ['Shoot', 'Shoots'], staff: ['Photographer', 'Photographers'], task: ['Shoot Task', 'Shoot Tasks'], category: ['Shoot Type', 'Shoot Types'], project: ['Shoot title', 'Shoot titles'], dueDate: ['Delivery date', 'Delivery dates'], delivery: ['Delivery', 'Deliveries'], assignedAsset: ['Camera', 'Cameras'] }), [
+		field('order', 'shoot_at', 'Shoot date and time', 'datetime', 1),
+		field('order', 'shoot_location', 'Shoot location', 'text', 2),
+		field('order', 'prints_count', 'Number of prints', 'number', 3)
+	], { categories: ['Portrait', 'Passport', 'Family', 'Product', 'Corporate', 'Event'] })),
+	pkg('printing-press', 'Printing Press', 'Print jobs, proofs, operators, production steps, billing and dispatch.', baseProfile('printing-press', terms({ order: ['Print Job', 'Print Jobs'], staff: ['Operator', 'Operators'], task: ['Production Step', 'Production Steps'], category: ['Print Type', 'Print Types'], project: ['Job title', 'Job titles'], dueDate: ['Ready date', 'Ready dates'], delivery: ['Dispatch', 'Dispatches'], assignedAsset: ['Machine', 'Machines'] }), [
+		field('order', 'quantity', 'Quantity', 'number', 1, true),
+		field('order', 'paper_size', 'Paper size', 'select', 2, false, ['A4', 'A3', 'Letter', 'Custom']),
+		field('order', 'paper_type', 'Paper type', 'text', 3),
+		field('order', 'proof_approved', 'Proof approved', 'checkbox', 4)
+	], { categories: ['Visiting cards', 'Flyers', 'Banners', 'Invitations', 'Books', 'Stickers'] }), ['billing.duration']),
+	pkg('laundry', 'Laundry / Dry Cleaning', 'Laundry orders, items, staff, express service, billing and returns.', baseProfile('laundry', terms({ order: ['Laundry Order', 'Laundry Orders'], staff: ['Staff Member', 'Staff'], task: ['Item', 'Items'], category: ['Service Type', 'Service Types'], project: ['Bag', 'Bags'], dueDate: ['Ready date', 'Ready dates'], delivery: ['Return', 'Returns'], assignedAsset: ['Machine', 'Machines'] }), [
+		field('order', 'item_count', 'Number of items', 'number', 1, true),
+		field('order', 'express', 'Express service', 'checkbox', 2),
+		field('customer', 'pickup_address', 'Pickup address', 'textarea', 3)
+	], { categories: ['Wash & fold', 'Dry cleaning', 'Ironing', 'Shoe cleaning', 'Curtains'] }), ['billing.partialInvoices', 'billing.duration']),
+	pkg('interior-fitout', 'Interior / Fit-out', 'Interior projects, site supervisors, work packages, staged billing and handover.', baseProfile('interior-fitout', terms({ customer: ['Client', 'Clients'], order: ['Project', 'Projects'], staff: ['Site Supervisor', 'Site Supervisors'], task: ['Work Package', 'Work Packages'], category: ['Space Type', 'Space Types'], project: ['Site', 'Sites'], dueDate: ['Handover date', 'Handover dates'], delivery: ['Handover', 'Handovers'], assignedAsset: ['Tool', 'Tools'] }), [
+		field('order', 'site_address', 'Site address', 'textarea', 1, true),
+		field('order', 'area_sqft', 'Area (sq ft)', 'number', 2),
+		field('order', 'design_approved', 'Design approved', 'checkbox', 3)
+	], { categories: ['Kitchen', 'Bedroom', 'Living room', 'Office', 'Full home'] }), ['billing.duration'])
 ];
 
 export const defaultPackage = builtInPackages[0];

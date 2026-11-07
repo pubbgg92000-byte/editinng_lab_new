@@ -11,7 +11,7 @@ export const GET = async ({ cookies, locals }) => {
 
 export const POST = async ({ request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	try {
 		return json({ options: await addEventOption(await readyDatabase(locals.tenant), String(input.name || '')) }, { status: 201 });
 	} catch (cause) {
@@ -21,6 +21,6 @@ export const POST = async ({ request, cookies, locals }) => {
 
 export const DELETE = async ({ request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	return json({ options: await deleteEventOption(await readyDatabase(locals.tenant), String(input.name || '')) });
 };

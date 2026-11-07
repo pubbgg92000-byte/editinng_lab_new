@@ -6,13 +6,15 @@ import { flushSheetSync, validateSheetConnection } from '$lib/server/googleSheet
 import { applyNichePackage, createConfigurationSnapshot, listConfigurationSnapshots, restoreConfigurationSnapshot, updateSettings } from '$lib/server/repository';
 import { resetDemoTenant } from '$lib/server/demo';
 import type { BusinessTerminology, CustomFieldDefinition, CustomFieldEntity, CustomFieldType, Tenant, TenantStatus } from '$lib/types';
-import { capabilityKeys, capabilityRegistry } from '$lib/capabilities';
+import { builtInPackages, capabilityKeys, capabilityRegistry } from '$lib/capabilities';
 import { getTenantConfiguration, saveModuleConfiguration, saveTenantPreferences } from '$lib/server/configuration';
 import { normalizePackageModuleConfiguration, validateModuleConfiguration } from '$lib/moduleConfiguration';
 import { getDatabaseStorageUsage } from '$lib/server/maintenance';
 import { themePalettes } from '$lib/theme';
 
 const field = (form: FormData, name: string) => String(form.get(name) || '').trim();
+// Passwords are compared exactly as typed at login, so they must be stored untrimmed.
+const secret = (form: FormData, name: string) => String(form.get(name) || '');
 const message = (cause: unknown) => cause instanceof Error ? cause.message : 'The operation failed.';
 const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const terminologyKeys: (keyof BusinessTerminology)[] = ['customer', 'order', 'staff', 'task', 'category', 'project', 'dueDate', 'delivery', 'assignedAsset'];
@@ -51,17 +53,17 @@ export const load = async ({ locals }) => {
 			};
 		}
 	}));
-	return { account: locals.account, tenants: enrichedTenants, packages, capabilityDefinitions: capabilityKeys.map((key) => capabilityRegistry[key]) };
+	return { account: locals.account, tenants: enrichedTenants, packages, builtInIds: builtInPackages.map((item) => item.id), capabilityDefinitions: capabilityKeys.map((key) => capabilityRegistry[key]) };
 };
 
 export const actions = {
 	create: async ({ request, locals }) => {
 		const form = await request.formData();
-		const passwordConfirm = field(form, 'passwordConfirm');
+		const passwordConfirm = secret(form, 'passwordConfirm');
 		const input = {
 			internalName: field(form, 'internalName'), slug: field(form, 'slug').toLowerCase(), studioName: field(form, 'studioName'),
 			logoUrl: field(form, 'logoUrl'), databaseUrl: field(form, 'databaseUrl'), googleSheetId: field(form, 'googleSheetId'),
-			ordersTab: field(form, 'ordersTab') || 'Orders', email: field(form, 'email').toLowerCase(), password: field(form, 'password'),
+			ordersTab: field(form, 'ordersTab') || 'Orders', email: field(form, 'email').toLowerCase(), password: secret(form, 'password'),
 			isDemo: form.get('isDemo') === 'on', status: 'draft' as TenantStatus, packageId: field(form, 'packageId') || 'editing-studio'
 		};
 		if (!input.internalName || !input.studioName || !input.email || !input.databaseUrl || !input.googleSheetId) return fail(400, { action: 'create', error: 'Workspace name, display name, administrator email, Neon URL, and Sheet ID are required.' });
@@ -183,11 +185,17 @@ export const actions = {
 			moduleConfiguration['work.staffPortal'].progressMode = progressMode as typeof moduleConfiguration['work.staffPortal']['progressMode'];
 		}
 		if (['digital', 'pickup', 'appointment', 'fulfilment', 'handover', 'completion'].includes(deliveryExperience)) moduleConfiguration['portal.customer'].deliveryExperience = deliveryExperience as typeof moduleConfiguration['portal.customer']['deliveryExperience'];
+		// Optional status renames from the builder; only existing status keys, meaning and order unchanged.
+		const statuses = structuredClone(base.profile.statuses);
+		for (const key of Object.keys(statuses)) {
+			const label = field(form, `status:${key}:label`).slice(0, 40);
+			if (label) statuses[key] = { ...statuses[key], label };
+		}
 		const value = {
 			...base, id: packageId, name, description, version: 1, allowed, enabled: { ...allowed },
 			moduleConfiguration,
 			profile: {
-				...base.profile, presetId: packageId, presetVersion: 1, terminology,
+				...base.profile, presetId: packageId, presetVersion: 1, terminology, statuses,
 				customFields: [...base.profile.customFields.filter((item) => !customKeys.has(`${item.entity}:${item.key}`)), ...customFields],
 				optionLists: { ...base.profile.optionLists, categories: categories.length ? categories : base.profile.optionLists.categories || [] }
 			}
@@ -216,7 +224,8 @@ export const actions = {
 		try {
 			const target = databaseFromUrl(databaseUrl);
 			const assignment = await getTenantPackage(tenant.id);
-			await createConfigurationSnapshot(await readyDatabase(tenant), 'Before connection or branding change', { packageId: assignment.package.id, allowed: assignment.allowed });
+			// Best effort: the current database may be the broken thing being replaced.
+			await readyDatabase(tenant).then((current) => createConfigurationSnapshot(current, 'Before connection or branding change', { packageId: assignment.package.id, allowed: assignment.allowed })).catch(() => {});
 			await assertConnectionsAvailable(databaseUrl, googleSheetId, tenant.id);
 			const inspection = await inspectTenantDatabase(databaseUrl);
 			if (!inspection.compatible) throw new Error('The replacement database has an incompatible schema.');
@@ -251,9 +260,9 @@ export const actions = {
 		const form = await request.formData();
 		const status = field(form, 'status') as TenantStatus;
 		if (!['draft', 'active', 'suspended'].includes(status)) return fail(400, { action: 'status', error: 'Invalid status.' });
+		const tenant = await getTenantById(field(form, 'tenantId'));
+		if (!tenant) return fail(404, { action: 'status', error: 'Workspace not found.' });
 		if (status === 'active') {
-			const tenant = await getTenantById(field(form, 'tenantId'));
-			if (!tenant) return fail(404, { action: 'status', error: 'Workspace not found.' });
 			try {
 				const inspection = await inspectTenantDatabase(tenant.databaseUrl);
 				if (!inspection.compatible) throw new Error('The tenant database schema is incompatible.');
@@ -269,10 +278,10 @@ export const actions = {
 	},
 	credentials: async ({ request, locals }) => {
 		const form = await request.formData();
-		const password = field(form, 'password');
+		const password = secret(form, 'password');
 		const email = field(form, 'email').toLowerCase();
 		if (!validEmail(email)) return fail(400, { action: 'credentials', error: 'Enter a valid administrator email address.' });
-		if (password !== field(form, 'passwordConfirm')) return fail(400, { action: 'credentials', error: 'The new password and confirmation do not match.' });
+		if (password !== secret(form, 'passwordConfirm')) return fail(400, { action: 'credentials', error: 'The new password and confirmation do not match.' });
 		try {
 			await updateTenantCredentials(field(form, 'tenantId'), email, password, locals.account!.id);
 			return { action: 'credentials', success: 'Administrator login saved. Existing workspace sessions were signed out.' };
@@ -306,11 +315,11 @@ export const actions = {
 	},
 	ownerPassword: async ({ request, locals, cookies }) => {
 		const form = await request.formData();
-		const password = field(form, 'password');
-		if (password !== field(form, 'passwordConfirm')) return fail(400, { action: 'ownerPassword', error: 'The new administrator passwords do not match.' });
+		const password = secret(form, 'password');
+		if (password !== secret(form, 'passwordConfirm')) return fail(400, { action: 'ownerPassword', error: 'The new administrator passwords do not match.' });
 		try { await changeOwnerPassword(locals.account!.id, password); }
 		catch (cause) { return fail(400, { action: 'ownerPassword', error: message(cause) }); }
 		cookies.delete('studioflow_session', { path: '/' });
-		redirect(303, '/owner/login');
+		redirect(303, '/login');
 	}
 };

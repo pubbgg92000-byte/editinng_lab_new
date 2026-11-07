@@ -42,4 +42,4 @@
 	{#if error}<p class="error">{error}</p>{/if}
 	{#snippet footer()}<button type="button" class="secondary" disabled={saving} onclick={()=>open=false}>Cancel</button><button type="button" class="primary" disabled={saving} aria-busy={saving} onclick={save}>{saving?'Saving…':`Save ${staffLabel.toLowerCase()}`}</button>{/snippet}
 </Modal>
-<style>.location{margin-top:16px}.error{color:#ef4444;font-size:10px;margin-top:12px}</style>
+<style>.location{margin-top:16px}.error{color:#ef4444;font-size:12px;margin-top:12px}</style>

@@ -10,7 +10,10 @@ import { getTenantConfiguration } from '$lib/server/configuration';
 import { hasCapability, validateCustomValues } from '$lib/capabilities';
 
 export const PATCH = async ({ params, request, cookies, locals }) => {
-	const input = await request.json();
+	const input = await request.json().catch(() => null);
+	if (!input || typeof input !== 'object' || Array.isArray(input)) return json({ error: 'Invalid request body.' }, { status: 400 });
+	const taskStatuses = ['Not started', 'Files downloaded', 'In progress', 'Waiting for clarification', 'Ready for review', 'Revision required', 'Completed'];
+	if (input.status !== undefined && !taskStatuses.includes(input.status)) return json({ error: 'Choose a valid task status.' }, { status: 400 });
 	const linkError = taskLinkError(input);
 	if (linkError) return json({ error: `${linkError} Upload files externally and paste the link here.` }, { status: 400 });
 	if (input.videoDuration !== undefined) {
@@ -39,6 +42,10 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 	if (input.hourlyRate !== undefined && (!Number.isFinite(Number(input.hourlyRate)) || Number(input.hourlyRate) < 0)) return json({ error: 'Hourly rate must be zero or a positive number.' }, { status: 400 });
 	if (input.billingMode && !['manual', 'duration'].includes(input.billingMode)) return json({ error: 'Choose manual billing or duration billing.' }, { status: 400 });
 	if (input.editorSettlement && !['not-set', 'editor-bills-admin', 'admin-issues-statement'].includes(input.editorSettlement)) return json({ error: 'Choose a valid editor payment arrangement.' }, { status: 400 });
+	if (input.editorId) {
+		const editor = await database.prepare('SELECT id FROM editors WHERE id = ? AND archived_at IS NULL').bind(String(input.editorId)).first();
+		if (!editor) return json({ error: 'Choose an active team member.' }, { status: 400 });
+	}
 	let task;
 	try {
 		task = await updateTask(database, params.id, input, 'admin');
@@ -60,7 +67,7 @@ export const DELETE = async ({ params, cookies, locals }) => {
 
 export const POST = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	if (input.action !== 'restore') return json({ error: 'Unsupported action' }, { status: 400 });
 	const database = await readyDatabase(locals.tenant);
 	const task = await restoreTask(database, params.id);

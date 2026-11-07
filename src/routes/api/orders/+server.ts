@@ -27,7 +27,7 @@ export const GET = async ({ cookies, locals, url }) => {
 
 export const POST = async ({ request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	const orderInputs: Record<string, any>[] = Array.isArray(input.orders) ? input.orders : [input];
 	if (!orderInputs.length || orderInputs.length > 20) return json({ error: 'Create between 1 and 20 orders at a time.' }, { status: 400 });
 	if (!String(input.customer || '').trim() || orderInputs.some((item) => !String(item.event || '').trim() || !String(item.project || '').trim())) return json({ error: 'Studio name, event and project name are required for every order.' }, { status: 400 });

@@ -44,12 +44,18 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 			if (!durationTasks.length) return json({ error: 'No task has both an editor duration and hourly rate.' }, { status: 400 });
 			taskItems = durationTasks.map((task) => ({ taskId: task.id, name: `${task.name} · ${task.videoDurationMinutes} min`, amount: durationBillableAmount(task.hourlyRate, task.videoDurationMinutes) }));
 			subtotal = taskItems.reduce((sum, item) => sum + item.amount, 0);
-			for (const task of durationTasks) await updateTask(database, task.id, { billingMode: 'duration', hourlyRate: task.hourlyRate, videoDurationMinutes: task.videoDurationMinutes });
+			try {
+				for (const task of durationTasks) await updateTask(database, task.id, { billingMode: 'duration', hourlyRate: task.hourlyRate, videoDurationMinutes: task.videoDurationMinutes });
+			} catch (cause) {
+				return json({ error: cause instanceof Error ? cause.message : 'Unable to apply duration billing.' }, { status: 400 });
+			}
 		} else {
-			subtotal = Math.max(0, Number(input.manualSubtotal ?? order.price));
+			subtotal = Number(input.manualSubtotal ?? order.price);
+			if (!Number.isFinite(subtotal) || subtotal < 0) return json({ error: 'Enter a valid invoice subtotal.' }, { status: 400 });
 			taskItems = [];
 		}
-		const discountValue = Math.max(0, Number(input.discountValue || 0));
+		const discountValue = Number(input.discountValue || 0);
+		if (!Number.isFinite(discountValue) || discountValue < 0) return json({ error: 'Enter a valid discount.' }, { status: 400 });
 		if (discountMode === 'percent' && discountValue > 100) return json({ error: 'Discount percentage cannot exceed 100%.' }, { status: 400 });
 		discount = discountMode === 'percent' ? Math.round(subtotal * discountValue / 100 * 100) / 100 : discountValue;
 		if (discount > subtotal) return json({ error: 'Discount cannot be greater than the subtotal.' }, { status: 400 });

@@ -15,7 +15,7 @@ export const GET = async ({ cookies, locals }) => {
 
 export const POST = async ({ request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	if (!String(input.name || '').trim() || !String(input.business || input.name || '').trim() || !String(input.phone || '').trim()) return json({ error: 'Customer name, studio name, and phone number are required.' }, { status: 400 });
 	const phoneError = indianMobileError(input.phone, true);
 	if (phoneError) return json({ error: phoneError }, { status: 400 });

@@ -178,6 +178,88 @@ const packageCopy: Record<string, {
 		assignment: 'Hello {{editor_name}},\n\nA property service request is assigned: {{project}}.\n\n{{task_list}}\n\nField portal: {{portal_link}}',
 		followup: 'Service request {{project}} has been resolved. Thank you for using {{studio_name}}.'
 	},
+	'car-garage': {
+		delivery: 'pickup',
+		received: 'Hello {{customer_name}}, your job card for {{project}} is open at {{studio_name}}.\nTrack it here: {{portal_link}}',
+		reminder: 'Reminder: {{project}} is due on {{delivery_date}} at {{studio_name}}.',
+		ready: 'Your vehicle {{project}} is ready for pickup.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for choosing {{studio_name}}. Please tell us if anything needs attention.'
+	},
+	'bike-service': {
+		delivery: 'pickup',
+		received: 'Hello {{customer_name}}, your bike {{project}} is booked in at {{studio_name}}.\nTrack it here: {{portal_link}}',
+		reminder: 'Reminder: your bike {{project}} is due on {{delivery_date}}.',
+		ready: 'Your bike {{project}} is ready for pickup.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for choosing {{studio_name}}. Ride safe!'
+	},
+	'hospital-front-desk': {
+		delivery: 'appointment',
+		staffMode: 'assignments-only',
+		received: 'Hello {{customer_name}}, your visit at {{studio_name}} is booked for {{delivery_date}}.\nDetails: {{portal_link}}',
+		reminder: 'Reminder: your visit at {{studio_name}} is on {{delivery_date}}.',
+		ready: 'Your visit is complete. Receipt: {{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for visiting {{studio_name}}. Contact us if you need a follow-up.'
+	},
+	'dental-clinic': {
+		delivery: 'appointment',
+		staffMode: 'progress-updates',
+		received: 'Hello {{customer_name}}, your appointment at {{studio_name}} is confirmed for {{delivery_date}}.\nDetails: {{portal_link}}',
+		reminder: 'Reminder: your dental appointment at {{studio_name}} is on {{delivery_date}}.',
+		ready: 'Your treatment visit is complete. Receipt: {{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for visiting {{studio_name}}. See you at your next visit.'
+	},
+	'diagnostic-lab': {
+		delivery: 'digital',
+		received: 'Hello {{customer_name}}, your sample {{project}} has been received at {{studio_name}}.\nTrack status: {{portal_link}}',
+		reminder: 'Reminder from {{studio_name}}: your report is expected on {{delivery_date}}.',
+		ready: 'Your report for {{project}} is ready.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for choosing {{studio_name}}.'
+	},
+	'tailoring': {
+		delivery: 'pickup',
+		received: 'Hello {{customer_name}}, your stitching order {{project}} is booked at {{studio_name}}.\nTrack it here: {{portal_link}}',
+		reminder: 'Reminder: your order {{project}} is due on {{delivery_date}}.',
+		ready: 'Your order {{project}} is ready for pickup.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for choosing {{studio_name}}. We hope you love the fit.'
+	},
+	'photo-studio': {
+		delivery: 'digital',
+		received: 'Hello {{customer_name}}, your shoot {{project}} is booked with {{studio_name}}.\nDetails: {{portal_link}}',
+		reminder: 'Reminder: your shoot {{project}} is on {{delivery_date}}.',
+		ready: 'Your photos for {{project}} are ready.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for choosing {{studio_name}}. We would love your feedback.'
+	},
+	'printing-press': {
+		delivery: 'fulfilment',
+		received: 'Hello {{customer_name}}, your print job {{project}} is received at {{studio_name}}.\nTrack it here: {{portal_link}}',
+		reminder: 'Reminder: your print job {{project}} is due on {{delivery_date}}.',
+		ready: 'Your print job {{project}} is ready for dispatch.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for printing with {{studio_name}}.'
+	},
+	'laundry': {
+		delivery: 'pickup',
+		received: 'Hello {{customer_name}}, your laundry order {{project}} is received at {{studio_name}}.\nTrack it here: {{portal_link}}',
+		reminder: 'Reminder: your laundry {{project}} will be ready on {{delivery_date}}.',
+		ready: 'Your laundry {{project}} is ready.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for choosing {{studio_name}}.'
+	},
+	'interior-fitout': {
+		delivery: 'handover',
+		received: 'Hello {{customer_name}}, your project {{project}} has started with {{studio_name}}.\nTrack progress: {{portal_link}}',
+		reminder: 'Reminder from {{studio_name}}: {{project}} handover is planned for {{delivery_date}}.',
+		ready: 'Your site {{project}} is ready for handover.\nBalance: {{balance}}\n{{portal_link}}',
+		assignment: 'Hello {{editor_name}},\n\nNew work has been assigned for {{project}}.\n\n{{task_list}}\n\nOpen the work portal: {{portal_link}}',
+		followup: 'Thank you for choosing {{studio_name}}. Enjoy your new space.'
+	},
 	'general-service': {
 		delivery: 'completion',
 		received: 'Hello {{customer_name}}, we have received your job {{project}} at {{studio_name}}.\nTrack progress: {{portal_link}}',

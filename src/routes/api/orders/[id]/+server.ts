@@ -17,8 +17,25 @@ export const GET = async ({ params, cookies, locals }) => {
 export const PATCH = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
-	const input = await request.json();
+	const input = await request.json().catch(() => null);
+	if (!input || typeof input !== 'object' || Array.isArray(input)) return json({ error: 'Invalid request body.' }, { status: 400 });
+	// Server-owned fields: derived from payments, imports, notifications, or the delivery flow.
+	for (const key of ['id', 'serial', 'historical', 'paid', 'initialAdvance', 'advanceSet', 'payments', 'tasks', 'archived', 'createdAt', 'customerNotifiedAt']) delete input[key];
+	if (input.status !== 'Delivered') delete input.deliveredAt;
+	// Validate every numeric field on its own so a discount- or progress-only update can't store NaN.
+	for (const key of ['price', 'discount', 'progress']) {
+		if (input[key] === undefined) continue;
+		const value = Number(input[key]);
+		if (!Number.isFinite(value) || value < 0 || (key === 'progress' && value > 100)) return json({ error: key === 'progress' ? 'Progress must be between 0 and 100.' : 'Total and discount must be valid positive amounts.' }, { status: 400 });
+		input[key] = value;
+	}
+	if (input.priceSet !== undefined) input.priceSet = Boolean(input.priceSet);
+	if (input.important !== undefined) input.important = Boolean(input.important);
 	const configuration = await getTenantConfiguration(database, locals.tenant!);
+	if (input.customerId !== undefined && input.customerId !== null) {
+		const customer = await database.prepare('SELECT id FROM customers WHERE id = ? AND archived_at IS NULL').bind(String(input.customerId)).first();
+		if (!customer) return json({ error: 'Choose an active customer.' }, { status: 400 });
+	}
 	try {
 		if (input.customFields !== undefined) {
 			if (hasCapability(configuration.effectiveCapabilities, 'customFields')) input.customFields = validateCustomValues(configuration.profile, 'order', input.customFields);
@@ -53,7 +70,7 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 
 export const POST = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	const database = await readyDatabase(locals.tenant);
 	if (input.action === 'restore') {
 		const order = await restoreOrder(database, params.id);

@@ -1,6 +1,10 @@
 <!-- Per-client studio profile, prefixes, templates, export, and tenant-scoped appearance. -->
 <script lang="ts">
+  import { safeFetch } from "$lib/http";
   import { untrack } from "svelte";
+  import { beforeNavigate, goto } from "$app/navigation";
+  import { askConfirm, confirmDanger } from "$lib/stores/confirm";
+  import { notifyAction } from "$lib/stores/actionFeedback";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import ModuleConfigurationPanel from "$lib/components/ModuleConfigurationPanel.svelte";
   import RequiredMark from "$lib/components/RequiredMark.svelte";
@@ -28,20 +32,29 @@
   const whatsappEnabled = $derived(hasCapability(configuration.effectiveCapabilities, "communications.whatsapp"));
   const whiteLabelEnabled = $derived(hasCapability(configuration.effectiveCapabilities, "branding.whiteLabel"));
   let saving = $state(false);
-  let message = $state("");
-  const messageIsError = $derived(/fail|unable|error|required|exists|incorrect/i.test(message));
+  // Unsaved-change tracking: the save bar appears only when something changed, and leaving warns first.
+  let savedSnapshot = $state(untrack(() => JSON.stringify(data.settings)));
+  const dirty = $derived(JSON.stringify(settings) !== savedSnapshot);
+  // Ask before leaving with unsaved changes (in-app dialog; navigation resumes only if confirmed).
+  let leaveConfirmed = false;
+  beforeNavigate((navigation) => {
+    if (!dirty || leaveConfirmed || navigation.type === "leave") return;
+    navigation.cancel();
+    const target = navigation.to?.url;
+    askConfirm({ title: "Unsaved changes", message: "You have unsaved settings. Leave without saving?", confirmLabel: "Leave without saving", danger: true }).then((leave) => {
+      if (leave && target) { leaveConfirmed = true; goto(target); }
+    });
+  });
+  function discard() {
+    settings = JSON.parse(savedSnapshot);
+    applyTheme({ palette: settings.themePalette, mode: settings.themeDefaultMode }, false, data.themeScope);
+  }
   let syncPending = $state(untrack(() => data.sync.pending));
   let syncError = $state(untrack(() => data.sync.lastError || ""));
   let themesOpen = $state(false);
   let storageOpen = $state(false);
   let whatsappSaving = $state(false);
   let runningAction = $state<"sync" | "import" | null>(null);
-  let messageTimer: ReturnType<typeof setTimeout> | undefined;
-  $effect(() => {
-    if (!message || saving || runningAction) return;
-    if (messageTimer) clearTimeout(messageTimer);
-    messageTimer = setTimeout(() => (message = ""), messageIsError ? 9000 : 4500);
-  });
   const formatBytes = (bytes: number) =>
     bytes >= 1024 * 1024
       ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -52,24 +65,23 @@
       themePalettes.find((theme) => theme.id === palette)?.mode ?? "light";
     settings.themePalette = palette;
     settings.themeDefaultMode = mode;
-    applyTheme({ palette, mode }, true, data.themeScope);
+    // Preview only; the choice is remembered after Save succeeds.
+    applyTheme({ palette, mode }, false, data.themeScope);
   }
 
   async function save() {
     saving = true;
-    message = "";
     try {
-      const response = await fetch("/api/settings", {
+      const response = await safeFetch("/api/settings", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(settings),
       });
       const result = await response.json();
-      message = response.ok
-        ? "Settings and business theme saved."
-        : result.error || "Unable to save settings.";
-    } catch {
-      message = "Unable to reach the server. Your changes were not saved.";
+      if (!response.ok) { notifyAction(result.error || "Couldn't save settings.", "error"); return; }
+      savedSnapshot = JSON.stringify(settings);
+      applyTheme({ palette: settings.themePalette, mode: settings.themeDefaultMode }, true, data.themeScope);
+      notifyAction("Settings saved.");
     } finally {
       saving = false;
     }
@@ -77,22 +89,19 @@
 
   async function saveWhatsappTemplates() {
     whatsappSaving = true;
-    message = "";
     try {
-      const response = await fetch("/api/settings/whatsapp", {
+      const response = await safeFetch("/api/settings/whatsapp", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(configuration.moduleConfiguration["communications.whatsapp"]),
       });
       const result = await response.json();
       if (!response.ok) {
-        message = result.error || "Unable to save WhatsApp templates.";
+        notifyAction(result.error || "Couldn't save the WhatsApp messages.", "error");
         return;
       }
       configuration.moduleConfiguration["communications.whatsapp"] = result.catalog;
-      message = "WhatsApp templates saved.";
-    } catch {
-      message = "Unable to reach the server. Your WhatsApp templates were not saved.";
+      notifyAction("WhatsApp messages saved.");
     } finally {
       whatsappSaving = false;
     }
@@ -100,86 +109,37 @@
 
   async function run(action: "sync" | "import") {
     if (runningAction) return;
+    if (action === "import" && !await confirmDanger("Import past orders from the Google Sheet?\n\nRows already in NexaDesk are skipped. This can take a moment.")) return;
     runningAction = action;
-    message =
-      action === "sync"
-        ? "Retrying Google Sheets sync..."
-        : "Importing historical orders...";
     try {
-      const response = await fetch(`/api/sheets/${action}`, { method: "POST" });
+      const response = await safeFetch(`/api/sheets/${action}`, { method: "POST" });
       const result = await response.json();
-      if (!response.ok) message = result.error || "Action failed.";
+      if (!response.ok) notifyAction(result.error || (action === "sync" ? "Couldn't copy changes to Google Sheets." : "Couldn't import past orders."), "error");
       else if (action === "import")
-        message = `Imported ${result.imported} records; skipped ${result.skipped}. ${result.editorsArchived ? `${result.editorsArchived} ${labelFor(configuration.profile, "staff", true).toLowerCase()} missing from Sheets moved to Archived.` : `${labelFor(configuration.profile, "staff", true)} are reconciled.`}`;
-      else if (result.error)
-        message = `Google Sheets sync failed: ${result.error}`;
-      else
-        message = result.configured
-          ? `Synced ${result.processed}; ${result.failed} failed. Orders summary: ${result.orders ?? 0} rows.`
-          : "Add Google service-account credentials to enable sync.";
-      const status = await fetch("/api/sheets/sync").then((statusResponse) =>
-        statusResponse.json(),
-      );
+        notifyAction(`Imported ${result.imported} past orders${result.skipped ? `, skipped ${result.skipped} already here` : ""}.${result.editorsArchived ? ` ${result.editorsArchived} ${labelFor(configuration.profile, "staff", true).toLowerCase()} archived to match the Sheet.` : ""}${result.warning ? ` ${result.warning}` : ""}`);
+      else if (result.error) notifyAction(`Google Sheets didn't update: ${result.error}`, "error");
+      else if (!result.configured) notifyAction("Google Sheets isn't connected yet. Ask your platform administrator to connect it.", "error");
+      else if (result.failed) notifyAction(`Copied ${result.processed} changes; ${result.failed} couldn't be copied. Try again in a minute.`, "error");
+      else notifyAction(result.processed ? `Copied ${result.processed} changes to Google Sheets.` : "Google Sheets is already up to date.");
+      const status = await safeFetch("/api/sheets/sync").then((statusResponse) => statusResponse.json());
       syncPending = status.pending || 0;
       syncError = status.lastError || result.error || "";
-    } catch {
-      message =
-        action === "sync"
-          ? "Unable to retry Google Sheets sync."
-          : "Unable to import historical orders.";
     } finally {
       runningAction = null;
     }
   }
 </script>
 
-<PageHeader eyebrow="Workspace preferences, branding and integrations" title="Settings" />
+<PageHeader eyebrow="Your business details, messages, Google Sheets and look." title="Settings" />
 
-<!-- Platform-managed feature, terminology, portal, and messaging controls are intentionally hidden from client administrators.
-  <div class="setup-heading">
-    <div><span>Flag-driven workspace</span><h2>Business setup and features</h2><p>Your owner controls what is available. You can enable or hide allowed features and adapt the wording to your niche.</p></div>
-    <button class="primary" disabled={capabilitySaving} onclick={saveCapabilities}>{capabilitySaving ? "Saving..." : "Save business setup"}</button>
-  </div>
-  <div class="setup-columns">
-    <div>
-      <h3>Enabled features</h3>
-      <div class="feature-grid">
-        {#each data.capabilityDefinitions as definition}
-          {@const allowed = configuration.allowedCapabilities[definition.key as CapabilityKey] !== false}
-          <label class:unavailable={!allowed}><input type="checkbox" disabled={!allowed} checked={configuration.preferences[definition.key as CapabilityKey] !== false} onchange={(event) => configuration.preferences[definition.key as CapabilityKey] = event.currentTarget.checked}/><span><b>{definition.label}</b><small>{allowed ? definition.description : "Not included by the owner"}</small></span></label>
-        {/each}
-      </div>
-    </div>
-    <div>
-      <h3>Business terminology</h3>
-      <div class="term-grid">
-        {#each terminologyKeys as key}
-          <label><span>{key}</span><input bind:value={configuration.profile.terminology[key].singular}/><input bind:value={configuration.profile.terminology[key].plural}/></label>
-        {/each}
-      </div>
-    </div>
-  </div>
-  {#if configuration.allowedCapabilities.customFields !== false}
-    <div class="custom-fields">
-      <div><h3>Custom fields</h3><p>Inactive fields keep their saved data. Portal, WhatsApp and reporting visibility can be controlled per field.</p></div>
-      <div class="new-field">
-        <select bind:value={newField.entity}><option value="customer">Customer</option><option value="order">Order</option><option value="task">Task</option><option value="staff">Staff</option></select>
-        <input bind:value={newField.label} placeholder="Field label"/>
-        <input bind:value={newField.key} placeholder="field_key"/>
-        <select bind:value={newField.type}><option value="text">Short text</option><option value="textarea">Long text</option><option value="number">Number</option><option value="date">Date</option><option value="datetime">Date and time</option><option value="select">Select</option><option value="checkbox">Checkbox</option><option value="url">HTTPS URL</option></select>
-        {#if newField.type === "select"}<input bind:value={newField.options} placeholder="Choices, comma separated"/>{/if}
-        <button type="button" onclick={addCustomField}>Add field</button>
-      </div>
-      <div class="field-list">
-        {#each configuration.profile.customFields as custom}
-          <article class:inactive={!custom.active}><div><b>{custom.label}</b><small>{custom.entity} · {custom.key} · {custom.type}</small></div><label><input type="checkbox" bind:checked={custom.required}/>Required</label><label><input type="checkbox" bind:checked={custom.visibility.customerPortal}/>Customer portal</label><label><input type="checkbox" bind:checked={custom.visibility.staffPortal}/>Staff portal</label><label><input type="checkbox" bind:checked={custom.visibility.whatsapp}/>WhatsApp</label><label><input type="checkbox" bind:checked={custom.visibility.sheets}/>Sheets</label><label><input type="checkbox" bind:checked={custom.visibility.export}/>Export</label><button type="button" onclick={() => custom.active = !custom.active}>{custom.active ? "Deactivate" : "Restore"}</button></article>
-        {:else}<p class="empty-fields">This niche does not have custom fields yet.</p>{/each}
-      </div>
-    </div>
-  {/if}
-</section>
+<nav class="jump" aria-label="Settings sections">
+  <a href="#business">Business details</a>
+  {#if whatsappEnabled}<a href="#messages">WhatsApp messages</a>{/if}
+  {#if sheetsEnabled || exportEnabled}<a href="#sheets">Google Sheets and reports</a>{/if}
+  <a href="#theme">Look and colours</a>
+  <a href="#storage">Storage</a>
+</nav>
 
-<ModuleConfigurationPanel {configuration} onmessage={(value) => (message = value)}/> -->
 
 <aside class="owner-managed" aria-label="Platform-managed features">
   <div>
@@ -189,22 +149,22 @@
   <span class="managed-badge">Protected configuration</span>
 </aside>
 
-{#if whatsappEnabled}<details class="card whatsapp-settings">
+{#if whatsappEnabled}<details class="card whatsapp-settings" id="messages">
   <summary>
     <span><MessageSquareText size={17}/></span>
-    <div><strong>WhatsApp message templates</strong><small>Create reusable messages for this business. Feature access is still controlled by your platform administrator.</small></div>
+    <div><strong>WhatsApp messages</strong><small>Ready-made messages you send to customers and your team. Open to add or edit.</small></div>
     <ChevronDown size={17}/>
   </summary>
   <div class="whatsapp-settings-body">
-    <ModuleConfigurationPanel {configuration} whatsappOnly onmessage={(value) => (message = value)}/>
-    <button class="primary whatsapp-save" disabled={whatsappSaving} aria-busy={whatsappSaving} onclick={saveWhatsappTemplates}>{whatsappSaving ? "Saving templates..." : "Save WhatsApp templates"}</button>
+    <ModuleConfigurationPanel {configuration} whatsappOnly onmessage={(value) => notifyAction(value, /fail|unable|couldn|error|remove|required/i.test(value) ? "error" : "success")}/>
+    <button class="primary whatsapp-save" disabled={whatsappSaving} aria-busy={whatsappSaving} onclick={saveWhatsappTemplates}>{whatsappSaving ? "Saving…" : "Save WhatsApp messages"}</button>
   </div>
 </details>{/if}
 
 <div class="settings-grid">
-  <section class="card settings-card">
-    <h2>Business profile</h2>
-    <p>Used in WhatsApp bills, portals and assignment messages.</p>
+  <section class="card settings-card" id="business">
+    <h2>Business details</h2>
+    <p>Shown on bills, customer pages and messages.</p>
     <div class="form-grid">
       <div class="field">
         <label for="studio-name">Business name <RequiredMark/></label><input
@@ -277,22 +237,22 @@
     </div>
   </section>
 
-  {#if sheetsEnabled || exportEnabled}<section class="card sync-card">
-    <h2>Reports and workbook</h2>
-    <p>Download allowed reports or mirror enabled modules to Google Sheets.</p>
+  {#if sheetsEnabled || exportEnabled}<section class="card sync-card" id="sheets">
+    <h2>Google Sheets and reports</h2>
+    <p>Your data is copied to Google Sheets automatically. You can also download everything as an Excel file.</p>
     {#if sheetsEnabled}
     <div class="sync-status">
       <Sheet size={17} />
       <div>
         <strong
           >{syncPending
-            ? `${syncPending} pending changes`
-            : "Sync queue clear"}</strong
-        ><small>Orders plus supporting tabs</small>
+            ? `${syncPending} ${syncPending === 1 ? "change" : "changes"} waiting to copy`
+            : "Google Sheets is up to date"}</strong
+        ><small>{syncPending ? "These copy automatically; use the button to try now." : "All changes are copied."}</small>
       </div>
     </div>
     {#if syncError}<div class="sync-error">
-        <strong>Last Google Sheets error</strong><span>{syncError}</span>
+        <strong>Last problem copying to Google Sheets</strong><span>{syncError}</span>
       </div>{/if}
     <button
       class="secondary sheet-action retry-action"
@@ -302,7 +262,7 @@
       ><RefreshCw
         class={runningAction === "sync" ? "loading" : ""}
         size={13}
-      />{runningAction === "sync" ? "Retrying sync..." : "Retry sync"}</button
+      />{runningAction === "sync" ? "Copying…" : "Copy changes now"}</button
     >
     <button
       class="secondary sheet-action import-action"
@@ -313,12 +273,12 @@
         class={runningAction === "import" ? "loading-upload" : ""}
         size={13}
       />{runningAction === "import"
-        ? "Importing orders..."
-        : "Import historical Orders"}</button
+        ? "Importing…"
+        : "Import past orders from the Sheet"}</button
     >
     {/if}
-    {#if exportEnabled}<a class="secondary export" href="/api/export"
-      ><Download size={13} /> Download workbook</a
+    {#if exportEnabled}<a class="secondary export" href="/api/export" data-sveltekit-reload
+      ><Download size={13} /> Download Excel file</a
     >{/if}
   </section>{/if}
 
@@ -327,6 +287,7 @@
     class:warning={data.storage.level === "warning"}
     class:notice={data.storage.level === "notice"}
     class="card storage-card collapsible-card"
+    id="storage"
   >
     <button
       class="storage-heading dropdown-heading"
@@ -336,8 +297,7 @@
       <div>
         <h2>Database storage</h2>
         <p>
-          {data.storage.percent}% used · Open only when you need storage
-          details.
+          {data.storage.percent}% of your space used. Old sync records clean up automatically.
         </p>
       </div>
       <strong>{data.storage.percent}%</strong><ChevronDown
@@ -367,76 +327,16 @@
       </div>{/if}
   </section>
 
-  <!-- Legacy two-template editor retained only for migration reference.
-    <button
-      class="dropdown-heading template-heading"
-      aria-expanded={templatesOpen}
-      onclick={() => (templatesOpen = !templatesOpen)}
-      ><span><MessageSquareText size={17} /></span>
-      <div>
-        <h2>WhatsApp templates</h2>
-        <p>{labelFor(configuration.profile, "staff")} assignments and {labelFor(configuration.profile, "customer").toLowerCase()} status/bill messages.</p>
-      </div>
-      <ChevronDown class={templatesOpen ? "open" : ""} size={17} /></button
-    >
-    {#if templatesOpen}<div class="template-grid dropdown-body">
-        <article class="template-preview">
-          <div class="template-title">
-            <span><MessageSquareText size={16} /></span>
-            <div>
-              <strong>{labelFor(configuration.profile, "staff")} assignment</strong><small
-                >Work details and private staff portal</small
-              >
-            </div>
-            <button
-              class="template-reset"
-              onclick={() => usePolishedTemplate("assignmentTemplate")}
-              aria-label="Use polished editor template"
-              title="Use polished default"><RefreshCw size={13}/></button>
-            <button
-              onclick={() => editTemplate("assignmentTemplate")}
-              aria-label="Edit editor assignment template"
-              ><Pencil size={14} /></button
-            >
-          </div>
-          <pre>{settings.assignmentTemplate}</pre>
-          <div class="link-preview-mock"><span>SF</span><div><strong>{settings.studioName} — Private {labelFor(configuration.profile, "staff").toLowerCase()} work portal</strong><small>View work items, source files and submit updates</small><em>workspace portal</em></div></div>
-        </article>
-        <article class="template-preview">
-          <div class="template-title">
-            <span><MessageSquareText size={16} /></span>
-            <div>
-              <strong>Customer bill & status</strong><small
-                >Invoice, payments and unique private status link</small
-              >
-            </div>
-            <button
-              class="template-reset"
-              onclick={() => usePolishedTemplate("invoiceTemplate")}
-              aria-label="Use polished customer template"
-              title="Use polished default"><RefreshCw size={13}/></button>
-            <button
-              onclick={() => editTemplate("invoiceTemplate")}
-              aria-label="Edit customer bill and status template"
-              ><Pencil size={14} /></button
-            >
-          </div>
-          <pre>{settings.invoiceTemplate}</pre>
-          <div class="link-preview-mock"><span>SF</span><div><strong>{settings.studioName} — Private {labelFor(configuration.profile, "customer").toLowerCase()} portal</strong><small>View work status, invoices and receipts</small><em>workspace portal</em></div></div>
-        </article>
-      </div>{/if}
-  -->
 
-  <section class="card theme-card">
+  <section class="card theme-card" id="theme">
     <button
       class="theme-heading"
       aria-expanded={themesOpen}
       onclick={() => (themesOpen = !themesOpen)}
       ><div>
-        <h2>Business theme</h2>
+        <h2>Look and colours</h2>
         <p>
-          Choose a polished light or dark palette. Every option is tuned for
-          readable text and controls.
+          Pick a colour style for your workspace. Click one to preview it, then save.
         </p>
       </div>
       <ChevronDown class={themesOpen ? "open" : ""} size={18} /></button
@@ -465,46 +365,22 @@
   </section>
 </div>
 
-<!-- Legacy template modal retained only for migration reference.
-  title={editingTemplate === "assignmentTemplate"
-    ? "Edit editor assignment template"
-    : "Edit customer bill & status template"}
-  bind:open={templateModalOpen}
-  wide
->
-  <div class="template-editor">
-    <p>
-      Keep placeholder names inside double braces. Messages open in WhatsApp for
-      review before sending.
-    </p>
-    <textarea bind:value={templateDraft}></textarea><small
-      >{editingTemplate === "assignmentTemplate"
-        ? "Available: editor_name, studio_name, project, customer, task_list, portal_link"
-        : "Available: studio_name, studio_address, studio_phone_line, gstin_line, invoice_number, customer, project, event, delivery_date, total, paid, balance, payment_note, invoice_footer_line, portal_link"}</small
-    >
+
+{#if dirty}
+  <div class="save-bar" role="region" aria-label="Unsaved changes">
+    <span>You have unsaved changes.</span>
+    <div class="save-actions">
+      <button class="secondary" type="button" disabled={saving} onclick={discard}>Discard</button>
+      <button class="primary" type="button" disabled={saving} aria-busy={saving} onclick={save}>{saving ? "Saving…" : "Save changes"}</button>
+    </div>
   </div>
-  {#snippet footer()}<button
-      class="secondary"
-      onclick={() => (templateModalOpen = false)}>Cancel</button
-    ><button class="primary" disabled={templateSaving} onclick={saveTemplate}
-      >{templateSaving ? "Saving..." : "Save template"}</button
-    >{/snippet}
--->
-
-{#if message}<div class:error={messageIsError} class="settings-notice" role={messageIsError ? "alert" : "status"}>
-  <span>{message}</span><button type="button" aria-label="Dismiss notification" onclick={() => message = ""}><X size={14}/></button>
-</div>{/if}
-
-<div class="save-bar">
-  <span>Changes apply to this workspace after saving.</span><button class="primary" disabled={saving} aria-busy={saving} onclick={save}
-    >{saving ? "Saving..." : "Save settings"}</button
-  >
-</div>
+{/if}
+<svelte:window onbeforeunload={(event) => { if (dirty) event.preventDefault(); }} />
 
 <style>
-  .settings-notice{position:fixed;z-index:90;top:82px;right:20px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:10px;width:min(390px,calc(100vw - 28px));box-sizing:border-box;padding:13px 14px;border:1px solid color-mix(in srgb,#10b981 46%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--card) 94%,#10b981 6%);color:#047857;box-shadow:0 20px 55px #0f172a24;font-size:10px;line-height:1.5;animation:notice-in .2s ease-out}.settings-notice.error{border-color:color-mix(in srgb,#ef4444 48%,var(--line));background:color-mix(in srgb,var(--card) 94%,#ef4444 6%);color:#dc2626}.settings-notice button{width:26px;height:26px;display:grid;place-items:center;padding:0;border:0;border-radius:7px;background:transparent;color:currentColor}@keyframes notice-in{from{opacity:0;transform:translateY(-7px) scale(.98)}}
-  .whatsapp-settings{margin-bottom:18px;padding:0;overflow:hidden}.whatsapp-settings>summary{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:17px 19px;list-style:none;cursor:pointer}.whatsapp-settings>summary::-webkit-details-marker{display:none}.whatsapp-settings>summary>span{width:35px;height:35px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,var(--purple) 10%,var(--card));color:var(--purple)}.whatsapp-settings>summary>div{display:grid;gap:4px}.whatsapp-settings>summary strong{font-size:12px}.whatsapp-settings>summary small{color:var(--muted);font-size:9px;line-height:1.45}.whatsapp-settings>summary>:global(svg:last-child){color:var(--muted);transition:transform .2s ease}.whatsapp-settings[open]>summary{border-bottom:1px solid var(--line)}.whatsapp-settings[open]>summary>:global(svg:last-child){color:var(--purple);transform:rotate(180deg)}.whatsapp-settings-body{padding:18px}.whatsapp-save{width:100%;min-height:43px;justify-content:center;margin-top:12px}
-  .owner-managed{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px;padding:15px 18px;border:1px solid color-mix(in srgb,var(--purple) 28%,var(--line));border-radius:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--purple) 8%,var(--card)),var(--card));box-shadow:0 10px 30px #0f172a08}.owner-managed>div{display:grid;gap:4px}.owner-managed strong{font-size:11px}.owner-managed span{color:var(--muted);font-size:9px;line-height:1.5}.owner-managed .managed-badge{flex:none;padding:7px 9px;border:1px solid color-mix(in srgb,var(--purple) 28%,var(--line));border-radius:999px;background:var(--card);color:var(--purple);font-size:8px;font-weight:750}
+  @keyframes notice-in{from{opacity:0;transform:translateY(-7px) scale(.98)}}
+  .whatsapp-settings{margin-bottom:18px;padding:0;overflow:hidden}.whatsapp-settings>summary{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:17px 19px;list-style:none;cursor:pointer}.whatsapp-settings>summary::-webkit-details-marker{display:none}.whatsapp-settings>summary>span{width:35px;height:35px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,var(--purple) 10%,var(--card));color:var(--purple)}.whatsapp-settings>summary>div{display:grid;gap:4px}.whatsapp-settings>summary strong{font-size:13px}.whatsapp-settings>summary small{color:var(--muted);font-size:11px;line-height:1.45}.whatsapp-settings>summary>:global(svg:last-child){color:var(--muted);transition:transform .2s ease}.whatsapp-settings[open]>summary{border-bottom:1px solid var(--line)}.whatsapp-settings[open]>summary>:global(svg:last-child){color:var(--purple);transform:rotate(180deg)}.whatsapp-settings-body{padding:18px}.whatsapp-save{width:100%;min-height:43px;justify-content:center;margin-top:12px}
+  .owner-managed{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px;padding:15px 18px;border:1px solid color-mix(in srgb,var(--purple) 28%,var(--line));border-radius:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--purple) 8%,var(--card)),var(--card));box-shadow:0 10px 30px #0f172a08}.owner-managed>div{display:grid;gap:4px}.owner-managed strong{font-size:12.5px}.owner-managed span{color:var(--muted);font-size:11px;line-height:1.5}.owner-managed .managed-badge{flex:none;padding:7px 9px;border:1px solid color-mix(in srgb,var(--purple) 28%,var(--line));border-radius:999px;background:var(--card);color:var(--purple);font-size:11px;font-weight:750}
   .settings-grid {
     display: grid;
     grid-template-columns: 1.45fr 1fr;
@@ -525,7 +401,7 @@
   .sync-card > p,
   .theme-heading p {
     color: var(--muted);
-    font-size: 10px;
+    font-size:12px;
     margin: 6px 0 22px;
   }
   .full {
@@ -555,24 +431,21 @@
   .sync-status:hover {
     border-color: color-mix(in srgb, var(--purple) 55%, var(--line));
     background: var(--theme-soft);
-    transform: translateY(-1px);
   }
   .sync-status :global(svg) {
     transition: transform 0.22s ease;
   }
-  .sync-status:hover :global(svg) {
-    transform: scale(1.12) rotate(-4deg);
-  }
+
   .sync-status div {
     display: flex;
     flex-direction: column;
     gap: 3px;
   }
   .sync-status strong {
-    font-size: 11px;
+    font-size:12.5px;
   }
   .sync-status small {
-    font-size: 9px;
+    font-size:11px;
     color: var(--muted);
   }
   .sync-error {
@@ -586,11 +459,11 @@
     padding: 11px 12px;
   }
   .sync-error strong {
-    font-size: 10px;
+    font-size:12px;
   }
   .sync-error span {
     font:
-      9px/1.5 ui-monospace,
+      11px/1.5 ui-monospace,
       SFMono-Regular,
       Menlo,
       monospace;
@@ -638,16 +511,13 @@
     box-shadow:
       inset 3px 0 var(--action-color),
       0 8px 22px color-mix(in srgb, var(--action-color) 15%, transparent);
-    transform: translateY(-1px);
   }
   .sync-card .secondary:not(:disabled):active,
   .export:active {
     transform: translateY(0) scale(0.985);
   }
   .sync-card .secondary:not(:disabled):hover :global(svg),
-  .export:hover :global(svg) {
-    transform: scale(1.14);
-  }
+
   .sync-card .secondary:disabled {
     cursor: wait;
     opacity: 0.62;
@@ -698,11 +568,11 @@
     flex: 1;
   }
   .dropdown-heading h2 {
-    font-size: 13px;
+    font-size:14px;
   }
   .dropdown-heading p {
     color: var(--muted);
-    font-size: 9px;
+    font-size:11px;
     margin: 4px 0 0;
   }
   .dropdown-heading > :global(svg:last-child) {
@@ -776,11 +646,11 @@
     margin-top: 9px;
   }
   .palette strong {
-    font-size: 10px;
+    font-size:12px;
   }
   .palette small {
     color: var(--muted);
-    font-size: 8px;
+    font-size:11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -799,7 +669,7 @@
     box-shadow: 0 18px 50px #0002;
   }
   .save-bar span {
-    font-size: 10px;
+    font-size:12px;
     color: var(--muted);
   }
   @media (max-width: 900px) {
@@ -826,4 +696,11 @@
     }
     .save-bar{bottom:10px;align-items:stretch;flex-direction:column;gap:9px;padding:10px}.save-bar span{text-align:center}.save-bar button{width:100%;min-height:42px;justify-content:center}
   }
+
+  .jump { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
+  .jump a { height: 32px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--theme-text); font-size: 13px; font-weight: 600; text-decoration: none; }
+  .jump a:hover { border-color: color-mix(in srgb, var(--purple) 45%, var(--line)); }
+  #business, #messages, #sheets, #theme, #storage { scroll-margin-top: 84px; }
+  .save-actions { display: flex; gap: 8px; }
+  @media (max-width: 620px) { .save-actions { width: 100%; } .save-actions button { flex: 1; } }
 </style>
