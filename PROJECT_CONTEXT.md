@@ -247,3 +247,5 @@ Audience: non-technical studio owners, staff, and customers on phones. Calm, cle
 
 - 2026-11-07 (later): Audit done (`docs/audit/*`), Phase 1 fixed. Not yet browser-tested with a tenant login. Next: Phase 2.
 - 2026-11-07: Project explored, server run, env issues diagnosed (bootstrap password ignored while an owner exists; encryption key mismatch → 500). Branch created. Audit started.
+
+- [x] Committed locally on `enhance/ux-and-bugfixes` (2026-11-08): 22223c6 docs, a47f73d server/API, 746bd30 owner, 3564f24 UI. Pushed via personal SSH alias and merged into main by the owner as PR #3 (810b6ec) on 2026-11-08. Repo is PUBLIC: review `docs/audit/*` (lists security findings) before any push.
