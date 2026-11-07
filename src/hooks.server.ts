@@ -24,7 +24,16 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.account = session?.account || null;
 	event.locals.tenant = session?.tenant || null;
 
-	const pathname = event.url.pathname;
+	// Check the same decoded path SvelteKit routes on. Otherwise '/%6Fwner' would skip the '/owner'
+	// check here and still be routed to the owner page (encoded-path auth bypass).
+	let decodedPath: string;
+	try {
+		decodedPath = event.url.pathname.split('%25').map(decodeURI).join('%25');
+	} catch {
+		error(400, 'Invalid request path.');
+	}
+	// Page data requests ('/orders/__data.json') need the same permission as the page itself.
+	const pathname = decodedPath.replace(/\/__data\.json$/, '') || '/';
 	// Single sign-in: /login routes each account by role (owner → /owner, workspace admin → /dashboard).
 	const isOwnerLogin = pathname === '/owner/login';
 	if (pathname.startsWith('/owner') && !isOwnerLogin && event.locals.account?.role !== 'owner') redirect(303, '/login');
