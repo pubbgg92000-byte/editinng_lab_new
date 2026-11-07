@@ -11,7 +11,7 @@ import { hasCapability, validateCustomValues } from '$lib/capabilities';
 
 export const POST = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	const tasks: Record<string, unknown>[] = Array.isArray(input.tasks) ? input.tasks : [input];
 	const database = await readyDatabase(locals.tenant);
 	const configuration = await getTenantConfiguration(database, locals.tenant!);

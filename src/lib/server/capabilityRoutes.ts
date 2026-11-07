@@ -5,8 +5,8 @@ export function capabilitiesForPath(pathname: string): CapabilityKey[] {
 	const required: CapabilityKey[] = [];
 	if (pathname.startsWith('/editors') || pathname.startsWith('/api/editors')) required.push('work.staff');
 	if (pathname.startsWith('/invoices') || pathname.startsWith('/api/invoices')) required.push('billing.invoices');
-	if (pathname.startsWith('/settings/sheets') || pathname.startsWith('/api/sheets')) required.push('integrations.googleSheets');
-	if (pathname.startsWith('/api/export')) required.push('reports.excelExport');
+	if (pathname.startsWith('/settings/sheets') || pathname.startsWith('/api/sheets') || pathname === '/api/editors/reconcile') required.push('integrations.googleSheets');
+	if (pathname.startsWith('/api/export') || pathname === '/api/orders/export') required.push('reports.excelExport');
 	if (pathname.startsWith('/api/tasks') || /^\/api\/orders\/[^/]+\/tasks/.test(pathname)) required.push('work.tasks');
 	if (pathname.startsWith('/api/notifications')) required.push('work.staff');
 	if (/^\/api\/orders\/[^/]+\/payments/.test(pathname)) required.push('billing.payments');

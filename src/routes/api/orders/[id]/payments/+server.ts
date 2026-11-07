@@ -7,7 +7,7 @@ import { flushSheetSync } from '$lib/server/googleSheets';
 
 export const POST = async ({ params, request, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
-	const input = await request.json();
+	const input = await request.json().catch(() => ({}));
 	if (!(Number(input.amount) > 0)) return json({ error: 'Payment amount must be greater than zero.' }, { status: 400 });
 	const database = await readyDatabase(locals.tenant);
 	let payment;

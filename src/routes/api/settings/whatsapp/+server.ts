@@ -14,11 +14,17 @@ export const PATCH = async ({ request, cookies, locals }) => {
 	if (!current.effectiveCapabilities['communications.whatsapp']) {
 		return json({ error: 'WhatsApp templates are not enabled for this workspace. Contact your platform administrator.' }, { status: 403 });
 	}
-	const catalog = await request.json();
-	const submitted = validateModuleConfiguration({
-		...current.moduleConfiguration,
-		'communications.whatsapp': catalog
-	}, current.profile, current.allowedCapabilities);
+	const catalog = await request.json().catch(() => null);
+	if (!catalog || typeof catalog !== 'object') return json({ error: 'Invalid WhatsApp message settings.' }, { status: 400 });
+	let submitted;
+	try {
+		submitted = validateModuleConfiguration({
+			...current.moduleConfiguration,
+			'communications.whatsapp': catalog
+		}, current.profile, current.allowedCapabilities);
+	} catch (cause) {
+		return json({ error: cause instanceof Error ? cause.message : 'WhatsApp message settings are invalid.' }, { status: 400 });
+	}
 	await createConfigurationSnapshot(database, 'Before administrator WhatsApp template change');
 	const configuration = await saveModuleConfiguration(database, locals.tenant, submitted);
 	await flushSheetSync(database, locals.tenant);

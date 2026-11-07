@@ -2,7 +2,13 @@
 // for information about these interfaces
 declare global {
 	namespace App {
-		// interface Error {}
+		interface Error {
+			message: string;
+			/** Set when a portal link was replaced or no longer exists (shows the friendly ask-for-new-link page). */
+			linkReplaced?: boolean;
+			kind?: 'customer' | 'staff';
+			business?: { name: string; logoUrl: string; phone: string };
+		}
 		interface Locals {
 			session: import('$lib/types').AuthSession | null;
 			account: import('$lib/types').Account | null;

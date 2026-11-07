@@ -11,7 +11,7 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test:tenancy": "node scripts/audit-tenancy.mjs",
-		"test:capabilities": "node --experimental-strip-types scripts/test-capabilities.mjs",
+		"test:capabilities": "node --experimental-strip-types scripts/test-capabilities.mjs && node --experimental-strip-types scripts/test-permissions.mjs",
 		"control:migrate": "node scripts/control-db.mjs migrate",
 		"control:bootstrap": "node scripts/control-db.mjs bootstrap"
 	},

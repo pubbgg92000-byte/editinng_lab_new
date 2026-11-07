@@ -1,4 +1,5 @@
 // Central tenant business-data layer for customers, editors, orders, tasks, billing, and history.
+import { cached, clearCache, databaseKey } from './cache';
 import type { ActivityLog, BusinessProfile, Customer, Editor, EditorAvailability, Invoice, NichePackage, Order, Payment, StudioSettings, Task, TaskStatus, TenantPreferences, WorkspaceModuleOverrides } from '$lib/types';
 import { createPortalToken, hashPortalToken, openPortalToken, sealPortalToken } from './tokens';
 import { defaultAssignmentTemplate, defaultInvoiceTemplate, legacyAssignmentTemplate, legacyInvoiceTemplate } from '$lib/messageTemplates';
@@ -55,6 +56,9 @@ function paymentFrom(row: Row): Payment {
 	return { id: row.id, orderId: row.order_id, amount: Number(row.amount), paidAt: row.paid_at, method: row.method, note: row.note, kind: row.kind === 'advance' ? 'advance' : 'payment' };
 }
 
+// Today's date in India (YYYY-MM-DD); server time is UTC, which is the previous day before 05:30 IST.
+const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+
 function orderFrom(row: Row, orderTasks: Task[] = [], orderPayments: Payment[] = []): Order {
 	const initialAdvance = Number(row.advance);
 	const paid = initialAdvance + orderPayments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -62,7 +66,12 @@ function orderFrom(row: Row, orderTasks: Task[] = [], orderPayments: Payment[] =
 }
 
 // ---------- Studio profile, prefixes, WhatsApp templates, and tenant theme ----------
-export async function getSettings(database: AppDatabase): Promise<StudioSettings> {
+/** Workspace settings (cached briefly per database; cleared on writes). */
+export function getSettings(database: AppDatabase): Promise<StudioSettings> {
+	return cached(`settings:${databaseKey(database)}`, () => loadSettings(database));
+}
+
+async function loadSettings(database: AppDatabase): Promise<StudioSettings> {
 	const values = Object.fromEntries((await rows(database, 'SELECT key, value FROM settings')).map((row) => [row.key, row.value]));
 	const savedAssignmentTemplate = String(values.assignmentTemplate || '');
 	const assignmentTemplate = !savedAssignmentTemplate || savedAssignmentTemplate.trim() === legacyAssignmentTemplate.trim() ? defaultAssignmentTemplate : savedAssignmentTemplate;
@@ -75,6 +84,7 @@ export async function getSettings(database: AppDatabase): Promise<StudioSettings
 export async function updateSettings(database: AppDatabase, input: Partial<StudioSettings>) {
 	const timestamp = now();
 	await database.batch(Object.entries(input).map(([key, value]) => database.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at').bind(key, String(value ?? ''), timestamp)));
+	clearCache();
 	const settings = await getSettings(database);
 	await activity(database, 'admin', 'Settings updated', 'settings', 'studio', 'Studio profile, messages and appearance updated');
 	await queueSheetSync(database, 'Settings', 'studio', settings);
@@ -382,7 +392,7 @@ async function hydrateOrders(database: AppDatabase, orderRows: Row[]) {
 	const orderIds = orderRows.map((row) => row.id);
 	const placeholders = orderIds.map(() => '?').join(', ');
 	const [taskRows, paymentRows] = await Promise.all([
-		rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t LEFT JOIN editors e ON e.id = t.editor_id WHERE t.order_id IN (${placeholders}) ORDER BY t.created_at`, orderIds),
+		rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item JOIN invoices inv ON inv.id = item.invoice_id WHERE item.task_id = t.id AND COALESCE(inv.status, '') <> 'cancelled' AND inv.kind = 'partial'), 0) AS invoiced_amount FROM tasks t LEFT JOIN editors e ON e.id = t.editor_id WHERE t.order_id IN (${placeholders}) ORDER BY t.created_at`, orderIds),
 		rows(database, `SELECT * FROM payments WHERE order_id IN (${placeholders}) ORDER BY paid_at DESC`, orderIds)
 	]);
 	return orderRows.map((row) => orderFrom(row, taskRows.filter((task) => task.order_id === row.id).map(taskFrom), paymentRows.filter((payment) => payment.order_id === row.id).map(paymentFrom)));
@@ -432,8 +442,16 @@ export async function listOrdersPage(database: AppDatabase, options: OrderPageOp
 	}
 	if (options.status?.trim()) { conditions.push('status = ?'); values.push(options.status.trim()); }
 	if (options.event?.trim()) { conditions.push('event = ?'); values.push(options.event.trim()); }
-	if (options.dateFrom?.trim()) { conditions.push('created_at >= ?'); values.push(options.dateFrom.trim()); }
-	if (options.dateTo?.trim()) { conditions.push('created_at < ?'); values.push(options.dateTo.trim() + 'T23:59:59.999Z'); }
+	// Filter dates are calendar days in India; created_at is stored in UTC, so convert the day bounds.
+	const istDayStartUtc = (day: string) => new Date(`${day}T00:00:00+05:30`).toISOString();
+	const validDay = (day?: string) => Boolean(day && /^\d{4}-\d{2}-\d{2}$/.test(day.trim()));
+	if (validDay(options.dateFrom)) { conditions.push('created_at >= ?'); values.push(istDayStartUtc(options.dateFrom!.trim())); }
+	if (validDay(options.dateTo)) {
+		const next = new Date(`${options.dateTo!.trim()}T00:00:00+05:30`);
+		next.setUTCDate(next.getUTCDate() + 1);
+		conditions.push('created_at < ?');
+		values.push(next.toISOString());
+	}
 	if (options.pendingBalance) { conditions.push('amount_set = 1 AND (amount - discount - advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = orders.id), 0)) > 0.009'); }
 	const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 	const count = await database.prepare(`SELECT COUNT(*) AS count FROM orders ${where}`).bind(...values).first<{ count: number | string }>();
@@ -517,7 +535,7 @@ export async function createOrder(database: AppDatabase, input: Partial<Order>) 
 	const mobileError = indianMobileError(mobileInput, true);
 	if (mobileError) throw new Error(mobileError);
 	const mobile = normalizeIndianMobile(mobileInput);
-	const serialRow = await database.prepare("INSERT INTO counters (name, value) SELECT 'order_serial', COALESCE(MAX(serial), 0) + 1 FROM orders ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 RETURNING value AS serial").first<{ serial: number }>();
+	const serialRow = await database.prepare("INSERT INTO counters (name, value) SELECT 'order_serial', COALESCE(MAX(serial), 0) + 1 FROM orders ON CONFLICT (name) DO UPDATE SET value = GREATEST(counters.value + 1, (SELECT COALESCE(MAX(serial), 0) + 1 FROM orders)) RETURNING value AS serial").first<{ serial: number }>();
 	const orderId = id('ORD');
 	await database.prepare('INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, amount_set, advance_set, source, remarks, due_date, status, progress, historical, important, custom_values, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?::jsonb, ?, ?)').bind(orderId, Number(serialRow?.serial || 1), input.customerId || null, customerName, mobile, input.workType || '', input.project || '', input.receiving || '', input.duration || '', Number(input.price || 0), Number(input.priceSet !== false), Number(input.advanceSet !== false), input.source || '', input.remarks || '', input.due || '', 'Received', Number(Boolean(input.important)), JSON.stringify(input.customFields || {}), timestamp, timestamp).run();
 	if (Number(input.paid || 0) > 0) await recordPayment(database, orderId, { amount: Number(input.paid), paidAt: timestamp.slice(0, 10), method: 'Advance at booking', note: 'Advance collected when order was created', kind: 'advance' });
@@ -578,6 +596,7 @@ export async function permanentlyDeleteOrder(database: AppDatabase, orderId: str
 	const existing = await database.prepare('SELECT id, project FROM orders WHERE id = ? AND archived_at IS NOT NULL').bind(orderId).first<Row>();
 	if (!existing) return null;
 	await database.batch([
+		database.prepare('DELETE FROM invoice_task_items WHERE invoice_id IN (SELECT id FROM invoices WHERE order_id = ?)').bind(orderId),
 		database.prepare('DELETE FROM invoices WHERE order_id = ?').bind(orderId),
 		database.prepare('DELETE FROM payments WHERE order_id = ?').bind(orderId),
 		database.prepare('DELETE FROM tasks WHERE order_id = ?').bind(orderId),
@@ -609,6 +628,8 @@ export async function createTask(database: AppDatabase, orderId: string, input: 
 export async function updateTask(database: AppDatabase, taskId: string, input: Partial<Task>, actor = 'admin', editorId?: string) {
 	const existing = await database.prepare('SELECT * FROM tasks WHERE id = ? AND archived_at IS NULL').bind(taskId).first<Row>();
 	if (!existing || (editorId && existing.editor_id !== editorId)) return null;
+	// Approved work is locked for editors so an approved output link or status cannot be changed afterwards.
+	if (editorId && existing.status === 'Completed') throw new Error('This work was approved and is locked. Ask the admin to reopen it if changes are needed.');
 	const allowedEditorStatuses: TaskStatus[] = ['Not started', 'Files downloaded', 'In progress', 'Waiting for clarification', 'Ready for review'];
 	const status = editorId && input.status && !allowedEditorStatuses.includes(input.status) ? existing.status : input.status ?? existing.status;
 	const progress = Math.max(0, Math.min(100, Number(input.progress ?? existing.progress)));
@@ -617,10 +638,12 @@ export async function updateTask(database: AppDatabase, taskId: string, input: P
 	// Editors may report duration for any task; the admin decides later whether it is billed.
 	const videoDurationMinutes = Math.max(0, Math.round(Number(input.videoDurationMinutes ?? existing.video_duration_minutes ?? 0)));
 	const billableAmount = billingMode === 'duration' ? durationBillableAmount(hourlyRate, videoDurationMinutes) : Math.max(0, Number(input.billableAmount ?? existing.billable_amount ?? 0));
-	const nextEditorId = editorId ? existing.editor_id : input.editorId ?? existing.editor_id;
+	const nextEditorId = editorId ? existing.editor_id : 'editorId' in input ? input.editorId || null : existing.editor_id;
 	const device = editorId ? existing.device : input.device ?? existing.device ?? '';
 	const editorSettlement = editorId ? existing.editor_settlement : input.editorSettlement === 'editor-bills-admin' ? 'editor-bills-admin' : input.editorSettlement === 'admin-issues-statement' ? 'admin-issues-statement' : input.editorSettlement === 'not-set' ? 'not-set' : existing.editor_settlement || 'not-set';
-	const invoicedAmount = Number((await database.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM invoice_task_items WHERE task_id = ?').bind(taskId).first<{ total: number | string }>())?.total || 0);
+	// "Invoiced" means billed on a live partial invoice. Final invoices are whole-order statements, and
+	// cancelled invoices release their tasks, so neither locks the task value.
+	const invoicedAmount = Number((await database.prepare(`SELECT COALESCE(SUM(item.amount), 0) AS total FROM invoice_task_items item JOIN invoices inv ON inv.id = item.invoice_id WHERE item.task_id = ? AND COALESCE(inv.status, '') <> 'cancelled' AND inv.kind = 'partial'`).bind(taskId).first<{ total: number | string }>())?.total || 0);
 	if (billableAmount + 0.009 < invoicedAmount) throw new Error('Task value cannot be lower than the amount already invoiced.');
 	await database.prepare('UPDATE tasks SET editor_id = ?, title = ?, instructions = ?, due_date = ?, text_link = ?, image_url = ?, status = ?, progress = ?, output_link = ?, notes = ?, billable_amount = ?, billing_mode = ?, hourly_rate = ?, video_duration_minutes = ?, device = ?, editor_settlement = ?, custom_values = ?::jsonb, updated_at = ? WHERE id = ?').bind(nextEditorId, input.name ?? existing.title, input.instructions ?? existing.instructions, input.due ?? existing.due_date, input.textLink ?? existing.text_link, input.imageUrl ?? existing.image_url, status, progress, input.outputLink ?? existing.output_link, input.notes ?? existing.notes, billableAmount, billingMode, hourlyRate, videoDurationMinutes, device, editorSettlement, JSON.stringify({ ...customValues(existing.custom_values), ...(input.customFields || {}) }), now(), taskId).run();
 	await updateOrderSummary(database, existing.order_id);
@@ -653,7 +676,7 @@ export async function restoreTask(database: AppDatabase, taskId: string) {
 }
 
 export async function tasksForEditor(database: AppDatabase, editorId: string) {
-	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, o.project, o.customer_name, o.event, o.serial, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item WHERE item.task_id = t.id), 0) AS invoiced_amount FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 AND o.archived_at IS NULL ORDER BY t.due_date, t.created_at`, [editorId]);
+	const taskRows = await rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, o.project, o.customer_name, o.event, o.serial, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item JOIN invoices inv ON inv.id = item.invoice_id WHERE item.task_id = t.id AND COALESCE(inv.status, '') <> 'cancelled' AND inv.kind = 'partial'), 0) AS invoiced_amount FROM tasks t JOIN orders o ON o.id = t.order_id LEFT JOIN editors e ON e.id = t.editor_id WHERE t.editor_id = ? AND t.archived_at IS NULL AND o.historical = 0 AND o.archived_at IS NULL ORDER BY t.due_date, t.created_at`, [editorId]);
 	return taskRows.map((row) => ({ ...taskFrom(row), project: row.project, customer: row.customer_name, workType: row.event, serial: row.serial }));
 }
 
@@ -665,7 +688,7 @@ export async function updateOrderSummary(database: AppDatabase, orderId: string)
 		await database.prepare("UPDATE orders SET status = 'Historical', progress = 100, updated_at = ? WHERE id = ?").bind(now(), orderId).run();
 		return;
 	}
-	if (['Delivered', 'Stopped'].includes(order.status)) return;
+	if (['Delivered', 'Stopped', 'Completed', 'Historical'].includes(order.status)) return;
 	const active = await rows(database, 'SELECT editor_id, status, progress FROM tasks WHERE order_id = ? AND archived_at IS NULL', [orderId]);
 	let status: Order['status'] = 'Received';
 	let progress = 0;
@@ -691,8 +714,17 @@ export async function recordPayment(database: AppDatabase, orderId: string, inpu
 	if (!(amount > 0)) throw new Error('Payment amount must be greater than zero.');
 	const total = Math.max(0, order.price - order.discount);
 	if (order.priceSet !== false && order.paid + amount > total) throw new Error('Payment cannot be greater than the remaining balance.');
-	const payment: Payment = { id: id('PAY'), orderId, amount, paidAt: input.paidAt || new Date().toISOString().slice(0, 10), method: input.method || 'Manual', note: input.note || '', kind: input.kind === 'advance' ? 'advance' : 'payment' };
-	await database.prepare('INSERT INTO payments (id, order_id, amount, paid_at, method, note, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(payment.id, orderId, payment.amount, payment.paidAt, payment.method, payment.note, payment.kind, now()).run();
+	const payment: Payment = { id: id('PAY'), orderId, amount, paidAt: input.paidAt || istToday(), method: input.method || 'Manual', note: input.note || '', kind: input.kind === 'advance' ? 'advance' : 'payment' };
+	// Lock the order row and insert only if the balance still allows it, in one transaction, so two
+	// simultaneous submissions (double-click, two tabs) can't overpay the order.
+	const [, inserted] = await database.batch([
+		database.prepare('SELECT id FROM orders WHERE id = ? FOR UPDATE').bind(orderId),
+		database.prepare(`INSERT INTO payments (id, order_id, amount, paid_at, method, note, kind, created_at)
+			SELECT ?::text, ?::text, ?::real, ?::text, ?::text, ?::text, ?::text, ?::text FROM orders o WHERE o.id = ?
+			AND (o.amount_set = 0 OR o.advance + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) + ?::real <= o.amount - o.discount + 0.009)`)
+			.bind(payment.id, orderId, payment.amount, payment.paidAt, payment.method, payment.note, payment.kind, now(), orderId, payment.amount)
+	]);
+	if (!inserted?.meta?.changes) throw new Error('Payment cannot be greater than the remaining balance.');
 	await activity(database, 'admin', payment.kind === 'advance' ? 'Advance collected' : 'Payment recorded', 'payment', payment.id, `${payment.amount}`);
 	await queueSheetSync(database, 'Payments', payment.id, payment);
 	await queueSheetSync(database, 'Orders', orderId, await getOrder(database, orderId));
@@ -701,10 +733,10 @@ export async function recordPayment(database: AppDatabase, orderId: string, inpu
 
 export async function recordInvoice(database: AppDatabase, orderId: string, messageInput: string | ((number: string, invoiceId: string) => string), snapshot: Partial<Invoice> = {}) {
 	if (snapshot.paymentId) {
-		const existing = await database.prepare('SELECT id FROM invoices WHERE payment_id = ? LIMIT 1').bind(snapshot.paymentId).first<{ id: string }>();
+		const existing = await database.prepare(`SELECT id FROM invoices WHERE payment_id = ? AND COALESCE(status, '') <> 'cancelled' LIMIT 1`).bind(snapshot.paymentId).first<{ id: string }>();
 		if (existing?.id) return (await getInvoice(database, existing.id))!;
 	}
-	const year = new Date().getFullYear();
+	const year = Number(istToday().slice(0, 4)); // invoice year in India time (SC-19)
 	const counter = await database.prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 RETURNING value').bind(`invoice_${year}`).first<{ value: number }>();
 	const number = `INV-${year}-${String(Number(counter?.value || 1)).padStart(4, '0')}`;
 	const invoiceId = id('INV');
@@ -788,6 +820,13 @@ export async function syncQueueStatus(database: AppDatabase) {
 
 export async function pendingSyncItems(database: AppDatabase) {
 	return rows(database, 'SELECT * FROM sheet_sync_outbox WHERE synced_at IS NULL ORDER BY created_at LIMIT 500');
+}
+
+/** Mark many outbox rows in one statement (avoids hundreds of round trips while Google is down). */
+export async function markSyncResults(database: AppDatabase, syncIds: string[], error?: string) {
+	if (!syncIds.length) return;
+	if (error) await database.prepare('UPDATE sheet_sync_outbox SET attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ANY(?::text[])').bind(error, now(), syncIds).run();
+	else await database.prepare('UPDATE sheet_sync_outbox SET attempts = attempts + 1, last_error = NULL, synced_at = ?, updated_at = ? WHERE id = ANY(?::text[])').bind(now(), now(), syncIds).run();
 }
 
 export async function markSyncResult(database: AppDatabase, syncId: string, error?: string) {

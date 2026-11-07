@@ -158,7 +158,7 @@ export function currentInvoiceMessage(
 	const invoiceLink = portalLink ? `${portalLink}/invoice/${invoice.id}` : '';
 	const hasSnapshot = Boolean(invoice.subtotal || invoice.total || invoice.discount || invoice.amountReceived || invoice.paid || invoice.balance);
 	const snapshotOrder: Order = hasSnapshot
-		? { ...order, price: invoice.subtotal, discount: invoice.discount, paid: invoice.paid, priceSet: true }
+		? { ...order, price: invoice.subtotal, discount: invoice.discount, paid: invoice.paid, priceSet: Number(invoice.subtotal || 0) > 0 || order.priceSet !== false }
 		: order;
 	if (invoice.kind !== 'partial') {
 		return invoiceMessage(settings, invoice.number, snapshotOrder, customerToken, origin, {

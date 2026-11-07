@@ -1,4 +1,5 @@
 // Master control plane for owner accounts, tenant connections, encrypted secrets, and sessions.
+import { cached, clearCache } from './cache';
 import { dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
 import { controlSchemaStatements } from '../../../db/control-schema';
@@ -181,7 +182,8 @@ export async function authenticate(email: string, password: string, address: str
 	if (attempt && attempt.count >= 8 && new Date(attempt.reset_at).getTime() > Date.now()) return { rateLimited: true as const };
 	const row = await database.prepare(`SELECT a.*, t.status AS tenant_status FROM control_accounts a LEFT JOIN control_tenants t ON t.id = a.tenant_id WHERE lower(a.email) = lower(?)`).bind(normalized).first<TenantRow>();
 	const valid = row && await verifyPassword(password, String(row.password_hash));
-	if (!valid || (row.role === 'client_admin' && row.tenant_status !== 'active')) {
+	// Every workspace login (any team role) needs an active workspace; only the platform owner doesn't.
+	if (!valid || (row.role !== 'owner' && row.tenant_status !== 'active')) {
 		const resetAt = new Date(Date.now() + 15 * 60_000).toISOString();
 		await database.prepare('INSERT INTO control_login_attempts (key, count, reset_at) VALUES (?, 1, ?) ON CONFLICT (key) DO UPDATE SET count = CASE WHEN control_login_attempts.reset_at > ? THEN control_login_attempts.count + 1 ELSE 1 END, reset_at = CASE WHEN control_login_attempts.reset_at > ? THEN control_login_attempts.reset_at ELSE excluded.reset_at END')
 			.bind(attemptKey, resetAt, now(), now()).run();
@@ -201,8 +203,13 @@ export async function createAuthSession(account: Account) {
 	return { token: rawToken, maxAge: SESSION_DAYS * 86_400 };
 }
 
-export async function getAuthSession(rawToken?: string): Promise<AuthSession | null> {
-	if (!rawToken) return null;
+/** Session lookup (cached briefly per token; logout and any write request clear it). */
+export function getAuthSession(rawToken?: string): Promise<AuthSession | null> {
+	if (!rawToken) return Promise.resolve(null);
+	return cached(`session:${rawToken}`, () => loadAuthSession(rawToken));
+}
+
+async function loadAuthSession(rawToken: string): Promise<AuthSession | null> {
 	const database = await readyControlDatabase();
 	const row = await database.prepare(`SELECT s.id AS session_id, s.expires_at,
 		a.id AS account_id, a.email AS account_email, a.role AS account_role, a.tenant_id AS account_tenant_id,
@@ -213,13 +220,14 @@ export async function getAuthSession(rawToken?: string): Promise<AuthSession | n
 		t.last_validated_at AS tenant_last_validated_at, t.created_at AS tenant_created_at, t.updated_at AS tenant_updated_at
 		FROM control_sessions s JOIN control_accounts a ON a.id = s.account_id LEFT JOIN control_tenants t ON t.id = a.tenant_id
 		WHERE s.token_hash = ? AND s.expires_at > ?`).bind(await digest(rawToken), now()).first<TenantRow>();
-	if (!row || (row.account_role === 'client_admin' && row.tenant_status !== 'active')) return null;
+	if (!row || (row.account_role !== 'owner' && row.tenant_status !== 'active')) return null;
 	const account: Account = { id: row.account_id, email: row.account_email, role: row.account_role, tenantId: row.account_tenant_id || undefined };
 	return { id: row.session_id, account, tenant: await tenantFromRow(row), expiresAt: row.expires_at };
 }
 
 export async function destroyAuthSession(rawToken?: string) {
 	if (!rawToken) return;
+	clearCache(`session:${rawToken}`);
 	const database = await readyControlDatabase();
 	await database.prepare('DELETE FROM control_sessions WHERE token_hash = ?').bind(await digest(rawToken)).run();
 }
@@ -228,9 +236,11 @@ export async function destroyAuthSession(rawToken?: string) {
 export async function listTenantSummaries() {
 	// Show safe connection metadata in master control, never the Neon password or full URL.
 	const database = await readyControlDatabase();
+	// One row per workspace: join only its main admin, and count team members separately.
 	const result = await database.prepare(`SELECT t.*, a.email AS admin_email,
-		(SELECT COUNT(*) FROM control_sessions s WHERE s.account_id = a.id AND s.expires_at > ?) AS active_sessions
-		FROM control_tenants t LEFT JOIN control_accounts a ON a.tenant_id = t.id ORDER BY t.created_at`).bind(now()).all<TenantRow>();
+		(SELECT COUNT(*) FROM control_sessions s WHERE s.account_id = a.id AND s.expires_at > ?) AS active_sessions,
+		(SELECT COUNT(*) FROM control_accounts m WHERE m.tenant_id = t.id) AS member_count
+		FROM control_tenants t LEFT JOIN control_accounts a ON a.tenant_id = t.id AND a.role = 'client_admin' ORDER BY t.created_at`).bind(now()).all<TenantRow>();
 	return Promise.all((result.results || []).map(async (row) => {
 		const tenant = (await tenantFromRow(row))!;
 		let databaseHost = 'Stored securely';
@@ -243,7 +253,7 @@ export async function listTenantSummaries() {
 			databaseRole = decodeURIComponent(connection.username) || databaseRole;
 		} catch { /* Keep protected labels for malformed legacy URLs. */ }
 		const assignment = await getTenantPackage(tenant.id);
-		return { ...tenant, adminEmail: row.admin_email || '', activeSessions: Number(row.active_sessions || 0), databaseUrl: undefined, databaseHost, databaseName, databaseRole, packageId: assignment.package.id, packageName: assignment.package.name, packageVersion: assignment.package.version, packageUpdateAvailable: assignment.updateAvailable, entitlements: assignment.allowed };
+		return { ...tenant, adminEmail: row.admin_email || '', activeSessions: Number(row.active_sessions || 0), memberCount: Number((row as any).member_count || 0), databaseUrl: undefined, databaseHost, databaseName, databaseRole, packageId: assignment.package.id, packageName: assignment.package.name, packageVersion: assignment.package.version, packageUpdateAvailable: assignment.updateAvailable, entitlements: assignment.allowed };
 	}));
 }
 
@@ -354,9 +364,10 @@ export async function setTenantStatus(tenantId: string, status: TenantStatus, ow
 
 export async function updateTenantCredentials(tenantId: string, email: string, password: string, ownerId: string) {
 	const database = await readyControlDatabase();
-	const statements = [database.prepare('UPDATE control_accounts SET email = ?, updated_at = ? WHERE tenant_id = ?').bind(email.trim().toLowerCase(), now(), tenantId)];
-	if (password) statements.push(database.prepare('UPDATE control_accounts SET password_hash = ?, updated_at = ? WHERE tenant_id = ?').bind(await hashPassword(password), now(), tenantId));
-	statements.push(database.prepare('DELETE FROM control_sessions WHERE account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ?)').bind(tenantId));
+	// Only the workspace's main admin login; team members keep their own credentials and sessions.
+	const statements = [database.prepare("UPDATE control_accounts SET email = ?, updated_at = ? WHERE tenant_id = ? AND role = 'client_admin'").bind(email.trim().toLowerCase(), now(), tenantId)];
+	if (password) statements.push(database.prepare("UPDATE control_accounts SET password_hash = ?, updated_at = ? WHERE tenant_id = ? AND role = 'client_admin'").bind(await hashPassword(password), now(), tenantId));
+	statements.push(database.prepare("DELETE FROM control_sessions WHERE account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ? AND role = 'client_admin')").bind(tenantId));
 	statements.push(database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id('AUD'), ownerId, 'Client credentials changed', tenantId, email.trim().toLowerCase(), now()));
 	await database.batch(statements);
 }
@@ -377,9 +388,22 @@ export async function getTenantById(tenantId: string) {
 export async function assertConnectionsAvailable(databaseUrl: string, googleSheetId: string, excludeTenantId = '') {
 	const database = await readyControlDatabase();
 	const result = await database.prepare('SELECT id, database_url_cipher, google_sheet_id FROM control_tenants WHERE id != ?').bind(excludeTenantId).all<TenantRow>();
+	// Compare normalized identities: a Sheet given as a URL or a bare ID, and a database URL with a
+	// different query string or the pooled host, must still count as the same connection.
+	const sheetKey = (value: string) => (String(value || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)?.[1] || String(value || '').trim());
+	const databaseKey = (value: string) => {
+		try {
+			const url = new URL(value);
+			return `${url.hostname.replace('-pooler', '').toLowerCase()}${url.pathname}`;
+		} catch {
+			return String(value || '').trim();
+		}
+	};
+	const wantedSheet = sheetKey(googleSheetId);
+	const wantedDatabase = databaseKey(databaseUrl);
 	for (const row of result.results || []) {
-		if (row.google_sheet_id === googleSheetId) throw new Error('This Google Sheet is already assigned to another client.');
-		if (await decryptSecret(String(row.database_url_cipher)) === databaseUrl) throw new Error('This Neon database is already assigned to another client.');
+		if (wantedSheet && sheetKey(String(row.google_sheet_id || '')) === wantedSheet) throw new Error('This Google Sheet is already assigned to another client.');
+		if (databaseKey(await decryptSecret(String(row.database_url_cipher))) === wantedDatabase) throw new Error('This Neon database is already assigned to another client.');
 	}
 }
 

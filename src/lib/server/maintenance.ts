@@ -33,7 +33,9 @@ export async function runScheduledMaintenance(database: AppDatabase) {
 	const activityCutoff = new Date(timestamp);
 	activityCutoff.setUTCMonth(activityCutoff.getUTCMonth() - ACTIVITY_RETENTION_MONTHS);
 	const [syncResult, activityResult] = await database.batch([
-		database.prepare('DELETE FROM sheet_sync_outbox WHERE synced_at IS NOT NULL AND synced_at < ?').bind(syncCutoff),
+		// Rows are only change signals (sync writes a full snapshot), so stale unsynced rows, e.g. while
+		// Google Sheets is off or not configured, can be dropped too; the next successful sync rewrites everything.
+		database.prepare('DELETE FROM sheet_sync_outbox WHERE (synced_at IS NOT NULL AND synced_at < ?) OR (synced_at IS NULL AND created_at < ?)').bind(syncCutoff, syncCutoff),
 		database.prepare('DELETE FROM activity_logs WHERE created_at < ?').bind(activityCutoff.toISOString())
 	]);
 	const details = {

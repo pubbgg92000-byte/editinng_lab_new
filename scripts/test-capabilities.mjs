@@ -57,7 +57,9 @@ assert.deepEqual(
 		'editing-studio', 'garage-service', 'salon-spa', 'small-shop', 'contractor-services',
 		'hospitality-lite', 'electronics-repair', 'clinic-wellness',
 		'education-coaching', 'cleaning-home-services', 'logistics-delivery',
-		'event-services', 'property-services', 'general-service'
+		'event-services', 'property-services', 'general-service',
+		'car-garage', 'bike-service', 'hospital-front-desk', 'dental-clinic', 'diagnostic-lab',
+		'tailoring', 'photo-studio', 'printing-press', 'laundry', 'interior-fitout'
 	]
 );
 for (const niche of ['small-shop', 'hospitality-lite']) {

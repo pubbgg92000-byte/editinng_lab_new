@@ -41,3 +41,28 @@ export async function requestJson<T>(
 	if (body === null) throw new Error(`${fallbackMessage} The server returned an empty response.`);
 	return body;
 }
+
+/**
+ * Drop-in replacement for `fetch` in UI code that never throws and always returns a
+ * JSON body. Network failures become a 503 with a friendly `error`, and non-JSON error
+ * pages become `{ error }`. Callers keep their existing `response.ok` / `response.json()`
+ * handling, but can no longer get stuck in a busy state or fail silently.
+ */
+export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+	const jsonResponse = (body: unknown, status: number) =>
+		new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+	let response: Response;
+	try {
+		response = await fetch(input, init);
+	} catch {
+		return jsonResponse({ error: 'Connection problem. Check your internet and try again.' }, 503);
+	}
+	const status = response.status === 204 || response.status === 205 || response.status === 304 ? 200 : response.status;
+	const text = await response.text().catch(() => '');
+	if (!text) return jsonResponse({}, status);
+	try {
+		return jsonResponse(JSON.parse(text), status);
+	} catch {
+		return jsonResponse(response.ok ? {} : { error: `Something went wrong (error ${response.status}). Please try again.` }, status);
+	}
+}
