@@ -24,7 +24,13 @@
 	let saved = $state(false);
 	let saving = $state(false);
 	let error = $state('');
-	const activeTasks = $derived(tasks.filter((task) => task.status !== 'Completed'));
+	const editorStatuses: TaskStatus[] = ['Not started', 'Files downloaded', 'In progress', 'Waiting for clarification', 'Ready for review'];
+	const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+	const needsAction = (task: Task) => task.status === 'Revision required' || task.status === 'Waiting for clarification';
+	// Work that needs the editor's attention first, then by due date.
+	const activeTasks = $derived(tasks.filter((task) => task.status !== 'Completed').sort((a, b) =>
+		Number(needsAction(b)) - Number(needsAction(a)) || (a.due || '9999').localeCompare(b.due || '9999')));
+	const dueChip = (task: Task) => !task.due ? '' : task.due.slice(0, 10) < todayIso ? 'Overdue' : task.due.slice(0, 10) === todayIso ? 'Due today' : '';
 	const completedTasks = $derived(tasks.filter((task) => task.status === 'Completed'));
 	const staffLabel = $derived(labelFor(data.configuration.profile, 'staff'));
 	const taskLabel = $derived(labelFor(data.configuration.profile, 'task'));
@@ -43,6 +49,18 @@
 		notes = task.notes || '';
 		videoDuration = formatVideoDuration(task.videoDurationMinutes);
 		error = '';
+		// Phone back button returns to the list instead of leaving the portal.
+		history.pushState({ editorTask: task.id }, '');
+		window.scrollTo(0, 0);
+	}
+	function closeTask() {
+		if (history.state?.editorTask) history.back();
+		else selected = null;
+	}
+	async function markReady() {
+		status = 'Ready for review';
+		progress = 100;
+		await update();
 	}
 
 	async function update() {
@@ -54,7 +72,8 @@
 				method: 'PATCH',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
-					...(portalConfiguration.allowStatusUpdate && portalConfiguration.mode !== 'assignments-only' ? { status } : {}),
+					// Send status only when the editor changed it, so admin-set states like "Revision required" don't block saving notes or links.
+					...(portalConfiguration.allowStatusUpdate && portalConfiguration.mode !== 'assignments-only' && status !== selected.status ? { status } : {}),
 					...(portalConfiguration.allowProgressUpdate && portalSections.progress ? { progress } : {}),
 					...(portalSections.output ? { outputLink } : {}),
 					...(portalSections.notes ? { notes } : {}),
@@ -91,13 +110,14 @@
 	<meta name="twitter:image" content={socialImage} />
 	<meta name="robots" content="noindex,nofollow" />
 </svelte:head>
+<svelte:window onpopstate={() => { if (selected) selected = null; }} />
 <PortalHeader label={`${staffLabel} portal`} settings={data.settings} themeScope={data.tenantSlug}/>
 
 <main class="portal-main">
 	{#if !selected}
 		<div class="welcome"><span class="avatar">{data.editor.initials}</span><div><p>Welcome back</p><h1>{data.editor.name}</h1></div></div>
 		{#if customFieldsEnabled}<CustomFieldValues definitions={data.configuration.profile.customFields} entity="staff" values={data.editor.customFields} surface="staffPortal"/>{/if}
-		<div class="work-title"><h2>Active assignments</h2><span>{activeTasks.length} {labelFor(data.configuration.profile, 'task', true).toLowerCase()}</span></div>
+		<div class="work-title"><h2>Active assignments</h2><span>{activeTasks.length} {activeTasks.length === 1 ? labelFor(data.configuration.profile, 'task').toLowerCase() : labelFor(data.configuration.profile, 'task', true).toLowerCase()}</span></div>
 		{#if activeTasks.length}
 			<div class="task-cards">
 				{#each activeTasks as task}
@@ -105,15 +125,15 @@
 						<div class="task-card-top"><div><span class="customer">{task.customer}</span><h3>{task.project}</h3></div><StatusBadge status={task.status}/></div>
 						<p>{task.name}</p>
 						<div class="task-meta">{#if assetsEnabled && task.device}<span><HardDrive size={12}/> {task.device}</span>{/if}{#if durationEnabled && task.videoDurationMinutes}<span><Clock3 size={12}/> {formatVideoDuration(task.videoDurationMinutes)}</span>{/if}</div>
-						<div class="task-footer"><span><CalendarDays size={13}/> {task.due ? `Due ${formatDate(task.due)}` : 'No due date'}</span><span class="open">Open <ArrowUpRight size={13}/></span></div>
+						{#if (dueChip(task) && task.status !== 'Completed') || needsAction(task)}<div class="chip-row">{#if needsAction(task)}<b class="due-chip action">Needs you</b>{/if}{#if dueChip(task) && task.status !== 'Completed'}<b class="due-chip">{dueChip(task)}</b>{/if}</div>{/if}<div class="task-footer"><span><CalendarDays size={13}/> {task.due ? `Due ${formatDate(task.due)}` : 'No due date'}</span><span class="open">Open <ArrowUpRight size={13}/></span></div>
 					</button>
 				{/each}
 			</div>
 		{:else}<div class="empty card"><Check size={22}/><h2>You’re all caught up</h2><p>No active assignments are available.</p></div>{/if}
 		{#if completedTasks.length}<div class="work-title completed-title"><h2>Completed work</h2><span>{completedTasks.length} approved</span></div><div class="task-cards completed-cards">{#each completedTasks as task}<button type="button" class="task-card" onclick={() => openTask(task)}><div class="task-card-top"><div><span class="customer">{task.customer}</span><h3>{task.project}</h3></div><StatusBadge status={task.status}/></div><p>{task.name}</p><div class="task-footer"><span><Check size={13}/> Approved</span><span class="open">View <ArrowUpRight size={13}/></span></div></button>{/each}</div>{/if}
 	{:else}
-		<button type="button" class="back" onclick={() => selected = null}><ChevronLeft size={15}/> All {labelFor(data.configuration.profile, 'task', true).toLowerCase()}</button>
-		<header class="task-heading"><div><span>{selected.customer}</span><h1>{selected.project}</h1><p>{selected.name}</p></div><StatusBadge status={status}/></header>
+		<button type="button" class="back" onclick={closeTask}><ChevronLeft size={15}/> All {labelFor(data.configuration.profile, 'task', true).toLowerCase()}</button>
+		<header class="task-heading"><div><span>{selected.customer}</span><h1>{selected.project}</h1><p>{selected.name}</p></div><StatusBadge status={selected.status}/></header>
 		<div class:single={portalConfiguration.mode === 'assignments-only'} class="task-layout">
 			<section class="card details">
 				<h2>Work details</h2>
@@ -126,16 +146,19 @@
 					{#if !selected.textLink && !selected.imageUrl}<span><FolderOpen size={14}/> No reference link added</span>{/if}
 				</div>{/if}
 			</section>
-			{#if portalConfiguration.mode !== 'assignments-only'}<section class="card update">
+			{#if selected.status === 'Completed'}<section class="card update"><h2>Approved</h2><p class="locked-note">This work was approved and is now locked. Ask the administrator if anything needs to change.</p></section>{:else if portalConfiguration.mode !== 'assignments-only'}<section class="card update">
 				<h2>Update {taskLabel.toLowerCase()}</h2>
-				{#if portalConfiguration.allowStatusUpdate}<div class="field"><label for="task-status">Status</label><select id="task-status" bind:value={status}>{#each ['Not started', 'Files downloaded', 'In progress', 'Waiting for clarification', 'Ready for review'] as option}<option value={option}>{statusFor(data.configuration.profile, option).label}</option>{/each}</select></div>{/if}
+				{#if portalConfiguration.allowStatusUpdate}<fieldset class="field status-pick"><legend>Status</legend>{#if !editorStatuses.includes(selected.status)}<p class="current-note">Current: <b>{statusFor(data.configuration.profile, selected.status).label}</b>. Pick a new status only when it changes.</p>{/if}<div class="chips">{#each editorStatuses as option}<label class="chip" class:on={status === option}><input type="radio" name="task-status" value={option} bind:group={status}/>{statusFor(data.configuration.profile, option).label}</label>{/each}</div></fieldset>{/if}
 				{#if portalSections.progress}<ProgressDisplay milestones={portalConfiguration.milestones} status={status} percent={progress} mode={portalConfiguration.progressMode} label={`${taskLabel} progress`}/>{/if}
-				{#if portalConfiguration.allowProgressUpdate && portalSections.progress}<div class="field"><label for="task-progress">Set progress <b>{progress}%</b></label><input id="task-progress" class="range" type="range" min="0" max="100" step="10" bind:value={progress}/></div>{/if}
+				{#if portalConfiguration.allowProgressUpdate && portalSections.progress}<div class="field"><label for="task-progress">Set progress <b>{progress}%</b></label><div class="chips progress-chips" role="group" aria-label="Quick progress">{#each [0, 25, 50, 75, 100] as value}<button type="button" class="chip" class:on={progress === value} aria-pressed={progress === value} onclick={() => (progress = value)}>{value}%</button>{/each}</div><input id="task-progress" class="range" type="range" min="0" max="100" step="5" bind:value={progress} aria-label="Fine-tune progress"/></div>{/if}
 				{#if durationEnabled}<div class="field duration-field"><label for="video-duration">Work duration <span>Optional</span></label><div class="with-icon"><Clock3 size={14}/><input id="video-duration" bind:value={videoDuration} placeholder="30 min, 1.5 hr, or 1:30"/></div><small>Add the time spent on this work. You can correct it later.</small></div>{/if}
 				{#if portalSections.output}<div class="field"><label for="task-output">Completion or delivery link <span>Optional</span></label><div class="with-icon"><FileUp size={14}/><input id="task-output" type="url" inputmode="url" bind:value={outputLink} placeholder="Paste a completed-work or delivery link"/></div></div>{/if}
 				{#if portalSections.notes}<div class="field"><label for="task-notes">Notes for administrator <span>Optional</span></label><textarea id="task-notes" bind:value={notes} placeholder="Add an update, question, or missing-information report..."></textarea></div>{/if}
 				{#if error}<p class="error">{error}</p>{/if}
-				<button type="button" class="primary save" disabled={saving} aria-busy={saving} onclick={update}>{saving ? 'Saving…' : `Update ${taskLabel.toLowerCase()}`}</button>
+				<div class="save-row">
+					{#if portalConfiguration.allowStatusUpdate && selected.status !== 'Ready for review'}<button type="button" class="secondary ready" disabled={saving} onclick={markReady}><Check size={16}/> Mark ready for review</button>{/if}
+					<button type="button" class="primary save" disabled={saving} aria-busy={saving} onclick={update}>{saving ? 'Saving…' : 'Save update'}</button>
+				</div>
 				{#if saved}<div class="saved" role="status" aria-live="polite"><Check size={13}/> Update saved</div>{/if}
 			</section>{/if}
 		</div>
@@ -143,7 +166,35 @@
 </main>
 
 <style>
-	.portal-main{max-width:880px;margin:0 auto;padding:58px 22px 80px}.welcome{display:flex;align-items:center;gap:14px;margin-bottom:46px}.avatar{width:44px;height:44px;border-radius:12px;background:var(--theme-soft);color:var(--purple);display:grid;place-items:center;font-size:12px;font-weight:700}.welcome p{color:var(--muted);font-size:11px;margin:0 0 3px}.welcome h1{font-size:22px;margin:0}.work-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.work-title h2{font-size:13px;margin:0}.work-title span{color:var(--muted);font-size:10px}.task-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}.task-card{display:block;text-align:left;border:1px solid var(--line);background:var(--card);color:inherit;border-radius:12px;padding:18px;transition:.15s}.task-card:hover{transform:translateY(-2px);border-color:var(--purple)}.task-card-top{display:flex;align-items:start;justify-content:space-between}.customer{color:var(--muted);font-size:9px}.task-card h3{font-size:14px;margin:4px 0}.task-card>p{color:var(--purple);font-size:10px;margin:14px 0 25px}.task-footer{border-top:1px solid var(--line);padding-top:12px;display:flex;justify-content:space-between;color:var(--muted);font-size:9px}.task-footer span,.references a,.references span{display:flex;align-items:center;gap:5px}.task-footer .open{color:var(--purple)}.empty{text-align:center;padding:50px;color:var(--muted)}.empty h2{color:inherit}.back{display:flex;gap:5px;align-items:center;border:0;background:transparent;color:var(--muted);font-size:10px;padding:0;margin-bottom:27px}.task-heading{display:flex;align-items:start;justify-content:space-between;margin-bottom:24px}.task-heading span{color:var(--muted);font-size:10px}.task-heading h1{font-size:24px;margin:4px 0}.task-heading p{color:var(--purple);font-size:11px;margin:0}.task-layout{display:grid;grid-template-columns:1fr 1fr;gap:14px}.details,.update{padding:20px}.details h2,.update h2{font-size:12px;margin:0 0 20px}.details dl{margin:0}.details dl div{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:10px}.details dt,.instructions span{color:var(--muted)}.details dd{margin:0}.instructions{margin-top:19px}.instructions span{font-size:10px}.instructions p{font-size:10px;line-height:1.7;color:inherit}.references{display:grid;gap:8px;margin-top:20px}.references a,.references span{min-height:36px;justify-content:center;border:1px solid var(--line);background:var(--theme-soft);color:var(--purple);border-radius:8px;font-size:10px}.references span{color:var(--muted)}.update{display:flex;flex-direction:column;gap:16px}.update h2{margin-bottom:3px}.field label{display:flex;justify-content:space-between}.field label b{color:var(--purple)}.range{padding:5px 0!important;accent-color:var(--purple)}.with-icon{position:relative}.with-icon input{padding-left:32px}.save{width:100%;margin-top:2px}.saved{display:flex;align-items:center;justify-content:center;gap:6px;color:#45c982;font-size:9px}.error{color:#ef7777;font-size:10px;margin:0}.portal-main :global(.badge){pointer-events:none}@media(max-width:650px){.task-cards,.task-layout{grid-template-columns:1fr}.portal-main{padding-top:38px}}
+	.locked-note{margin:6px 0 0;font-size:14px;line-height:1.5;color:var(--muted, #64748b)}
+	.portal-main{max-width:880px;margin:0 auto;padding:58px 22px 80px}.welcome{display:flex;align-items:center;gap:14px;margin-bottom:46px}.avatar{width:44px;height:44px;border-radius:12px;background:var(--theme-soft);color:var(--purple);display:grid;place-items:center;font-size:13px;font-weight:700}.welcome p{color:var(--muted);font-size:12.5px;margin:0 0 3px}.welcome h1{font-size:22px;margin:0}.work-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.work-title h2{font-size:14px;margin:0}.work-title span{color:var(--muted);font-size:12px}.task-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}.task-card{display:block;text-align:left;border:1px solid var(--line);background:var(--card);color:inherit;border-radius:12px;padding:18px;transition:.15s}.task-card:hover{border-color:var(--purple)}.task-card-top{display:flex;align-items:start;justify-content:space-between}.customer{color:var(--muted);font-size:11px}.task-card h3{font-size:14px;margin:4px 0}.task-card>p{color:var(--purple);font-size:12px;margin:14px 0 25px}.task-footer{border-top:1px solid var(--line);padding-top:12px;display:flex;justify-content:space-between;color:var(--muted);font-size:11px}.task-footer span,.references a,.references span{display:flex;align-items:center;gap:5px}.task-footer .open{color:var(--purple)}.empty{text-align:center;padding:50px;color:var(--muted)}.empty h2{color:inherit}.back{display:flex;gap:5px;align-items:center;border:0;background:transparent;color:var(--muted);font-size:12px;padding:0;margin-bottom:27px}.task-heading{display:flex;align-items:start;justify-content:space-between;margin-bottom:24px}.task-heading span{color:var(--muted);font-size:12px}.task-heading h1{font-size:24px;margin:4px 0}.task-heading p{color:var(--purple);font-size:12.5px;margin:0}.task-layout{display:grid;grid-template-columns:1fr 1fr;gap:14px}.details,.update{padding:20px}.details h2,.update h2{font-size:13px;margin:0 0 20px}.details dl{margin:0}.details dl div{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:12px}.details dt,.instructions span{color:var(--muted)}.details dd{margin:0}.instructions{margin-top:19px}.instructions span{font-size:12px}.instructions p{font-size:12px;line-height:1.7;color:inherit}.references{display:grid;gap:8px;margin-top:20px}.references a,.references span{min-height:36px;justify-content:center;border:1px solid var(--line);background:var(--theme-soft);color:var(--purple);border-radius:8px;font-size:12px}.references span{color:var(--muted)}.update{display:flex;flex-direction:column;gap:16px}.update h2{margin-bottom:3px}.field label{display:flex;justify-content:space-between}.field label b{color:var(--purple)}.range{padding:5px 0!important;accent-color:var(--purple)}.with-icon{position:relative}.with-icon input{padding-left:32px}.save{width:100%;margin-top:2px}.saved{display:flex;align-items:center;justify-content:center;gap:6px;color:#45c982;font-size:11px}.error{color:#ef7777;font-size:12px;margin:0}.portal-main :global(.badge){pointer-events:none}@media(max-width:650px){.task-cards,.task-layout{grid-template-columns:1fr}.portal-main{padding-top:38px}}
 	.completed-title{margin-top:34px}.completed-cards{opacity:.86}.completed-cards .task-card{background:color-mix(in srgb,var(--card) 94%,#22c55e 6%)}
-	.task-card>p{margin-bottom:12px}.task-meta{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.task-meta span{display:flex;align-items:center;gap:4px;padding:5px 7px;border-radius:99px;background:var(--theme-soft);color:var(--muted);font-size:8px}.details dl div{gap:14px}.details dd{text-align:right}.field small{color:var(--muted);font-size:8px;line-height:1.5}.duration-field{padding:13px;border:1px solid color-mix(in srgb,var(--purple) 30%,var(--line));border-radius:10px;background:var(--theme-soft)}.with-icon :global(svg){position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--purple)}.task-layout.single{grid-template-columns:1fr}
+	.task-card>p{margin-bottom:12px}.task-meta{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.task-meta span{display:flex;align-items:center;gap:4px;padding:5px 7px;border-radius:99px;background:var(--theme-soft);color:var(--muted);font-size:11px}.details dl div{gap:14px}.details dd{text-align:right}.field small{color:var(--muted);font-size:11px;line-height:1.5}.duration-field{padding:13px;border:1px solid color-mix(in srgb,var(--purple) 30%,var(--line));border-radius:10px;background:var(--theme-soft)}.with-icon :global(svg){position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--purple)}.task-layout.single{grid-template-columns:1fr}
+
+	/* Phone-first sizing: readable text, 44px targets, 16px inputs (prevents iOS zoom on focus). */
+	.portal-main{padding:28px 16px 64px}
+	.portal-main :global(input:not([type="radio"]):not([type="range"])),.portal-main textarea{font-size:16px;min-height:46px}
+	.portal-main textarea{min-height:96px}
+	.task-card{min-height:44px}
+	.status-pick{border:0;margin:0;padding:0}
+	.status-pick legend{font-size:14px;font-weight:600;margin-bottom:8px;padding:0}
+	.current-note{margin:0 0 8px;font-size:14px;color:var(--muted)}
+	.chips{display:flex;flex-wrap:wrap;gap:8px}
+	.chip{display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--theme-text);font-size:14px;font-weight:600;cursor:pointer}
+	.chip.on{background:var(--purple);border-color:var(--purple);color:var(--accent-text,#fff)}
+	.chip input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+	.chip:has(input:focus-visible){outline:2px solid var(--purple);outline-offset:2px}
+	.progress-chips{margin-bottom:6px}
+	.save-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+	.save-row button{flex:1 1 200px;min-height:48px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:15px}
+	.due-chip{margin-left:8px;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,#dc2626 14%,transparent);color:#b91c1c;font-size:12px;font-weight:700}
+	.due-chip.action{background:color-mix(in srgb,#d97706 16%,transparent);color:#92400e}
+	.back{min-height:44px;font-size:14px}
+	@media (min-width:700px){.portal-main{padding:48px 22px 80px}}
+
+	.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+	.chip-row .due-chip{margin-left:0;white-space:nowrap}
+	.progress-chips{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+	.progress-chips .chip{justify-content:center;padding:0 6px}
+	.task-footer span{white-space:nowrap}
 </style>

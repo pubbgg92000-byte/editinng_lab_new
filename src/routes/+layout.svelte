@@ -4,11 +4,16 @@
 	import { onMount } from 'svelte';
 	import { applyTheme, getLastWorkspaceTheme, getStoredTheme } from '$lib/theme';
 	import { hasCapability } from '$lib/capabilities';
+	import { page } from '$app/state';
+	import TopProgress from '$lib/components/TopProgress.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let { children, data } = $props();
 	const displayName = $derived(hasCapability(data.configuration?.effectiveCapabilities, 'branding.whiteLabel') ? data.settings.studioName : 'NexaDesk');
 	const displayLogo = $derived(hasCapability(data.configuration?.effectiveCapabilities, 'branding.whiteLabel') ? data.settings.logoUrl : '');
 	const socialImage = $derived(`${data.appUrl}/nexadesk-social.png`);
+	// Portal pages set their own preview tags; the generic ones must not appear first (link previews read the first tag).
+	const isPortal = $derived(/^\/(portal|customer|editor)\//.test(page.url.pathname));
 	const siteDescription = 'Customer relationships, service workflows, team assignments, billing, portals, and delivery in one secure platform.';
 	onMount(() => {
 		const selection = data.useLastWorkspaceTheme
@@ -36,8 +41,8 @@
 			document.documentElement.style.colorScheme = 'light';
 		}
 	</script>
-	<link rel="icon" href={displayLogo || '/nexadesk.svg'} />
-	<link rel="apple-touch-icon" href={displayLogo || '/nexadesk.svg'} />
+	<link rel="icon" href={displayLogo || '/favicon.svg'} type={displayLogo ? undefined : 'image/svg+xml'} />
+	<link rel="apple-touch-icon" href={displayLogo || '/apple-touch-icon.png'} />
 	<link rel="canonical" href={data.pageUrl} />
 	<meta name="theme-color" content="#0F1115" media="(prefers-color-scheme: dark)" />
 	<meta name="theme-color" content="#F8FAFC" media="(prefers-color-scheme: light)" />
@@ -45,6 +50,7 @@
 	<meta name="application-name" content="NexaDesk" />
 	<meta name="robots" content="noindex, nofollow" />
 
+	{#if !isPortal}
 	<meta property="og:type" content="website" />
 	<meta property="og:site_name" content={displayName} />
 	<meta property="og:title" content={displayName} />
@@ -61,5 +67,8 @@
 	<meta name="twitter:description" content={siteDescription} />
 	<meta name="twitter:image" content={socialImage} />
 	<meta name="twitter:image:alt" content="NexaDesk — universal business operations" />
+	{/if}
 </svelte:head>
+<TopProgress />
+<ConfirmDialog />
 {@render children()}

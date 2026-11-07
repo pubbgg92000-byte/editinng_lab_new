@@ -52,4 +52,4 @@
 	{#snippet footer()}<button type="button" class="secondary" disabled={saving} onclick={() => open = false}>Cancel</button><button type="button" class="primary" disabled={saving} aria-busy={saving} onclick={save}>{saving ? 'Saving…' : 'Save billing'}</button>{/snippet}
 </Modal>
 
-<style>.summary{display:grid;gap:7px;margin-top:16px;border:1px solid var(--line);border-radius:10px;background:var(--theme-soft);padding:12px}.summary div{display:flex;justify-content:space-between;gap:12px;font-size:10px}.summary span{color:var(--muted)}.error{color:#ef4444;font-size:10px;margin-top:12px}</style>
+<style>.summary{display:grid;gap:7px;margin-top:16px;border:1px solid var(--line);border-radius:10px;background:var(--theme-soft);padding:12px}.summary div{display:flex;justify-content:space-between;gap:12px;font-size:12px}.summary span{color:var(--muted)}.error{color:#ef4444;font-size:12px;margin-top:12px}</style>

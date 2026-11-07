@@ -1,236 +1,173 @@
-<!-- Editor directory: availability, assigned tasks, portal links, devices, and archive lifecycle. -->
+<!-- Team directory: availability, open and approved work, private portal link, WhatsApp, archive lifecycle. -->
 <script lang="ts">
+      import LinkReadyDialog from '$lib/components/LinkReadyDialog.svelte';
+import { allowed } from '$lib/stores/permissions';
+import { confirmDanger } from "$lib/stores/confirm";
+  import { safeFetch } from "$lib/http";
   import { onMount, untrack } from "svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import EditorModal from "$lib/components/EditorModal.svelte";
   import DirectWhatsAppModal from "$lib/components/DirectWhatsAppModal.svelte";
   import Modal from "$lib/components/Modal.svelte";
+  import StatusBadge from "$lib/components/StatusBadge.svelte";
   import WhatsAppIcon from "$lib/components/WhatsAppIcon.svelte";
   import CustomFieldValues from "$lib/components/CustomFieldValues.svelte";
-  import {
-    Pencil,
-    Link2,
-    Check,
-    Archive,
-    RotateCcw,
-    Eye,
-    Phone,
-    Sparkles,
-    ClipboardList,
-    Trash2,
-    RefreshCw,
-    ArrowLeft,
-    MapPin,
-    ExternalLink,
-  } from "@lucide/svelte";
+  import { Pencil, Link2, Archive, RotateCcw, Phone, Trash2, ArrowLeft, MapPin, ExternalLink, MoreHorizontal, ChevronRight, Search, RefreshCw } from "@lucide/svelte";
   import { editorStore } from "$lib/stores/app";
   import { formatDate } from "$lib/data";
   import type { Editor, Order } from "$lib/types";
-  import { hasCapability, labelFor, statusFor } from "$lib/capabilities";
-  import { flashAction, notifyAction } from "$lib/stores/actionFeedback";
+  import { hasCapability, labelFor } from "$lib/capabilities";
+  import { notifyAction } from "$lib/stores/actionFeedback";
 
   let { data } = $props();
-  const staffLabel = $derived(labelFor(data.configuration?.profile, "staff"));
-  const taskLabel = $derived(labelFor(data.configuration?.profile, "task"));
-  const customerLabel = $derived(labelFor(data.configuration?.profile, "customer"));
+  const profile = $derived(data.configuration?.profile);
+  const staffLabel = $derived(labelFor(profile, "staff"));
+  const staffPlural = $derived(labelFor(profile, "staff", true));
+  const taskPlural = $derived(labelFor(profile, "task", true));
   const portalEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "work.staffPortal"));
   const whatsappEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "communications.whatsapp"));
   const customFieldsEnabled = $derived(hasCapability(data.configuration?.effectiveCapabilities, "customFields"));
+
   let editors = $state<Editor[]>(untrack(() => data.editors));
   let orders = $state<Order[]>(untrack(() => data.orders));
   let showEditor = $state(false);
   let editing = $state<Editor | null>(null);
-  let copied = $state("");
   let showArchived = $state(false);
-  let message = $state("");
+  let query = $state("");
   let detailsOpen = $state(false);
   let detailEditor = $state<Editor | null>(null);
-  let reconciling = $state(false);
-  let mapOpen = $state(false);
-  let mapTarget = $state("");
+  let detailTab = $state<"open" | "done">("open");
   let directWhatsAppOpen = $state(false);
   let directEditor = $state<Editor | null>(null);
-  const visibleEditors = $derived(
-    editors.filter((editor) => Boolean(editor.archived) === showArchived),
-  );
-  const directEditorOrders = $derived(
-    directEditor
-      ? orders.filter((order) =>
-          order.tasks.some((task) => !task.archived && task.editorId === directEditor?.id))
-      : [],
-  );
+  let menuFor = $state("");
+  let busy = $state("");
+
+  // Re-sync after shared data reloads so counts never go stale.
+  $effect(() => {
+    const next = { editors: data.editors, orders: data.orders };
+    untrack(() => {
+      editors = next.editors;
+      orders = next.orders;
+      if (detailEditor) detailEditor = next.editors.find((item: Editor) => item.id === detailEditor?.id) || detailEditor;
+    });
+  });
+
+  const archivedCount = $derived(editors.filter((editor) => Boolean(editor.archived)).length);
+  const visibleEditors = $derived(editors.filter((editor) =>
+    Boolean(editor.archived) === showArchived &&
+    `${editor.name} ${editor.specialty || ""} ${editor.phone || ""}`.toLowerCase().includes(query.trim().toLowerCase())));
 
   function tasksFor(editorId: string) {
-    return orders.flatMap((order) =>
-      order.tasks
-        .filter((task) => task.editorId === editorId && !task.archived)
-        .map((task) => ({
-          ...task,
-          project: order.project,
-          customer: order.customer,
-          orderId: order.id,
-        })),
-    );
+    return orders.flatMap((order) => order.tasks
+      .filter((task) => task.editorId === editorId && !task.archived)
+      .map((task) => ({ ...task, project: order.project, customer: order.customer, orderId: order.id })));
   }
+  const openCount = (editorId: string) => tasksFor(editorId).filter((task) => task.status !== "Completed").length;
+  const detailTasks = $derived(detailEditor ? tasksFor(detailEditor.id) : []);
+  const detailOpenTasks = $derived(detailTasks.filter((task) => task.status !== "Completed"));
+  const detailDoneTasks = $derived(detailTasks.filter((task) => task.status === "Completed"));
+  const directEditorOrders = $derived(directEditor ? orders.filter((order) => order.tasks.some((task) => !task.archived && task.editorId === directEditor?.id)) : []);
+
+  const availabilityText = (editor: Editor) => editor.archived ? "Archived" : editor.availability === "busy" ? "Busy" : editor.availability === "inactive" ? "Not taking work" : "Available";
+
   function openEditor(editor: Editor | null = null) {
+    menuFor = "";
+    detailsOpen = false;
     editing = editor;
     showEditor = true;
   }
   function openDetails(editor: Editor) {
+    menuFor = "";
     detailEditor = editor;
+    detailTab = "open";
     detailsOpen = true;
   }
-  function previewMap(url: string | undefined) { if (!url) return; mapTarget = url; mapOpen = true; }
   function openEditorChat(editor: Editor) {
+    menuFor = "";
     if (!editor.phone) return;
     directEditor = editor;
     directWhatsAppOpen = true;
   }
-  function editDetails(editor: Editor) {
-    detailsOpen = false;
-    openEditor(editor);
-  }
   function saved(editor: Editor) {
-    const index = editors.findIndex((item) => item.id === editor.id);
-    editors =
-      index < 0
-        ? [...editors, editor]
-        : editors.map((item) => (item.id === editor.id ? editor : item));
+    editors = editors.some((item) => item.id === editor.id) ? editors.map((item) => (item.id === editor.id ? editor : item)) : [...editors, editor];
     if (detailEditor?.id === editor.id) detailEditor = editor;
-    editorStore.update((items) =>
-      items.some((item) => item.id === editor.id)
-        ? items.map((item) => (item.id === editor.id ? editor : item))
-        : [editor, ...items],
-    );
+    editorStore.update((items) => items.some((item) => item.id === editor.id) ? items.map((item) => (item.id === editor.id ? editor : item)) : [editor, ...items]);
     notifyAction(`${staffLabel} saved.`);
   }
+  let linkReady = $state({ open: false, name: "", phone: "", link: "", replaced: false });
+  // Replace a staff member's private link (the old one stops working), then offer copy / WhatsApp.
+  async function replacePortal(editor: Editor) {
+    menuFor = "";
+    if (!await confirmDanger(`Create a new private link for ${editor.name}?\n\nThe old link will stop working. Their work and history stay the same.`, "Yes, create new link")) return;
+    busy = editor.id;
+    const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "regenerate-token" }) });
+    const result = await response.json();
+    busy = "";
+    if (!response.ok) { notifyAction(result.error || "Couldn't create a new link.", "error"); return; }
+    const token = result.token as string;
+    editors = editors.map((item) => (item.id === editor.id ? { ...item, token } : item));
+    if (detailEditor?.id === editor.id) detailEditor = { ...detailEditor, token };
+    editorStore.update((items) => items.map((item) => (item.id === editor.id ? { ...item, token } : item)));
+    linkReady = { open: true, name: editor.name, phone: editor.phone, link: `${location.origin}/portal/${data.tenantSlug}/editor/${token}`, replaced: true };
+  }
   async function copyPortal(editor: Editor) {
+    menuFor = "";
     let token = editor.token;
     if (!token) {
-      const response = await fetch(`/api/editors/${editor.id}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "regenerate-token" }),
-      });
+      busy = editor.id;
+      const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "regenerate-token" }) });
       const result = await response.json();
-      if (!response.ok) {
-        message = result.error || "Unable to create the editor portal link";
-        return;
-      }
-      token = result.token;
-      editors = editors.map((item) =>
-        item.id === editor.id ? { ...item, token } : item,
-      );
-      if (detailEditor?.id === editor.id)
-        detailEditor = { ...detailEditor, token };
-      editorStore.update((items) =>
-        items.map((item) => (item.id === editor.id ? { ...item, token } : item)),
-      );
+      busy = "";
+      if (!response.ok) { notifyAction(result.error || "Couldn't create the private link.", "error"); return; }
+      token = result.token as string;
+      editors = editors.map((item) => (item.id === editor.id ? { ...item, token } : item));
+      if (detailEditor?.id === editor.id) detailEditor = { ...detailEditor, token };
+      editorStore.update((items) => items.map((item) => (item.id === editor.id ? { ...item, token } : item)));
     }
-    await navigator.clipboard.writeText(
-      `${location.origin}/portal/${data.tenantSlug}/editor/${token}`,
-    );
-    copied = editor.id;
-    notifyAction(`Private ${staffLabel.toLowerCase()} portal link copied.`);
-    setTimeout(() => (copied = ""), 1800);
+    try {
+      await navigator.clipboard.writeText(`${location.origin}/portal/${data.tenantSlug}/editor/${token}`);
+      notifyAction(`Private link copied. Send it to ${editor.name} so they can update their work.`);
+    } catch {
+      notifyAction("Couldn't copy automatically. Open their page and copy the address instead.", "error");
+    }
   }
+  const syncNote = (sync: { configured?: boolean; failed?: number } | undefined) => (sync?.configured && !sync?.failed ? "" : " Google Sheets will update shortly.");
   async function archiveEditor(editor: Editor) {
-    if (
-      !confirm(`Archive ${editor.name}? Assigned work will remain in history.`)
-    )
-      return;
-    const response = await fetch(`/api/editors/${editor.id}`, {
-      method: "DELETE",
-    });
+    menuFor = "";
+    if (!await confirmDanger(`Archive ${editor.name}?\n\nTheir past work stays in history and their private link stops working. You can restore them later.`)) return;
+    busy = editor.id;
+    const response = await safeFetch(`/api/editors/${editor.id}`, { method: "DELETE" });
     const result = await response.json();
-    if (!response.ok) {
-      message = result.error || "Unable to archive editor";
-      return;
-    }
-    editors = editors.map((item) =>
-      item.id === editor.id ? result.editor : item,
-    );
+    busy = "";
+    if (!response.ok) { notifyAction(result.error || `Couldn't archive this ${staffLabel.toLowerCase()}.`, "error"); return; }
+    editors = editors.map((item) => (item.id === editor.id ? result.editor : item));
     detailsOpen = false;
     detailEditor = null;
-    editorStore.update((items) =>
-      items.filter((item) => item.id !== editor.id),
-    );
-    message =
-      result.sync?.configured && !result.sync?.failed
-        ? "Editor archived in the database and Google Sheets"
-        : "Editor archived in the database; Google Sheets update is queued";
-    notifyAction(`${staffLabel} archived.`);
+    editorStore.update((items) => items.filter((item) => item.id !== editor.id));
+    notifyAction(`${editor.name} archived.${syncNote(result.sync)}`);
   }
   async function restoreEditor(editor: Editor) {
-    const response = await fetch(`/api/editors/${editor.id}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "restore" }),
-    });
+    busy = editor.id;
+    const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "restore" }) });
     const result = await response.json();
-    if (!response.ok) {
-      message = result.error || "Unable to restore editor";
-      return;
-    }
-    editors = editors.map((item) =>
-      item.id === editor.id ? result.editor : item,
-    );
-    editorStore.update((items) => [
-      result.editor,
-      ...items.filter((item) => item.id !== editor.id),
-    ]);
-    message =
-      result.sync?.configured && !result.sync?.failed
-        ? "Editor restored in the database and Google Sheets"
-        : "Editor restored in the database; Google Sheets update is queued";
-    notifyAction(`${staffLabel} restored.`);
+    busy = "";
+    if (!response.ok) { notifyAction(result.error || `Couldn't restore this ${staffLabel.toLowerCase()}.`, "error"); return; }
+    editors = editors.map((item) => (item.id === editor.id ? result.editor : item));
+    editorStore.update((items) => [result.editor, ...items.filter((item) => item.id !== editor.id)]);
+    notifyAction(`${editor.name} restored.${syncNote(result.sync)}`);
   }
   async function permanentlyDelete(editor: Editor) {
-    if (
-      !confirm(
-        `Permanently delete ${editor.name}? This cannot be undone. Their existing tasks will be kept and changed to Unassigned.`,
-      )
-    )
-      return;
-    const response = await fetch(`/api/editors/${editor.id}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "delete-permanently" }),
-    });
+    if (!await confirmDanger(`Delete ${editor.name} permanently?\n\nThis can't be undone. Their past ${taskPlural.toLowerCase()} are kept and marked "Unassigned".`)) return;
+    busy = editor.id;
+    const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "delete-permanently" }) });
     const result = await response.json();
-    if (!response.ok) {
-      message = result.error || "Unable to delete editor";
-      return;
-    }
+    busy = "";
+    if (!response.ok) { notifyAction(result.error || `Couldn't delete this ${staffLabel.toLowerCase()}.`, "error"); return; }
     editors = editors.filter((item) => item.id !== editor.id);
-    editorStore.update((items) =>
-      items.filter((item) => item.id !== editor.id),
-    );
+    editorStore.update((items) => items.filter((item) => item.id !== editor.id));
     detailsOpen = false;
     detailEditor = null;
-    message =
-      result.sync?.configured && !result.sync?.failed
-        ? `${editor.name} permanently deleted from the database and Google Sheets`
-        : `${editor.name} deleted from the database; Google Sheets deletion is queued until writable credentials are added`;
-    notifyAction(`${staffLabel} permanently deleted.`);
-  }
-  async function reconcileEditors() {
-    reconciling = true;
-    message = "";
-    const response = await fetch("/api/editors/reconcile", { method: "POST" });
-    const result = await response.json();
-    reconciling = false;
-    if (!response.ok) {
-      message = result.error || "Unable to reconcile editors with Sheets";
-      return;
-    }
-    message = result.editorsArchived
-      ? `${result.editorsArchived} ${staffLabel.toLowerCase()} record(s) missing from Sheets moved to Archived.`
-      : `${labelFor(data.configuration?.profile, "staff", true)} already match Google Sheets.`;
-    if (result.editorsArchived) {
-      flashAction(message);
-      location.reload();
-    } else notifyAction(message);
+    notifyAction(`${editor.name} deleted.${syncNote(result.sync)}`);
   }
   onMount(() => {
     const editorId = new URL(location.href).searchParams.get("editor");
@@ -242,635 +179,209 @@
   });
 </script>
 
+<svelte:window
+  onclick={(event) => { if (menuFor && !(event.target as Element).closest?.(".card-menu")) menuFor = ""; }}
+  onkeydown={(event) => { if (event.key === "Escape") menuFor = ""; }}
+/>
+
 <PageHeader
-  eyebrow="Team availability and work allocation"
-  title={labelFor(data.configuration?.profile, "staff", true)}
-  action={`New ${staffLabel.toLowerCase()}`}
+  eyebrow={showArchived ? `Restore or remove past ${staffPlural.toLowerCase()}.` : "Who's on the team, and how much work each person has."}
+  title={showArchived ? `Archived ${staffPlural.toLowerCase()}` : staffPlural}
+  action={showArchived || !allowed("staff.manage") ? undefined : `New ${staffLabel.toLowerCase()}`}
   onclick={() => openEditor()}
 />
-{#if showArchived}<div class="archive-context">
-    <span
-      ><Archive size={15} /><strong>Archived {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</strong><small
-        >Restore a {staffLabel.toLowerCase()} or delete the record permanently.</small
-      ></span
-    ><button
-      class="back-active"
-      onclick={() => {
-        showArchived = false;
-        detailsOpen = false;
-        detailEditor = null;
-      }}><ArrowLeft size={13} /> Back to active {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</button
-    >
-  </div>{/if}
-<div class="editor-tools">
-  <button disabled={reconciling} onclick={reconcileEditors}
-    ><RefreshCw size={12} class={reconciling ? "spin" : ""} />{reconciling
-      ? "Checking…"
-      : "Reconcile Sheets"}</button
-  >{#if showArchived}<button
-      class="back-active"
-      onclick={() => {
-        showArchived = false;
-        detailsOpen = false;
-        detailEditor = null;
-      }}><ArrowLeft size={12} /> Back to active {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</button
-    >{:else}<button
-      onclick={() => {
-        showArchived = true;
-        detailsOpen = false;
-        detailEditor = null;
-      }}><Archive size={12} /> View archived</button
-    >{/if}<span>{visibleEditors.length} {labelFor(data.configuration?.profile, "staff", true).toLowerCase()}</span>
-</div>
-{#if message}<p class="message">{message}</p>{/if}
 
-<div class="editor-grid">
-  {#each visibleEditors as editor}
-    <article class:archived={editor.archived} class="card editor-card">
-      <div class="editor-summary">
-        <div class="editor-top">
-          <span class="editor-avatar">{editor.initials}</span><span
-            class:available={editor.availability === "available"}
-            class="availability"
-            ><i></i>{editor.archived
-              ? "archived"
-              : editor.availability || "available"}</span
-          >
-        </div>
-        <h2>{editor.name}</h2>
-        <p>{editor.specialty || "Specialty not set"}</p>
-        <div class="editor-meta">
-          <span><strong>{editor.activeTasks}</strong> Active {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</span><span
-            >{editor.phone || "No WhatsApp number"}</span
-          >
-        </div>
-        <div class:archived-actions={editor.archived} class="editor-actions">
-          <button
-            aria-label={`Open ${editor.name} details`}
-            onclick={() => openDetails(editor)}
-            ><Eye size={13} /><span class="action-label">Open</span></button
-          >
-          {#if editor.archived}<button
-              aria-label={`Restore ${editor.name}`}
-              onclick={() => restoreEditor(editor)}
-              ><RotateCcw size={13} /><span class="action-label">Restore</span
-              ></button
-            ><button
-              class="delete-permanent"
-              aria-label={`Permanently delete ${editor.name}`}
-              title="Delete permanently"
-              onclick={() => permanentlyDelete(editor)}
-              ><Trash2 size={13} /><span class="action-label">Delete</span
-              ></button
-            >{:else}
-            {#if portalEnabled}<button
-              aria-label={`Copy ${editor.name} portal link`}
-              onclick={() => copyPortal(editor)}
-              >{#if copied === editor.id}<Check size={13} /><span
-                  class="action-label">Copied</span
-                >{:else}<Link2 size={13} /><span class="action-label"
-                  >Portal</span
-                >{/if}</button>{/if}
-            <button
-              aria-label={`Edit ${editor.name}`}
-              onclick={() => openEditor(editor)}
-              ><Pencil size={13} /><span class="action-label">Edit</span
-              ></button
-            >
-            {#if whatsappEnabled && editor.phone}<button
-                type="button"
-                class="whatsapp"
-                onclick={() => openEditorChat(editor)}
-                aria-label={`WhatsApp ${editor.name}`}
-                ><WhatsAppIcon size={14} /></button
-              >{:else if whatsappEnabled}<button
-                type="button"
-                class="whatsapp unavailable"
-                aria-disabled="true"
-                aria-label={`No WhatsApp number for ${editor.name}`}
-                ><WhatsAppIcon size={14} /></button
-              >{/if}
-            <button
-              class="danger"
-              aria-label={`Archive ${editor.name}`}
-              onclick={() => archiveEditor(editor)}
-              ><Archive size={13} /></button
-            >
-          {/if}
-        </div>
-      </div>
-    </article>
-  {/each}
+{#if showArchived}
+  <div class="archive-bar">
+    <span><Archive size={16} aria-hidden="true" />You're viewing archived {staffPlural.toLowerCase()}.</span>
+    <button type="button" class="link" onclick={() => (showArchived = false)}><ArrowLeft size={15} aria-hidden="true" />Back to the team</button>
+  </div>
+{/if}
+
+<div class="toolbar">
+  <label class="search">
+    <Search size={16} aria-hidden="true" />
+    <input bind:value={query} placeholder="Search by name, skill or phone" aria-label={`Search ${staffPlural.toLowerCase()}`} />
+  </label>
+  {#if !showArchived}<button type="button" class="secondary archived-btn" onclick={() => (showArchived = true)}><Archive size={15} aria-hidden="true" />Archived<span class="count">{archivedCount}</span></button>{/if}
 </div>
 
-<Modal
-  bind:open={detailsOpen}
-  wide
-  title={detailEditor
-    ? `${detailEditor.name} — ${staffLabel} profile`
-    : `${staffLabel} profile`}
->
-  {#if detailEditor}
-    <div class="editor-detail">
-      <div class="expansion-head">
-        <div>
-          <div class="entity-tags">
-            <span class="editor-tag">{staffLabel}</span><span
-              >{detailEditor.availability || "available"}</span
-            >
+{#if visibleEditors.length}
+  <div class="team">
+    {#each visibleEditors as editor (editor.id)}
+      {@const open = openCount(editor.id)}
+      <article class="card person" class:archived={editor.archived}>
+        <header>
+          <span class="avatar" aria-hidden="true">{editor.initials}</span>
+          <div class="who">
+            <button type="button" class="name" onclick={() => openDetails(editor)}>{editor.name}</button>
+            <span class="skill">{editor.specialty || "No skill added"}</span>
           </div>
-          <h3>{detailEditor.name}'s workspace</h3>
-          <p>
-            {detailEditor.specialty ||
-              "Add a specialty to help with assignment decisions."}
-          </p>
-        </div>
-        <div class="detail-actions">
-          {#if whatsappEnabled}<button class="secondary" disabled={!detailEditor.phone} onclick={() => openEditorChat(detailEditor!)}
-            ><WhatsAppIcon size={13}/> WhatsApp</button>{/if}
-          <button class="secondary" onclick={() => editDetails(detailEditor!)}
-            ><Pencil size={13} /> Edit profile</button
-          >
-        </div>
-      </div>
-      <div class="editor-stats">
-        <div>
-          <Phone size={15} /><span
-            >WhatsApp<strong>{detailEditor.phone || "Not added"}</strong></span
-          >
-        </div>
-        <div>
-          <Sparkles size={15} /><span
-            >Availability<strong
-              >{detailEditor.availability || "Available"}</strong
-            ></span
-          >
-        </div>
-        <div>
-          <ClipboardList size={15} /><span
-            >Active work<strong>{tasksFor(detailEditor.id).length} {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</strong
-            ></span
-          >
-        </div>
-        <div>
-          <Check size={15} /><span
-            >Completed<strong
-              >{tasksFor(detailEditor.id).filter(
-                (task) => task.status === "Completed",
-              ).length} {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</strong
-            ></span
-          >
-        </div>
-        {#if detailEditor.locationUrl}<div class="editor-location"><MapPin size={15}/><span>Google Maps<strong><button onclick={() => previewMap(detailEditor?.locationUrl)}>Preview map</button><a href={detailEditor.locationUrl} target="_blank" rel="noreferrer">Open in new tab <ExternalLink size={10}/></a></strong></span></div>{/if}
-        {#if customFieldsEnabled}<CustomFieldValues definitions={data.configuration.profile.customFields} entity="staff" values={detailEditor.customFields}/>{/if}
-      </div>
-      <div class="assignment-head">
-        <span>Current assignments</span><strong
-          >{tasksFor(detailEditor.id).length} {labelFor(data.configuration?.profile, "task", true).toLowerCase()}</strong
-        >
-      </div>
-      {#if tasksFor(detailEditor.id).length}<div class="assignment-list">
-          {#each tasksFor(detailEditor.id) as task}<a
-              href={"/orders/" + task.orderId}
-              ><div class="assignment-copy">
-                <div class="entity-tags">
-                  <span class="task-tag">{taskLabel}</span><span class="customer-tag"
-                    >{customerLabel}</span
-                  ><span>{task.customer}</span>
+          <span class="availability" class:free={!editor.archived && (!editor.availability || editor.availability === "available")}>{availabilityText(editor)}</span>
+        </header>
+        <dl class="facts">
+          <div><dt>Open work</dt><dd>{open === 0 ? "Nothing open" : `${open} ${open === 1 ? labelFor(profile, "task").toLowerCase() : taskPlural.toLowerCase()}`}</dd></div>
+          <div><dt>Phone</dt><dd>{#if editor.phone}<a href={`tel:${editor.phone}`}>{editor.phone}</a>{:else}<span class="muted">Not added</span>{/if}</dd></div>
+        </dl>
+        <footer class="actions">
+          {#if editor.archived}
+            {#if allowed("staff.manage")}<button type="button" class="small" disabled={busy === editor.id} onclick={() => restoreEditor(editor)}><RotateCcw size={14} aria-hidden="true" />Restore</button>
+            <button type="button" class="small danger" disabled={busy === editor.id} onclick={() => permanentlyDelete(editor)}><Trash2 size={14} aria-hidden="true" />Delete</button>{/if}
+          {:else}
+            <button type="button" class="small" onclick={() => openDetails(editor)}>View<ChevronRight size={14} aria-hidden="true" /></button>
+            {#if whatsappEnabled && editor.phone}<button type="button" class="icon" title="Message on WhatsApp" aria-label={`Message ${editor.name} on WhatsApp`} onclick={() => openEditorChat(editor)}><WhatsAppIcon size={16} /></button>{/if}
+            <div class="card-menu">
+              <button type="button" class="icon" aria-haspopup="menu" aria-expanded={menuFor === editor.id} title="More actions" aria-label={`More actions for ${editor.name}`} onclick={() => (menuFor = menuFor === editor.id ? "" : editor.id)}><MoreHorizontal size={16} /></button>
+              {#if menuFor === editor.id}
+                <div class="menu" role="menu">
+                  {#if portalEnabled}<button type="button" role="menuitem" disabled={busy === editor.id} onclick={() => copyPortal(editor)}><Link2 size={15} aria-hidden="true" />Copy private link</button>{/if}
+                  {#if portalEnabled && editor.token && allowed("staff.manage")}<button type="button" role="menuitem" disabled={busy === editor.id} onclick={() => replacePortal(editor)}><RefreshCw size={15} aria-hidden="true" />Create a new link</button>{/if}
+                  {#if allowed("staff.manage")}<button type="button" role="menuitem" onclick={() => openEditor(editor)}><Pencil size={15} aria-hidden="true" />Edit details</button>
+                  <button type="button" role="menuitem" class="danger" onclick={() => archiveEditor(editor)}><Archive size={15} aria-hidden="true" />Archive</button>{/if}
                 </div>
-                <strong>{task.name}</strong><small
-                  >{task.project}{task.due
-                    ? ` · Due ${formatDate(task.due)}`
-                    : ""}</small
-                >
-              </div>
-              <div class="assignment-status">
-                <span>{statusFor(data.configuration?.profile, task.status).label}</span><small
-                  >{task.progress}% complete</small
-                >
-              </div></a
-            >{/each}
-        </div>{:else}<p class="empty-detail">
-          No active assignments for this {staffLabel.toLowerCase()}.
-        </p>{/if}
+              {/if}
+            </div>
+          {/if}
+        </footer>
+      </article>
+    {/each}
+  </div>
+{:else}
+  <div class="card empty">
+    <p><strong>{query.trim() ? `No ${staffPlural.toLowerCase()} match “${query.trim()}”.` : showArchived ? `No archived ${staffPlural.toLowerCase()}.` : `No ${staffPlural.toLowerCase()} yet.`}</strong></p>
+    {#if query.trim()}<button type="button" class="secondary" onclick={() => (query = "")}>Clear search</button>{:else if !showArchived && allowed("staff.manage")}<button type="button" class="secondary" onclick={() => openEditor()}>New {staffLabel.toLowerCase()}</button>{/if}
+  </div>
+{/if}
+
+<Modal bind:open={detailsOpen} wide title={detailEditor ? detailEditor.name : `${staffLabel} details`}>
+  {#if detailEditor}
+    <div class="detail">
+      <div class="detail-actions">
+        {#if whatsappEnabled && detailEditor.phone}<button type="button" class="secondary" onclick={() => openEditorChat(detailEditor!)}><WhatsAppIcon size={15} />Message</button>{/if}
+        {#if portalEnabled && !detailEditor.archived}<button type="button" class="secondary" disabled={busy === detailEditor.id} onclick={() => copyPortal(detailEditor!)}><Link2 size={15} aria-hidden="true" />Copy private link</button>{/if}
+        {#if portalEnabled && detailEditor.token && !detailEditor.archived}<a class="secondary" href={`/portal/${data.tenantSlug}/editor/${detailEditor.token}`} target="_blank" rel="noreferrer"><ExternalLink size={15} aria-hidden="true" />Open their page</a>{/if}
+        {#if portalEnabled && detailEditor.token && !detailEditor.archived && allowed("staff.manage")}<button type="button" class="secondary" disabled={busy === detailEditor.id} onclick={() => replacePortal(detailEditor!)}><RefreshCw size={15} aria-hidden="true" />New link</button>{/if}
+        {#if allowed("staff.manage")}<button type="button" class="secondary" onclick={() => openEditor(detailEditor)}><Pencil size={15} aria-hidden="true" />Edit</button>{/if}
+      </div>
+
+      <section class="box">
+        <dl class="info">
+          <div><dt>Skill</dt><dd>{detailEditor.specialty || "Not added"}</dd></div>
+          <div><dt>Availability</dt><dd>{availabilityText(detailEditor)}</dd></div>
+          <div><dt><Phone size={14} aria-hidden="true" />Phone</dt><dd>{#if detailEditor.phone}<a href={`tel:${detailEditor.phone}`}>{detailEditor.phone}</a>{:else}Not added{/if}</dd></div>
+          {#if detailEditor.locationUrl}<div><dt><MapPin size={14} aria-hidden="true" />Location</dt><dd><a href={detailEditor.locationUrl} target="_blank" rel="noreferrer">Open in Google Maps <ExternalLink size={12} aria-hidden="true" /></a></dd></div>{/if}
+        </dl>
+        {#if customFieldsEnabled}<CustomFieldValues definitions={data.configuration.profile.customFields} entity="staff" values={detailEditor.customFields} />{/if}
+      </section>
+
+      <section class="box">
+        <div class="tabs" role="tablist" aria-label="Work">
+          <button type="button" role="tab" aria-selected={detailTab === "open"} class:on={detailTab === "open"} onclick={() => (detailTab = "open")}>Open work <span class="count">{detailOpenTasks.length}</span></button>
+          <button type="button" role="tab" aria-selected={detailTab === "done"} class:on={detailTab === "done"} onclick={() => (detailTab = "done")}>Approved <span class="count">{detailDoneTasks.length}</span></button>
+        </div>
+        {#if (detailTab === "open" ? detailOpenTasks : detailDoneTasks).length}
+          <ul class="work">
+            {#each detailTab === "open" ? detailOpenTasks : detailDoneTasks as task (task.id)}
+              <li><a href={"/orders/" + task.orderId}>
+                <span class="work-main"><strong>{task.name}</strong><small>{task.project} · {task.customer}{task.due ? ` · Due ${formatDate(task.due)}` : ""}</small></span>
+                <span class="work-status"><StatusBadge status={task.status} />{#if detailTab === "open"}<small>{task.progress}% done</small>{/if}</span>
+                <ChevronRight size={15} aria-hidden="true" />
+              </a></li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="muted">{detailTab === "open" ? `Nothing open right now.` : `No approved work yet.`}</p>
+        {/if}
+      </section>
+
+      {#if !detailEditor.archived && allowed("staff.manage")}
+        <div class="danger-zone"><button type="button" class="link danger" disabled={busy === detailEditor.id} onclick={() => archiveEditor(detailEditor!)}><Archive size={14} aria-hidden="true" />Archive {detailEditor.name}</button></div>
+      {/if}
     </div>
   {/if}
+  {#snippet footer()}<button class="secondary" onclick={() => (detailsOpen = false)}>Close</button>{/snippet}
 </Modal>
-<Modal title={`${staffLabel} Google Maps location`} bind:open={mapOpen} wide>
-  <div class="map-preview"><iframe title={`${staffLabel} Google Maps location preview`} src={mapTarget} loading="lazy"></iframe><p>If Google blocks the embedded preview, use the new-tab button.</p><a class="primary" href={mapTarget} target="_blank" rel="noreferrer"><MapPin size={14}/> Open in Google Maps</a></div>
-</Modal>
+
 <DirectWhatsAppModal
   bind:open={directWhatsAppOpen}
   recipient={directEditor ? { kind: "staff", record: directEditor } : null}
   orders={directEditorOrders}
   configuration={data.configuration}
-  onmessage={(value) => (message = value)}
+  onmessage={(value) => notifyAction(value)}
 />
 <EditorModal bind:open={showEditor} editor={editing} onsaved={saved} />
 
+<LinkReadyDialog bind:open={linkReady.open} name={linkReady.name} phone={linkReady.phone} link={linkReady.link} replaced={linkReady.replaced} business={data.settings?.studioName || ""} whatsapp={whatsappEnabled} />
+
 <style>
-  .detail-actions{display:flex;align-items:center;gap:7px}.detail-actions button{display:flex;align-items:center;justify-content:center;gap:6px}.editor-location strong{display:flex!important;align-items:flex-start;flex-direction:column;gap:3px}.editor-location button,.editor-location a{display:flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--purple);padding:0;font-size:8px}.map-preview{display:grid;gap:10px}.map-preview iframe{width:100%;height:min(55vh,430px);border:1px solid var(--line);border-radius:12px;background:var(--theme-soft)}.map-preview p{margin:0;color:var(--muted);font-size:8px}.map-preview>a{display:flex;align-items:center;justify-content:center;gap:6px}
-  .archive-context {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    margin: -6px 0 14px;
-    border: 1px solid #f59e0b4d;
-    border-radius: 12px;
-    background: #f59e0b0d;
-    padding: 11px 13px;
-  }
-  .archive-context > span {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #d99012;
-  }
-  .archive-context strong {
-    font-size: 10px;
-  }
-  .archive-context small {
-    color: var(--muted);
-    font-size: 8px;
-  }
-  .archive-context .back-active {
-    height: 34px;
-    border: 1px solid var(--purple);
-    border-radius: 8px;
-    background: var(--theme-soft);
-    color: var(--purple);
-    font-size: 9px;
-    padding: 0 10px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .editor-tools {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-  .editor-tools button {
-    height: 32px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--card);
-    color: var(--muted);
-    font-size: 9px;
-    padding: 0 11px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .editor-tools button.back-active {
-    color: var(--purple);
-    border-color: var(--purple);
-    background: var(--theme-soft);
-  }
-  .editor-tools :global(.spin) {
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-  .editor-tools span,
-  .message {
-    color: var(--muted);
-    font-size: 9px;
-  }
-  .message {
-    text-align: right;
-  }
-  .editor-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
-    align-items: start;
-  }
-  .editor-card {
-    padding: 18px;
-  }
-  .editor-card.archived h2,
-  .editor-card.archived .editor-meta {
-    text-decoration: line-through;
-  }
-  .editor-top {
-    display: flex;
-    justify-content: space-between;
-  }
-  .editor-avatar {
-    width: 39px;
-    height: 39px;
-    border-radius: 10px;
-    background: var(--theme-soft);
-    color: var(--purple);
-    display: grid;
-    place-items: center;
-    font-size: 11px;
-    font-weight: 700;
-  }
-  .availability {
-    display: flex;
-    gap: 5px;
-    align-items: center;
-    border-radius: 20px;
-    background: var(--theme-soft);
-    color: var(--muted);
-    font-size: 8px;
-    padding: 4px 7px;
-    text-transform: capitalize;
-  }
-  .availability i {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #94a3b8;
-  }
-  .availability.available {
-    color: #059669;
-  }
-  .availability.available i {
-    background: #10b981;
-  }
-  .editor-card h2 {
-    font-size: 13px;
-    margin: 15px 0 3px;
-  }
-  .editor-card p {
-    font-size: 10px;
-    color: var(--muted);
-    margin: 0;
-  }
-  .editor-meta {
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-    margin: 17px 0 13px;
-    padding: 12px 0;
-    display: flex;
-    justify-content: space-between;
-    color: var(--muted);
-    font-size: 9px;
-  }
-  .editor-meta strong {
-    font-size: 11px;
-    margin-right: 4px;
-  }
-  .editor-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(
-        0,
-        0.8fr
-      ) 32px 32px;
-    gap: 7px;
-  }
-  .editor-actions.archived-actions {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .editor-actions button {
-    min-width: 0;
-    height: 32px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--card);
-    color: var(--purple);
-    font-size: 9px;
-    padding: 0 7px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    white-space: nowrap;
-  }
-  .editor-actions .whatsapp,
-  .editor-actions .danger {
-    width: 32px;
-    padding: 0;
-  }
-  .editor-actions .whatsapp {
-    color: #25d366;
-  }
-  .editor-actions .whatsapp.unavailable {
-    color: var(--muted);
-    cursor: help;
-    opacity: 0.55;
-  }
-  .editor-actions .danger {
-    color: #ef7777;
-  }
-  .editor-detail {
-    min-width: 0;
-  }
-  .expansion-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 20px;
-  }
-  .expansion-head h3 {
-    font-size: 17px;
-    margin: 7px 0 4px;
-  }
-  .expansion-head p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 9px;
-  }
-  .expansion-head .secondary {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .entity-tags {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-wrap: wrap;
-  }
-  .entity-tags span {
-    padding: 4px 7px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    color: var(--muted);
-    background: var(--card);
-    font-size: 7px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  .entity-tags .editor-tag {
-    color: #7c3aed;
-    border-color: #8b5cf640;
-    background: #8b5cf612;
-  }
-  .entity-tags .customer-tag {
-    color: #0284c7;
-    border-color: #0ea5e940;
-    background: #0ea5e912;
-  }
-  .entity-tags .task-tag {
-    color: #059669;
-    border-color: #10b98140;
-    background: #10b98112;
-  }
-  .editor-stats {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin: 18px 0;
-  }
-  .editor-stats > div {
-    display: flex;
-    gap: 9px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 12px;
-    background: var(--card);
-    color: var(--purple);
-  }
-  .editor-stats span {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    color: var(--muted);
-    font-size: 8px;
-  }
-  .editor-stats strong {
-    color: var(--theme-text);
-    font-size: 10px;
-    text-transform: capitalize;
-  }
-  .assignment-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1px solid var(--line);
-    padding: 16px 0 7px;
-  }
-  .assignment-head span {
-    color: var(--purple);
-    font-size: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-  .assignment-head strong {
-    font-size: 10px;
-  }
-  .assignment-list {
-    display: grid;
-  }
-  .assignment-list > a {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 15px;
-    border-top: 1px solid var(--line);
-    padding: 12px 0;
-  }
-  .assignment-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    min-width: 0;
-  }
-  .assignment-copy > strong {
-    font-size: 11px;
-  }
-  .assignment-copy > small {
-    font-size: 8px;
-    color: var(--muted);
-  }
-  .assignment-status {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-  }
-  .assignment-status > span {
-    font-size: 9px;
-    color: var(--purple);
-  }
-  .assignment-status > small,
-  .empty-detail {
-    font-size: 8px;
-    color: var(--muted);
-  }
-  .empty-detail {
-    margin: 14px 0 0;
-  }
-  @media (max-width: 1050px) {
-    .editor-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-  @media (max-width: 650px) {
-    .archive-context {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-    .archive-context > span {
-      align-items: flex-start;
-      flex-wrap: wrap;
-    }
-    .editor-grid {
-      grid-template-columns: 1fr;
-    }
-    .editor-stats {
-      grid-template-columns: 1fr 1fr;
-    }
-    .expansion-head {
-      flex-direction: column;
-    }
-    .detail-actions {
-      width: 100%;
-    }
-    .detail-actions button {
-      flex: 1;
-    }
-    .assignment-list > a {
-      align-items: flex-start;
-    }
-    .assignment-status {
-      min-width: 82px;
-    }
-  }
-  @media (max-width: 430px) {
-    .editor-actions {
-      grid-template-columns: repeat(5, 1fr);
-    }
-    .editor-actions.archived-actions {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .editor-actions .whatsapp,
-    .editor-actions .danger {
-      width: 100%;
-    }
-    .action-label {
-      display: none;
-    }
-    .editor-stats {
-      grid-template-columns: 1fr;
-    }
-  }
-  .editor-card.archived .editor-summary > p,
-  .editor-card.archived .editor-avatar {
-    text-decoration: line-through;
-    opacity: 0.65;
-  }
-  .editor-actions.archived-actions {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-  }
-  .editor-actions .delete-permanent {
-    border-color: #ef777744;
-    background: #ef77770d;
-    color: #ef7777;
-  }
-  .editor-actions .delete-permanent:hover {
-    border-color: #ef7777;
-    background: #ef77771a;
-    color: #ef7777;
+  .muted { color: var(--muted); }
+  .count { display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--theme-soft); color: var(--theme-text); font-size: 12px; font-weight: 650; }
+  .link { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: var(--purple); font-size: 13.5px; font-weight: 600; cursor: pointer; }
+  .link.danger { color: #b91c1c; }
+  .archive-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--theme-soft); font-size: 13.5px; color: var(--theme-text); }
+  .archive-bar span { display: inline-flex; align-items: center; gap: 8px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .search { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--muted); }
+  .search:focus-within { border-color: var(--purple); box-shadow: 0 0 0 3px color-mix(in srgb, var(--purple) 18%, transparent); }
+  .search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--theme-text); font-size: 14px; }
+  .archived-btn { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 12px; font-size: 13.5px; }
+
+  .team { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .person { display: flex; flex-direction: column; gap: 14px; padding: 16px; min-width: 0; transition: border-color .15s ease; }
+  .person:hover { border-color: color-mix(in srgb, var(--purple) 35%, var(--line)); }
+  .person.archived { opacity: .85; }
+  .person header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+  .avatar { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--theme-soft); color: var(--purple); font-size: 14px; font-weight: 700; }
+  .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .name { padding: 0; border: 0; background: none; color: var(--theme-text); font-size: 15px; font-weight: 650; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .name:hover { text-decoration: underline; }
+  .skill { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .availability { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--theme-soft); color: var(--muted); white-space: nowrap; }
+  .availability.free { background: color-mix(in srgb, #16a34a 14%, transparent); color: #15803d; }
+  .facts { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .facts dt { font-size: 12px; color: var(--muted); }
+  .facts dd { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; color: var(--theme-text); overflow-wrap: anywhere; }
+  .facts a { color: inherit; text-decoration: none; }
+  .facts a:hover { text-decoration: underline; }
+  .actions { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+  .small { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--theme-text); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .small:hover { border-color: color-mix(in srgb, var(--purple) 45%, var(--line)); }
+  .small.danger { color: #b91c1c; }
+  .small:disabled { opacity: .5; cursor: not-allowed; }
+  .icon { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+  .icon:hover { background: var(--theme-soft); color: var(--theme-text); }
+  .card-menu { position: relative; margin-left: auto; }
+  .menu { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 30; min-width: 210px; padding: 6px; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 12px 32px #0000001f; }
+  .menu button { display: flex; align-items: center; gap: 9px; width: 100%; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--theme-text); font-size: 13.5px; font-weight: 500; text-align: left; cursor: pointer; white-space: nowrap; }
+  .menu button:hover { background: var(--theme-soft); }
+  .menu .danger { color: #b91c1c; }
+  .empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 36px 16px; text-align: center; color: var(--muted); font-size: 14px; }
+  .empty p { margin: 0; }
+  .empty strong { color: var(--theme-text); }
+
+  .detail { display: grid; gap: 14px; }
+  .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .detail-actions > * { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; text-decoration: none; }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--card); min-width: 0; }
+  .info { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .info dt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .info dd { margin: 3px 0 0; font-size: 13.5px; color: var(--theme-text); overflow-wrap: anywhere; }
+  .info a { color: var(--purple); }
+  .tabs { display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--theme-soft); margin-bottom: 10px; max-width: 100%; }
+  .tabs button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .tabs button.on { background: var(--card); color: var(--theme-text); box-shadow: 0 1px 2px #0000001a; }
+  .work { list-style: none; margin: 0; padding: 0; }
+  .work a { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
+  .work li:last-child a { border-bottom: 0; }
+  .work a:hover strong { text-decoration: underline; }
+  .work-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .work-main strong { font-size: 13.5px; color: var(--theme-text); }
+  .work-main small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .work-status { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+  .work-status small { font-size: 12px; color: var(--muted); }
+  .danger-zone { display: flex; justify-content: flex-end; }
+  @media (max-width: 520px) {
+    .work a { grid-template-columns: minmax(0, 1fr) auto; }
+    .work a > :global(svg) { display: none; }
   }
 </style>

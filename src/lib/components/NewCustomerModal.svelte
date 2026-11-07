@@ -72,4 +72,4 @@
 	{#snippet footer()}<button type="button" class="secondary" disabled={saving} onclick={() => open = false}>Cancel</button><button type="button" class="primary" disabled={saving} aria-busy={saving} onclick={save}>{saving ? 'Saving…' : customer ? 'Save changes' : `Add ${customerLabel.toLowerCase()}`}</button>{/snippet}
 </Modal>
 
-<style>.address{margin-top:18px}.error{color:#ef8585;font-size:10px;margin:12px 0 0}</style>
+<style>.address{margin-top:18px}.error{color:#ef8585;font-size:12px;margin:12px 0 0}</style>
