@@ -68,6 +68,13 @@ import { confirmDanger } from "$lib/stores/confirm";
     Boolean(customer.archived) === showArchived &&
     `${customer.name} ${customer.business} ${customer.phone} ${customer.email || ""}`.toLowerCase().includes(query.trim().toLowerCase())));
 
+  // Paged in the browser; going back to page 1 whenever the search or archive view changes.
+  let page = $state(1);
+  $effect(() => { query; showArchived; page = 1; });
+  let pageSize = $state(readPageSize('customers', 25));
+  $effect(() => savePageSize('customers', pageSize));
+  const shown = $derived(pageSlice(filtered, page, pageSize));
+
   const ordersFor = (customer: Customer | null) => customer
     ? orders.filter((order) => order.customerId === customer.id || (!order.customerId && order.customer === customer.business))
     : [];
@@ -197,6 +204,8 @@ import { confirmDanger } from "$lib/stores/confirm";
       openCustomer(customer);
     }
   });
+  import ListPager from '$lib/components/ListPager.svelte';
+  import { pageSlice, readPageSize, savePageSize } from '$lib/pageSize';
 </script>
 
 <svelte:window
@@ -239,7 +248,7 @@ import { confirmDanger } from "$lib/stores/confirm";
       </tr>
     </thead>
     <tbody>
-      {#each filtered as customer (customer.id)}
+      {#each shown as customer, index (customer.id)}
         <tr>
           <td class="col-name">
             <button type="button" class="name-btn" onclick={() => openCustomer(customer)}>
@@ -260,7 +269,7 @@ import { confirmDanger } from "$lib/stores/confirm";
                 <div class="row-menu">
                   <button type="button" class="icon" aria-haspopup="menu" aria-expanded={menuFor === customer.id} title="More actions" aria-label={`More actions for ${customer.business}`} onclick={() => (menuFor = menuFor === customer.id ? "" : customer.id)}><MoreHorizontal size={16} /></button>
                   {#if menuFor === customer.id}
-                    <div class="menu" role="menu">
+                    <div class="menu" class:up={shown.length > 3 && index >= shown.length - 2} role="menu">
                       {#if allowed("orders.edit")}<button type="button" role="menuitem" onclick={() => startOrder(customer)}><Plus size={15} aria-hidden="true" />New {orderLabel.toLowerCase()}</button>{/if}
                       {#if allowed("customers.edit")}<button type="button" role="menuitem" onclick={() => edit(customer)}><Edit3 size={15} aria-hidden="true" />Edit details</button>{/if}
                       {#if portalEnabled && customer.token}
@@ -286,6 +295,7 @@ import { confirmDanger } from "$lib/stores/confirm";
     </div>
   {/if}
 </div>
+<ListPager total={filtered.length} bind:page bind:pageSize />
 
 <Modal title={selectedCustomer?.business || `${customerLabel} details`} bind:open={detailsOpen} wide>
   {#if selectedCustomer}
@@ -436,6 +446,8 @@ import { confirmDanger } from "$lib/stores/confirm";
   .icon:hover { background: var(--theme-soft); color: var(--theme-text); }
   .row-menu { position: relative; }
   .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 220px; padding: 6px; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: 0 12px 32px #0000001f; }
+  /* Last rows open the menu upward so it is not cut off inside the scrolling list. */
+  .menu.up { top: auto; bottom: calc(100% + 4px); }
   .menu button, .menu a { display: flex; align-items: center; gap: 9px; width: 100%; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--theme-text); font-size: 13.5px; font-weight: 500; text-align: left; text-decoration: none; cursor: pointer; white-space: nowrap; }
   .menu button:hover, .menu a:hover { background: var(--theme-soft); }
   .menu .danger { color: #b91c1c; }

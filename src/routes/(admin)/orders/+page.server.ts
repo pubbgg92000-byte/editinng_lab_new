@@ -15,7 +15,7 @@ export const load = async ({ locals, url }) => {
 		archived: url.searchParams.get('archived') === 'true'
 	};
 	const [result, eventOptions, archivedCount, queueCounts] = await Promise.all([
-		listOrdersPage(database, { page: Number(url.searchParams.get('page') || 1), pageSize: 10, ...filters }),
+		listOrdersPage(database, { page: Number(url.searchParams.get('page') || 1), pageSize: [10, 25, 50, 100].includes(Number(url.searchParams.get('size'))) ? Number(url.searchParams.get('size')) : 10, ...filters }),
 		listOrderEvents(database),
 		countArchivedOrders(database),
 		getOrderQueueCounts(database)

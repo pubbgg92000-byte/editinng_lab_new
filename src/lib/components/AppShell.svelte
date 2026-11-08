@@ -333,6 +333,7 @@ import { safeFetch } from "$lib/http";
           href={item.href}
           class:active={isNavActive(item.href)}
           aria-current={isNavActive(item.href) ? "page" : undefined}
+          data-label={item.label}
           onclick={() => ($sidebarOpen = false)}
           ><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span></a
         >{/each}
@@ -343,6 +344,7 @@ import { safeFetch } from "$lib/http";
           href={item.href}
           class:active={isNavActive(item.href)}
           aria-current={isNavActive(item.href) ? "page" : undefined}
+          data-label={item.label}
           onclick={() => ($sidebarOpen = false)}
           ><item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span></a
         >{/each}
@@ -353,6 +355,7 @@ import { safeFetch } from "$lib/http";
         class:error={Boolean(sheetSync.lastError)}
         class="sync"
         href={sheetsEnabled ? "/settings/sheets" : "/settings"}
+        data-label={sheetSync.lastError ? "Google Sheets isn't updating" : sheetSync.pending ? `${sheetSync.pending} ${sheetSync.pending === 1 ? "change" : "changes"} waiting to copy` : "Google Sheets is up to date"}
         ><span class="sync-dot"></span>
         <div>
           <strong
@@ -369,7 +372,7 @@ import { safeFetch } from "$lib/http";
                 : "All changes are copied"}</small
           >
         </div></a
-      ><a href="/logout" data-sveltekit-reload class="profile" onclick={confirmSignOut}
+      ><a href="/logout" data-sveltekit-reload class="profile" data-label="Sign out" onclick={confirmSignOut}
         ><span class="avatar"
           >{displayName
             .split(/\s+/)

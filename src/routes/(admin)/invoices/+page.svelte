@@ -60,6 +60,12 @@ import PageHeader from '$lib/components/PageHeader.svelte';
 		const text = `${invoice.number} ${order?.customer || ''} ${order?.project || ''} ${order ? orderCode(data.settings, order.serial) : ''}`.toLowerCase();
 		return text.includes(query.trim().toLowerCase());
 	}));
+	// Paged in the browser; back to page 1 when the filter or search changes.
+	let page = $state(1);
+	$effect(() => { filter; query; page = 1; });
+	let pageSize = $state(readPageSize('invoices', 25));
+	$effect(() => savePageSize('invoices', pageSize));
+	const pageRows = $derived(pageSlice(visible, page, pageSize));
 	const outstanding = $derived((data.orders as Order[]).reduce((sum, order) => sum + orderBalance(order), 0));
 	const collected = $derived((data.orders as Order[]).reduce((sum, order) => sum + Number(order.paid || 0), 0));
 	const filters = $derived<{ key: Filter; label: string }[]>([
@@ -69,6 +75,8 @@ import PageHeader from '$lib/components/PageHeader.svelte';
 		{ key: 'unpaid', label: 'Unpaid' },
 		...(counts.cancelled ? [{ key: 'cancelled' as Filter, label: 'Cancelled' }] : [])
 	]);
+	import ListPager from '$lib/components/ListPager.svelte';
+	import { pageSlice, readPageSize, savePageSize } from '$lib/pageSize';
 </script>
 
 <PageHeader eyebrow="Bills and receipts you've sent, and what's still owed." title="Invoices" />
@@ -107,7 +115,7 @@ import PageHeader from '$lib/components/PageHeader.svelte';
 			</tr>
 		</thead>
 		<tbody>
-			{#each visible as row (row.invoice.id)}
+			{#each pageRows as row (row.invoice.id)}
 				<tr>
 					<td class="col-number">
 						<a href={'/invoices/' + row.invoice.id} class="doc-link"><strong>{row.invoice.number}</strong><small>{kindLabel(row.invoice)}</small></a>
@@ -134,6 +142,7 @@ import PageHeader from '$lib/components/PageHeader.svelte';
 		</div>
 	{/if}
 </div>
+<ListPager total={visible.length} bind:page bind:pageSize />
 
 <style>
 	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

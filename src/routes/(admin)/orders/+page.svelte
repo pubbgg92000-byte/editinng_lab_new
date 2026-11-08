@@ -81,9 +81,9 @@ import { confirmDanger } from "$lib/stores/confirm";
   const pageTitle = $derived(archived ? `Archived ${orderPlural.toLowerCase()}` : orderPlural);
   const pageHint = $derived(archived ? "Restore an item, or delete it permanently." : "Every job from intake to delivery.");
 
-  type Filters = { q?: string; status?: string; event?: string; sort?: string; dateFrom?: string; dateTo?: string; archived?: boolean; page?: number };
+  type Filters = { q?: string; status?: string; event?: string; sort?: string; dateFrom?: string; dateTo?: string; archived?: boolean; page?: number; size?: number };
   function buildHref(overrides: Partial<Filters> = {}) {
-    const next: Filters = { q: query.trim(), status: statusFilter, event: eventFilter, sort: sortOrder, dateFrom, dateTo, archived, ...overrides };
+    const next: Filters = { q: query.trim(), status: statusFilter, event: eventFilter, sort: sortOrder, dateFrom, dateTo, archived, size: pagination.pageSize, ...overrides };
     const params = new URLSearchParams();
     if (next.q) params.set("q", next.q);
     if (next.status) params.set("status", next.status);
@@ -92,6 +92,7 @@ import { confirmDanger } from "$lib/stores/confirm";
     if (next.dateFrom) params.set("dateFrom", next.dateFrom);
     if (next.dateTo) params.set("dateTo", next.dateTo);
     if (next.archived) params.set("archived", "true");
+    if (next.size && next.size !== 10) params.set("size", String(next.size));
     if (next.page && next.page > 1) params.set("page", String(next.page));
     const value = params.toString();
     return value ? `/orders?${value}` : "/orders";
@@ -190,6 +191,8 @@ import { confirmDanger } from "$lib/stores/confirm";
     }
     notifyAction(synced ? `${orderLabel} created.` : `${orderLabel} created. Google Sheets will update when the connection is available.`);
   }
+  import ListPager from '$lib/components/ListPager.svelte';
+  import { goto } from '$app/navigation';
 </script>
 
 <PageHeader eyebrow={pageHint} title={pageTitle} action={archived || !allowed("orders.edit") ? undefined : `New ${orderLabel.toLowerCase()}`} onclick={() => (showNew = true)} />
@@ -211,6 +214,7 @@ import { confirmDanger } from "$lib/stores/confirm";
 
 <form class="toolbar" method="GET">
   {#if archived}<input type="hidden" name="archived" value="true" />{/if}
+  {#if pagination.pageSize !== 10}<input type="hidden" name="size" value={pagination.pageSize} />{/if}
   {#if !filtersOpen}
     <!-- Keep current filters when searching with the panel closed. -->
     {#if statusFilter}<input type="hidden" name="status" value={statusFilter} />{/if}
@@ -352,18 +356,7 @@ import { confirmDanger } from "$lib/stores/confirm";
   {/if}
 </div>
 
-{#if pagination.totalPages > 1 || pagination.total > 0}
-  <nav class="pager" aria-label="Pages">
-    <span>{pagination.from}–{pagination.to} of {pagination.total}</span>
-    {#if pagination.totalPages > 1}
-      <div>
-        <a class="secondary" class:disabled={pagination.page <= 1} aria-disabled={pagination.page <= 1} href={pageHref(Math.max(1, pagination.page - 1))}><ChevronLeft size={15} aria-hidden="true" />Previous</a>
-        <span class="page-of">Page {pagination.page} of {pagination.totalPages}</span>
-        <a class="secondary" class:disabled={pagination.page >= pagination.totalPages} aria-disabled={pagination.page >= pagination.totalPages} href={pageHref(Math.min(pagination.totalPages, pagination.page + 1))}>Next<ChevronRight size={15} aria-hidden="true" /></a>
-      </div>
-    {/if}
-  </nav>
-{/if}
+<ListPager total={pagination.total} page={pagination.page} pageSize={pagination.pageSize} hrefFor={pageHref} onSizeChange={(size) => goto(buildHref({ size, page: 1 }))} />
 
 <NewOrderModal bind:open={showNew} onsaved={saved} />
 {#if deliveryOrder}<DeliveryModal bind:open={deliveryOpen} order={deliveryOrder} ondelivered={delivered} />{/if}
@@ -448,11 +441,6 @@ import { confirmDanger } from "$lib/stores/confirm";
   .empty strong { color: var(--theme-text); }
   .empty a { color: var(--purple); font-weight: 600; }
 
-  .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--muted); }
-  .pager div { display: flex; align-items: center; gap: 8px; }
-  .pager a { display: inline-flex; align-items: center; gap: 4px; height: 36px; padding: 0 12px; font-size: 13px; text-decoration: none; }
-  .pager a.disabled { pointer-events: none; opacity: .45; }
-  .page-of { color: var(--theme-text); font-weight: 600; }
 
   @media (max-width: 1000px) {
     .filter-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }

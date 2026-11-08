@@ -126,6 +126,13 @@
 	let downloadBusy = $state(false);
 
 	const rows = $derived(active === 'Orders' ? displayRows() : selected.rows);
+	// Rows per page chosen by the viewer (default 50); back to page 1 when the table or the filters change.
+	let sheetPageSize = $state(readPageSize('sheets', 50));
+	$effect(() => savePageSize('sheets', sheetPageSize));
+	let page = $state(1);
+	$effect(() => { active; rows; page = 1; });
+	const offset = $derived((Math.min(page, Math.max(1, Math.ceil(rows.length / sheetPageSize))) - 1) * sheetPageSize);
+	const pageRows = $derived(rows.slice(offset, offset + sheetPageSize));
 
 	function downloadExcel() {
 		downloadBusy = true;
@@ -139,6 +146,8 @@
 		window.location.assign(`/api/orders/export?${params.toString()}`);
 		setTimeout(() => { downloadBusy = false; }, 2000);
 	}
+	import ListPager from '$lib/components/ListPager.svelte';
+	import { readPageSize, savePageSize } from '$lib/pageSize';
 </script>
 
 <svelte:head><title>Sheets data — NexaDesk</title></svelte:head>
@@ -192,9 +201,10 @@
 <div class="card table-wrap sheet-table">
 	<table class="data-table">
 		<thead><tr>{#each selected.columns as column}<th class:phone-cell={isPhoneColumn(column)}>{column}</th>{/each}</tr></thead>
-		<tbody>{#each rows as row, rowIndex}<tr>{#each selected.columns as column, index}<td class:phone-cell={isPhoneColumn(column)}>{#if selected.links?.[rowIndex]?.[index]}<a class="cell-link" href={selected.links[rowIndex][index]} title={`Open related ${column.toLowerCase()}`}><span>{row[index] || '—'}</span><ArrowUpRight size={12}/></a>{:else}<span class:empty-value={!row[index]}>{row[index] || '—'}</span>{/if}</td>{/each}</tr>{:else}<tr><td class="empty-table" colspan={selected.columns.length}>No records match these filters.</td></tr>{/each}</tbody>
+		<tbody>{#each pageRows as row, pageIndex}{@const rowIndex = offset + pageIndex}<tr>{#each selected.columns as column, index}<td class:phone-cell={isPhoneColumn(column)}>{#if selected.links?.[rowIndex]?.[index]}<a class="cell-link" href={selected.links[rowIndex][index]} title={`Open related ${column.toLowerCase()}`}><span>{row[index] || '—'}</span><ArrowUpRight size={12}/></a>{:else}<span class:empty-value={!row[index]}>{row[index] || '—'}</span>{/if}</td>{/each}</tr>{:else}<tr><td class="empty-table" colspan={selected.columns.length}>No records match these filters.</td></tr>{/each}</tbody>
 	</table>
 </div>
+<ListPager total={rows.length} bind:page bind:pageSize={sheetPageSize} />
 
 <style>
 	.sheet-heading{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 24px;margin-bottom:22px}.heading-copy .eyebrow{display:flex;align-items:center;gap:6px;margin-bottom:7px;color:var(--purple);font-size:11px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}.sheet-heading h1{font-size:27px;letter-spacing:-.04em;margin:0}.sheet-heading p{max-width:610px;color:var(--muted);font-size:12px;line-height:1.6;margin:7px 0 0}.sheet-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.sheet-actions a,.sheet-actions button{display:flex;align-items:center;gap:7px;white-space:nowrap}.open-sheet{color:var(--purple)}.mode-notice{display:flex;align-items:center;gap:9px;border:1px solid #eab30838;background:#eab3080c;color:#c9ad54;border-radius:10px;padding:12px 14px;font-size:11px;line-height:1.55;margin-bottom:17px}.mode-notice strong{color:#dfc56c}.mode-notice.live{border-color:#22c55e38;background:#22c55e0c;color:#76d498}.mode-notice.live strong{color:#8ee3ad}.sheet-tabs{display:flex;gap:6px;overflow-x:auto;padding:1px 1px 13px;max-width:100%;min-width:0}.sheet-tabs button{display:flex;align-items:center;gap:8px;white-space:nowrap;border:1px solid #2c3039;background:#15181e;color:#778294;border-radius:9px;padding:8px 11px;font-size:11px;font-weight:600;transition:border-color .18s ease,background .18s ease,color .18s ease,transform .18s ease}.sheet-tabs button:hover{border-color:color-mix(in srgb,var(--purple) 45%,var(--line));color:var(--theme-text);}.sheet-tabs button span{display:grid;place-items:center;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#242832;color:#8b95a5;font-size:11px}.sheet-tabs button.active{border-color:var(--purple);background:color-mix(in srgb,var(--purple) 15%,var(--card));color:color-mix(in srgb,var(--purple) 55%,#fff)}.sheet-tabs button.active span{background:var(--purple);color:#fff}.table-summary{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin:8px 2px 12px}.table-summary>div{display:flex;flex-direction:column;gap:3px}.table-summary span{color:var(--purple);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}.table-summary h2{margin:0;font-size:15px;letter-spacing:-.02em}.table-summary p{display:flex;align-items:center;gap:6px;margin:0;color:var(--muted);font-size:11px}.table-summary p strong{color:var(--theme-text);font-size:12px}.table-summary i{width:3px;height:3px;border-radius:50%;background:var(--purple)}.sheet-table{max-height:560px}.sheet-table th{position:sticky;top:0;z-index:2;min-width:110px;background:color-mix(in srgb,var(--card) 94%,var(--theme-soft));backdrop-filter:blur(10px)}.sheet-table td{min-width:110px;max-width:260px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;vertical-align:top;line-height:1.6}.sheet-table td>span{display:block}.sheet-table td:first-child{min-width:135px;color:#f1f3f6;font-weight:620}.empty-value{color:var(--muted);opacity:.55}.empty-table{text-align:center!important;color:var(--muted)!important;padding:42px!important;font-weight:500!important}:global(html[data-theme="light"]) .sheet-heading h1{color:#0f172a;font-size:30px}:global(html[data-theme="light"]) .sheet-heading p{color:#64748b}:global(html[data-theme="light"]) .mode-notice{border-color:#f59e0b33;background:linear-gradient(135deg,#fffbeb,#ffffff);color:#b45309;border-radius:14px;box-shadow:0 10px 28px #f59e0b12}:global(html[data-theme="light"]) .mode-notice strong{color:#92400e}:global(html[data-theme="light"]) .mode-notice.live{border-color:#10b98133;background:linear-gradient(135deg,#ecfdf5,#ffffff);color:#047857}:global(html[data-theme="light"]) .mode-notice.live strong{color:#047857}:global(html[data-theme="light"]) .sheet-tabs{gap:8px}:global(html[data-theme="light"]) .sheet-tabs button{border-color:#dbeafe;background:#fff;color:#64748b;border-radius:12px;box-shadow:0 6px 16px #3b82f60b}:global(html[data-theme="light"]) .sheet-tabs button span{background:#eef2ff;color:#4f46e5}:global(html[data-theme="light"]) .sheet-tabs button:hover{border-color:#a5b4fc}:global(html[data-theme="light"]) .sheet-tabs button.active{border-color:var(--purple);background:var(--purple);color:#fff;box-shadow:0 12px 28px color-mix(in srgb,var(--purple) 20%,transparent)}:global(html[data-theme="light"]) .sheet-tabs button.active span{background:#ffffff2b;color:#fff}:global(html[data-theme="light"]) .sheet-table th{background:#f8fafcee}:global(html[data-theme="light"]) .sheet-table td:first-child{color:#0f172a}@media(max-width:700px){.sheet-heading{align-items:flex-start}.sheet-actions{flex-direction:column;align-items:stretch}.sheet-actions a,.sheet-actions button{justify-content:center}.table-summary{align-items:flex-start;flex-direction:column;gap:7px}}@media(max-width:520px){.sheet-heading{flex-direction:column}.sheet-actions{width:100%;flex-direction:row}.sheet-actions a,.sheet-actions button{flex:1}.sheet-tabs{margin-right:-20px}.table-summary p{align-items:flex-start;flex-wrap:wrap}}
@@ -215,4 +225,24 @@
 	.filter-download:disabled{opacity:.6;cursor:default}
 	.dl-spinner{width:11px;height:11px;border:2px solid #15803d44;border-top-color:#15803d;border-radius:50%;animation:dl-spin .7s linear infinite;display:inline-block}
 	@keyframes dl-spin{to{transform:rotate(360deg)}}
+	/* Sheet look: every cell centred across and down, a tinted header band, soft zebra rows, light column lines,
+	   and the first column pinned while scrolling sideways. Selectors are doubled so they beat the global light-theme table rules. */
+	.sheet-table .data-table th,.sheet-table .data-table td{text-align:center;vertical-align:middle;padding:12px 16px;border-bottom:1px solid var(--line);border-right:1px solid color-mix(in srgb,var(--line) 60%,transparent)}
+	.sheet-table .data-table th:last-child,.sheet-table .data-table td:last-child{border-right:0}
+	.sheet-table .data-table th{background:color-mix(in srgb,var(--theme-soft) 65%,var(--card));color:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-bottom:0;box-shadow:inset 0 -1px var(--line);backdrop-filter:none}
+	.sheet-table .data-table td{color:var(--theme-text);font-size:13px;line-height:1.5}
+	.sheet-table .data-table tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--theme-soft) 28%,var(--card))}
+	.sheet-table .data-table tbody tr:hover td{background:color-mix(in srgb,var(--theme-soft) 70%,var(--card))}
+	.sheet-table .data-table tbody tr:last-child td{border-bottom:0}
+	.sheet-table .data-table th:first-child,.sheet-table .data-table td:first-child{position:sticky;left:0;z-index:1;background-clip:padding-box;box-shadow:inset -1px 0 var(--line)}
+	.sheet-table .data-table td:first-child{background:var(--card);font-weight:650}
+	.sheet-table .data-table th:first-child{z-index:3;box-shadow:inset -1px 0 var(--line),inset 0 -1px var(--line)}
+	.sheet-table .cell-link{display:inline-flex;align-items:center;justify-content:center;margin:0 auto}
+	.sheet-table .cell-link :global(svg){margin-top:0}
+	.sheet-table .data-table td.empty-table{background:var(--card)}
+	/* Table tabs keep their full size (the count badge stayed inside) and wrap to a new line instead of scrolling sideways. */
+	.sheet-tabs{flex-wrap:wrap;overflow:visible;padding-bottom:4px;margin-bottom:10px}
+	.sheet-tabs button{flex:0 0 auto}
+	.sheet-tabs button span{flex:0 0 auto}
+	@media(max-width:520px){.sheet-tabs{margin-right:0}}
 </style>
