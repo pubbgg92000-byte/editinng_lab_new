@@ -9,6 +9,7 @@
 		import RequiredMark from '$lib/components/RequiredMark.svelte';
 		import WorkspaceWizard from '$lib/components/owner/WorkspaceWizard.svelte';
 		import PackageBuilder from '$lib/components/owner/PackageBuilder.svelte';
+	import HealthPanel from '$lib/components/owner/HealthPanel.svelte';
 		import { themePalettes } from '$lib/theme';
 		let { data, form } = $props();
 		let creating = $state(false);
@@ -19,7 +20,7 @@
 		let showDatabaseUrl = $state(false);
 		let showOwnerPassword = $state(false);
 		let noticeVisible = $state(false);
-		let tab = $state<'workspaces' | 'packages' | 'account'>(untrack(() => form?.action === 'package' ? 'packages' : form?.action === 'ownerPassword' ? 'account' : 'workspaces'));
+		let tab = $state<'workspaces' | 'packages' | 'health' | 'account'>(untrack(() => form?.action === 'package' ? 'packages' : form?.action === 'ownerPassword' ? 'account' : 'workspaces'));
 		let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 		let tenantConfigurations = $state(untrack(() => Object.fromEntries(data.tenants.map((tenant: any) => [tenant.id, structuredClone(tenant.configuration)]))));
 		// Keep editable copies in step with the server: add newly created workspaces and refresh a
@@ -73,6 +74,7 @@
 	<div class="owner-tabs" role="tablist" aria-label="Administration sections">
 		<button type="button" role="tab" aria-selected={tab === 'workspaces'} class:on={tab === 'workspaces'} onclick={() => (tab = 'workspaces')}>Workspaces <span>{data.tenants.length}</span></button>
 		<button type="button" role="tab" aria-selected={tab === 'packages'} class:on={tab === 'packages'} onclick={() => (tab = 'packages')}>Packages</button>
+		<button type="button" role="tab" aria-selected={tab === 'health'} class:on={tab === 'health'} onclick={() => (tab = 'health')}>Health</button>
 		<button type="button" role="tab" aria-selected={tab === 'account'} class:on={tab === 'account'} onclick={() => (tab = 'account')}>Account &amp; security</button>
 	</div>
 	{#if tab === 'workspaces' && creating}
@@ -83,6 +85,10 @@
 
 	{#if tab === 'packages'}
 	<section class="panel"><PackageBuilder packages={data.packages} capabilityDefinitions={data.capabilityDefinitions} builtInIds={data.builtInIds} usage={packageUsage} submit={track('package')} busy={pendingAction === 'package'} /></section>
+	{/if}
+
+	{#if tab === 'health'}
+	<HealthPanel />
 	{/if}
 
 	{#if tab === 'workspaces'}
