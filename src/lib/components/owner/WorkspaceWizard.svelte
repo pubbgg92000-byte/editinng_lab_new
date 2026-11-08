@@ -81,6 +81,8 @@
 </script>
 
 <form method="POST" action="?/create" novalidate use:enhance={guarded} use:clearOnEdit class="wizard step-form">
+	<!-- Always sent, even when a search hides the chosen tile. -->
+	<input type="hidden" name="packageId" value={packageId} />
 	<Stepper {steps} current={step} {reached} label="Setup steps" onselect={goTo} />
 
 	<div class="layout">
@@ -93,7 +95,7 @@
 					{#each filtered as item (item.id)}
 						{@const Icon = nicheIcon(item.id)}
 						<label class="tile" class:on={packageId === item.id}>
-							<input type="radio" name="packageId" value={item.id} bind:group={packageId} />
+							<input type="radio" name="businessTypeChoice" value={item.id} bind:group={packageId} />
 							<span class="icon"><Icon size={18} /></span>
 							<span><b>{item.name}</b><small>{wordsOf(item)}</small></span>
 						</label>

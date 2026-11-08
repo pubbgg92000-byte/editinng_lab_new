@@ -60,7 +60,12 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 		discount = discountMode === 'percent' ? Math.round(subtotal * discountValue / 100 * 100) / 100 : discountValue;
 		if (discount > subtotal) return json({ error: 'Discount cannot be greater than the subtotal.' }, { status: 400 });
 		if (subtotal - discount + 0.009 < order.paid) return json({ error: 'Invoice total cannot be below payments already collected.' }, { status: 400 });
-		const updatedOrder = await updateOrder(database, order.id, { price: subtotal, discount, priceSet: true });
+		let updatedOrder;
+		try {
+			updatedOrder = await updateOrder(database, order.id, { price: subtotal, discount, priceSet: true });
+		} catch (cause) {
+			return json({ error: cause instanceof Error ? cause.message : 'Unable to save invoice billing.' }, { status: 400 });
+		}
 		if (!updatedOrder) return json({ error: 'Unable to save invoice billing.' }, { status: 400 });
 		order = updatedOrder;
 	}

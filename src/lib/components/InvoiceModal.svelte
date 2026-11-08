@@ -24,8 +24,10 @@
 		if (!open) return;
 		billingMode = 'manual';
 		manualSubtotal = order.priceSet === false ? undefined : order.price;
-		discountMode = order.price > 0 && order.discount > 0 ? 'percent' : 'percent';
-		discountValue = order.price > 0 ? Number(((order.discount || 0) / order.price * 100).toFixed(2)) : 0;
+		// Start from the order's exact discount amount; converting it to a 2-decimal % can shift the total by
+		// a few paise and block the final invoice on a fully paid order.
+		discountMode = order.discount > 0 ? 'amount' : 'percent';
+		discountValue = order.discount > 0 ? order.discount : 0;
 		error = '';
 	});
 

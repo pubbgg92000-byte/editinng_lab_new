@@ -5,6 +5,7 @@ import { allowed } from '$lib/stores/permissions';
 import { confirmDanger } from "$lib/stores/confirm";
   import { safeFetch } from "$lib/http";
   import { onMount, untrack } from "svelte";
+  import { afterNavigate } from "$app/navigation";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import EditorModal from "$lib/components/EditorModal.svelte";
   import DirectWhatsAppModal from "$lib/components/DirectWhatsAppModal.svelte";
@@ -169,8 +170,9 @@ import { confirmDanger } from "$lib/stores/confirm";
     detailEditor = null;
     notifyAction(`${editor.name} deleted.${syncNote(result.sync)}`);
   }
-  onMount(() => {
-    const editorId = new URL(location.href).searchParams.get("editor");
+  // Runs on first load and on same-page links (e.g. picking a result in Cmd-K while already here).
+  afterNavigate((navigation) => {
+    const editorId = (navigation.to?.url ?? new URL(location.href)).searchParams.get("editor");
     const editor = editors.find((item) => item.id === editorId);
     if (editor) {
       showArchived = Boolean(editor.archived);

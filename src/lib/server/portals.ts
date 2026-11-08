@@ -82,7 +82,7 @@ export async function loadCustomerPortal(tenant: Tenant, token: string) {
 	const deliveryLinks = Object.fromEntries(rawOrders.map((order) => [
 		order.id,
 		deliveryVisible
-			? order.tasks.find((task) => task.outputLink && task.status === 'Completed')?.outputLink || ''
+			? order.tasks.find((task) => !task.archived && task.outputLink && task.status === 'Completed')?.outputLink || ''
 			: ''
 	]));
 	const orders = rawOrders.map((order) => ({
@@ -123,7 +123,9 @@ export async function loadCustomerPortal(tenant: Tenant, token: string) {
 	const orderIds = new Set(orders.map((order) => order.id));
 	const invoices = portalSections.documents ? (await listInvoices(database)).filter((invoice) => orderIds.has(invoice.orderId) && invoice.status !== 'cancelled') : [];
 	const settings = await getSettings(database);
-	const displaySettings = hasCapability(configuration.effectiveCapabilities, 'branding.whiteLabel') ? settings : { ...settings, studioName: 'NexaDesk', logoUrl: '' };
+	// The customer sees invoices here, so the seller name must stay the business's own (it sits next to
+	// their GSTIN and address). Without white label, only the custom logo is dropped.
+	const displaySettings = hasCapability(configuration.effectiveCapabilities, 'branding.whiteLabel') ? settings : { ...settings, logoUrl: '' };
 	return { customer, token, orders, deliveryLinks, invoices: hasCapability(configuration.effectiveCapabilities, 'billing.invoices') && portalSections.documents ? invoices : [], settings: displaySettings, configuration: publicConfiguration(configuration, ['portal.customer']), tenantSlug: tenant.slug };
 }
 

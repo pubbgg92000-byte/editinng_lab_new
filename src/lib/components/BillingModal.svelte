@@ -9,9 +9,12 @@
 	let { open = $bindable(), order, onsaved = () => {} }: { open: boolean; order: Order; onsaved?: (order: Order) => void } = $props();
 	let total = $state<number | undefined>(undefined);
 	let discountPercent = $state(0);
+	let initialPercent = 0;
 	let saving = $state(false);
 	let error = $state('');
-	const discountAmount = $derived(Math.round(Number(total || 0) * Number(discountPercent || 0) / 100));
+	// Keep the saved discount exactly when the admin hasn't changed total or %, so reopening and saving
+	// doesn't drift by the rounding of a 2-decimal percentage.
+	const discountAmount = $derived(Number(total) === order.price && discountPercent === initialPercent ? (order.discount || 0) : Math.round(Number(total || 0) * Number(discountPercent || 0) / 100));
 	const finalTotal = $derived(Math.max(0, Number(total || 0) - discountAmount));
 	const balance = $derived(Math.max(0, finalTotal - order.paid));
 
@@ -19,14 +22,16 @@
 		if (open) {
 			total = order.priceSet === false ? undefined : order.price;
 			discountPercent = order.price > 0 ? Number(((order.discount || 0) / order.price * 100).toFixed(2)) : 0;
+			initialPercent = discountPercent;
 			error = '';
 		}
 	});
 
 	async function save() {
-		if (total === undefined || !Number.isFinite(Number(total)) || Number(total) < 0) { error = 'Enter the agreed total amount.'; return; }
+		// A cleared number input binds to null; treat it as missing, not as ₹0.
+		if (total === undefined || total === null || String(total).trim() === '' || !Number.isFinite(Number(total)) || Number(total) < 0) { error = 'Enter the agreed total amount.'; return; }
 		if (discountPercent < 0 || discountPercent > 100) { error = 'Discount percentage must be between 0% and 100%.'; return; }
-		if (finalTotal < order.paid) { error = `The discounted total cannot be below the already collected amount (${money(order.paid)}).`; return; }
+		if (finalTotal + 0.009 < order.paid) { error = `The discounted total cannot be below the already collected amount (${money(order.paid)}).`; return; }
 		saving = true;
 		error = '';
 		try {

@@ -5,7 +5,7 @@ import { allowed } from '$lib/stores/permissions';
 import { confirmDanger } from "$lib/stores/confirm";
   import { safeFetch } from "$lib/http";
   import { onMount, untrack } from "svelte";
-  import { invalidateAll } from "$app/navigation";
+  import { invalidateAll, afterNavigate } from "$app/navigation";
   import {
     Search, Edit3, Copy, RefreshCw, Archive, RotateCcw, ExternalLink, Mail, MapPin, ReceiptIndianRupee,
     FileText, Plus, MoreHorizontal, ArrowLeft, Phone, ChevronRight,
@@ -188,8 +188,9 @@ import { confirmDanger } from "$lib/stores/confirm";
     customerStore.update((items) => [result.customer, ...items.filter((item) => item.id !== customer.id)]);
     notifyAction(`${customerLabel} restored.`);
   }
-  onMount(() => {
-    const customerId = new URL(location.href).searchParams.get("customer");
+  // Runs on first load and on same-page links (e.g. picking a result in Cmd-K while already here).
+  afterNavigate((navigation) => {
+    const customerId = (navigation.to?.url ?? new URL(location.href)).searchParams.get("customer");
     const customer = customers.find((item) => item.id === customerId);
     if (customer) {
       showArchived = Boolean(customer.archived);

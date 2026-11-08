@@ -157,8 +157,10 @@ export function currentInvoiceMessage(
 	const portalLink = portalUrl('customer', customerToken, origin, tenantSlug);
 	const invoiceLink = portalLink ? `${portalLink}/invoice/${invoice.id}` : '';
 	const hasSnapshot = Boolean(invoice.subtotal || invoice.total || invoice.discount || invoice.amountReceived || invoice.paid || invoice.balance);
+	// Use the snapshot's own pricing: a receipt taken while the order was unpriced keeps saying
+	// 'To be confirmed', even if the order was priced later.
 	const snapshotOrder: Order = hasSnapshot
-		? { ...order, price: invoice.subtotal, discount: invoice.discount, paid: invoice.paid, priceSet: Number(invoice.subtotal || 0) > 0 || order.priceSet !== false }
+		? { ...order, price: invoice.subtotal, discount: invoice.discount, paid: invoice.paid, priceSet: Number(invoice.subtotal || 0) > 0 || invoice.kind === 'final' }
 		: order;
 	if (invoice.kind !== 'partial') {
 		return invoiceMessage(settings, invoice.number, snapshotOrder, customerToken, origin, {

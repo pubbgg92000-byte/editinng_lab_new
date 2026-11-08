@@ -6,10 +6,11 @@
 	import { requestJson } from '$lib/http';
 	import { flashAction, notifyAction } from '$lib/stores/actionFeedback';
 	import type { Invoice, OrderStatus, Payment } from '$lib/types';
+	import { allowed } from '$lib/stores/permissions';
 
 	let { open = $bindable(), orderId, balance = 0, orderStatus = 'Received', onsaved = () => {} }: { open: boolean; orderId: string; balance?: number; orderStatus?: OrderStatus; onsaved?: () => void } = $props();
 	let amount = $state(0); const todayIst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()); let paidAt = $state(todayIst()); let method = $state('UPI'); let note = $state('');
-	let kind = $state<'advance' | 'payment'>('advance'); let generateInvoice = $state(true); let error = $state(''); let saving = $state(false); let saved = $state(false);
+	let kind = $state<'advance' | 'payment'>('advance'); let generateInvoice = $state(allowed('invoices.manage')); let error = $state(''); let saving = $state(false); let saved = $state(false);
 	$effect(() => { if (open) { kind = orderStatus === 'Received' ? 'advance' : 'payment'; amount = 0; note = ''; error = ''; saved = false; paidAt = todayIst(); } });
 
 	async function save() {
@@ -50,7 +51,7 @@
 		<div class="field"><label for="payment-method">Method</label><select id="payment-method" bind:value={method}><option>UPI</option><option>Cash</option><option>Bank transfer</option><option>Card</option><option>Other</option></select></div>
 		<div class="field full"><label for="payment-note">Reference / note</label><input id="payment-note" bind:value={note} placeholder="Transaction ID or optional note"/></div>
 	</div>
-	<label class="invoice-option"><input type="checkbox" bind:checked={generateInvoice}/> Generate a professional receipt after saving</label>
+	{#if allowed('invoices.manage')}<label class="invoice-option"><input type="checkbox" bind:checked={generateInvoice}/> Generate a professional receipt after saving</label>{/if}
 	{#if saved}<p class="saved"><CheckCircle2 size={15}/> Payment is safely recorded.</p>{/if}{#if error}<p class="error">{error}</p>{/if}
 	{#snippet footer()}<button type="button" class="secondary" disabled={saving} onclick={() => open = false}>{saved ? 'Close' : 'Cancel'}</button>{#if !saved}<button type="button" class="primary" disabled={saving} aria-busy={saving} onclick={save}>{saving ? 'Saving…' : 'Record payment'}</button>{/if}{/snippet}
 </Modal>

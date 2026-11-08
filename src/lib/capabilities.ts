@@ -289,11 +289,17 @@ export const statusFor = (profile: BusinessProfile | undefined, status: string) 
 
 export function profileForPackage(current: BusinessProfile, nichePackage: NichePackage): BusinessProfile {
 	const packaged = new Set(nichePackage.profile.customFields.map((field) => `${field.entity}:${field.key}`));
+	const switchingNiche = current.presetId !== nichePackage.id;
 	return {
 		...nichePackage.profile,
 		customFields: [
 			...nichePackage.profile.customFields,
-			...current.customFields.filter((field) => !packaged.has(`${field.entity}:${field.key}`))
+			// Fields the new package doesn't define are kept (their saved values stay), but when switching to a
+			// different niche they are turned off and made optional, so e.g. a garage's required "Vehicle
+			// registration" doesn't block every order after switching to laundry. Same-niche updates keep them as they are.
+			...current.customFields
+				.filter((field) => !packaged.has(`${field.entity}:${field.key}`))
+				.map((field) => switchingNiche ? { ...field, active: false, required: false } : field)
 		],
 		presetId: nichePackage.id,
 		presetVersion: nichePackage.version

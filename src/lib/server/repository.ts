@@ -545,13 +545,16 @@ export async function createOrder(database: AppDatabase, input: Partial<Order>) 
 	return order!;
 }
 
+// Amounts are stored as REAL rupees, so sums like 16.78 + 47.27 carry float error; compare within half a paisa.
+const MONEY_EPSILON = 0.009;
+
 export async function updateOrder(database: AppDatabase, orderId: string, input: Partial<Order>) {
 	const existing = await getOrder(database, orderId);
 	if (!existing) return null;
 	const price = Math.max(0, Number(input.price ?? existing.price));
 	const discount = Math.max(0, Number(input.discount ?? existing.discount));
 	if (discount > price) throw new Error('Discount cannot be greater than the total amount.');
-	if ((input.price !== undefined || input.discount !== undefined) && input.priceSet !== false && price - discount < existing.paid) throw new Error('The discounted total cannot be below the amount already collected.');
+	if ((input.price !== undefined || input.discount !== undefined) && input.priceSet !== false && price - discount + MONEY_EPSILON < existing.paid) throw new Error('The discounted total cannot be below the amount already collected.');
 	const nextStatus = input.status ?? existing.status;
 	const nextCustomerId = input.customerId ?? existing.customerId;
 	const linkedCustomer = nextCustomerId ? await database.prepare('SELECT business, phone FROM customers WHERE id = ?').bind(nextCustomerId).first<Row>() : null;
@@ -713,7 +716,7 @@ export async function recordPayment(database: AppDatabase, orderId: string, inpu
 	const amount = Number(input.amount || 0);
 	if (!(amount > 0)) throw new Error('Payment amount must be greater than zero.');
 	const total = Math.max(0, order.price - order.discount);
-	if (order.priceSet !== false && order.paid + amount > total) throw new Error('Payment cannot be greater than the remaining balance.');
+	if (order.priceSet !== false && order.paid + amount > total + MONEY_EPSILON) throw new Error('Payment cannot be greater than the remaining balance.');
 	const payment: Payment = { id: id('PAY'), orderId, amount, paidAt: input.paidAt || istToday(), method: input.method || 'Manual', note: input.note || '', kind: input.kind === 'advance' ? 'advance' : 'payment' };
 	// Lock the order row and insert only if the balance still allows it, in one transaction, so two
 	// simultaneous submissions (double-click, two tabs) can't overpay the order.
