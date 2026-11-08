@@ -1,6 +1,7 @@
 // Authenticates a client administrator and creates the protected session cookie.
 import { fail, redirect } from '@sveltejs/kit';
 import { authenticate, createAuthSession, SESSION_COOKIE } from '$lib/server/auth';
+import { clientInfo } from '$lib/server/clientInfo';
 
 export const load = async ({ locals }) => {
 	if (locals.account?.role === 'owner') redirect(303, '/owner');
@@ -15,7 +16,7 @@ export const actions = {
 		const result = await authenticate(email, String(form.get('password') || ''), getClientAddress());
 		if ('rateLimited' in result) return fail(429, { rateLimited: true, email });
 		if (!result.account) return fail(400, { invalid: true, email });
-		const session = await createAuthSession(result.account);
+		const session = await createAuthSession(result.account, clientInfo(request));
 		cookies.set(SESSION_COOKIE, session.token, {
 			path: '/', httpOnly: true, sameSite: 'lax', secure: url.protocol === 'https:', maxAge: session.maxAge
 		});

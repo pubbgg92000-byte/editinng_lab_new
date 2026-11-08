@@ -1,6 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { error, redirect } from '@sveltejs/kit';
-import { getAuthSession, SESSION_COOKIE } from '$lib/server/auth';
+import { getAuthSession, SESSION_COOKIE, touchAuthSession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
 import { getTenantConfiguration } from '$lib/server/configuration';
 import { capabilityRegistry, hasCapability } from '$lib/capabilities';
@@ -21,6 +21,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// Load one control session, then enforce owner and client route boundaries centrally.
 	const session = await getAuthSession(event.cookies.get(SESSION_COOKIE)).catch(() => null);
 	event.locals.session = session;
+	// "Last active" for the owner Health tab; throttled inside, and never blocks or fails the request.
+	if (session) await touchAuthSession(session.id).catch(() => {});
 	event.locals.account = session?.account || null;
 	event.locals.tenant = session?.tenant || null;
 

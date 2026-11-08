@@ -40,6 +40,14 @@ export const controlSchemaStatements = [
 	)`,
 	`CREATE INDEX IF NOT EXISTS control_sessions_account_idx ON control_sessions(account_id)`,
 	`CREATE INDEX IF NOT EXISTS control_sessions_expiry_idx ON control_sessions(expires_at)`,
+	// Device and approximate location (city/country, never the IP) for the owner Health tab. Additive only.
+	`ALTER TABLE control_sessions ADD COLUMN IF NOT EXISTS device TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE control_sessions ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT ''`,
+	// Sign-outs are kept for 5 days (shown as "Signed out" in Health) instead of being deleted at once.
+	`ALTER TABLE control_sessions ADD COLUMN IF NOT EXISTS signed_out_at TEXT`,
+	`ALTER TABLE control_sessions ADD COLUMN IF NOT EXISTS signed_out_reason TEXT NOT NULL DEFAULT ''`,
+	`CREATE TABLE IF NOT EXISTS control_signins (id TEXT PRIMARY KEY, account_id TEXT, tenant_id TEXT, email TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', device TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
+	`CREATE INDEX IF NOT EXISTS control_signins_created_idx ON control_signins(created_at)`,
 	`CREATE TABLE IF NOT EXISTS control_login_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS control_audit_logs (id TEXT PRIMARY KEY, account_id TEXT, action TEXT NOT NULL, tenant_id TEXT, details TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
 	`CREATE INDEX IF NOT EXISTS control_audit_created_idx ON control_audit_logs(created_at)`,

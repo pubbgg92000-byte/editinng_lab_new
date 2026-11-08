@@ -2,7 +2,7 @@
 // prepares a database (no schema, branding, or maintenance writes). The /owner guard in hooks protects it.
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { getTenantById, listTenantSummaries, readyControlDatabase } from '$lib/server/control';
+import { getTenantById, listLiveSessions, listOwnerAudit, listRecentSignins, listTenantSummaries, readyControlDatabase } from '$lib/server/control';
 import { databaseFromUrl } from '$lib/server/db';
 import { getDatabaseStorageUsage } from '$lib/server/maintenance';
 
@@ -47,14 +47,15 @@ export const GET = async ({ setHeaders }) => {
 			if (!tenant?.databaseUrl) throw new Error('No database is connected.');
 			const database = databaseFromUrl(tenant.databaseUrl);
 			const ping = await timed(() => database.prepare('SELECT 1 AS ok').first());
-			const [storage, sync, orders, payments] = await Promise.all([
+			const [storage, sync, orders, payments, activity] = await Promise.all([
 				getDatabaseStorageUsage(database).catch(() => null),
 				database.prepare(`SELECT COUNT(*) AS pending, MIN(created_at) AS oldest, MAX(attempts) AS attempts,
 					(SELECT last_error FROM sheet_sync_outbox WHERE synced_at IS NULL AND last_error IS NOT NULL ORDER BY updated_at DESC LIMIT 1) AS last_error,
 					(SELECT MAX(synced_at) FROM sheet_sync_outbox) AS last_synced
 					FROM sheet_sync_outbox WHERE synced_at IS NULL`).first<{ pending: number | string; oldest: string | null; attempts: number | null; last_error: string | null; last_synced: string | null }>().catch(() => null),
 				database.prepare('SELECT created_at FROM orders WHERE created_at >= ? AND historical = 0').bind(since).all<{ created_at: string }>().catch(() => null),
-				database.prepare('SELECT paid_at, amount FROM payments WHERE paid_at >= ?').bind(days[0]).all<{ paid_at: string; amount: number | string }>().catch(() => null)
+				database.prepare('SELECT paid_at, amount FROM payments WHERE paid_at >= ?').bind(days[0]).all<{ paid_at: string; amount: number | string }>().catch(() => null),
+				database.prepare('SELECT id, actor, action, entity_type, details, created_at FROM activity_logs ORDER BY created_at DESC LIMIT 10').all<{ id: string; actor: string; action: string; entity_type: string; details: string; created_at: string }>().catch(() => null)
 			]);
 			const ordersByDay = Object.fromEntries(days.map((day) => [day, 0]));
 			const paymentsByDay = Object.fromEntries(days.map((day) => [day, 0]));
@@ -67,14 +68,22 @@ export const GET = async ({ setHeaders }) => {
 				storage: storage ? { percent: storage.percent, usedMb: Math.round(storage.bytes / 1024 / 1024 * 10) / 10, limitMb: storage.limitMb } : null,
 				sync: sync ? { pending: Number(sync.pending || 0), oldest: sync.oldest, attempts: Number(sync.attempts || 0), lastError: sync.last_error ? sync.last_error.slice(0, 200) : '', lastSynced: sync.last_synced } : null,
 				orders: days.map((day) => ordersByDay[day]),
-				payments: days.map((day) => Math.round(paymentsByDay[day] * 100) / 100)
+				payments: days.map((day) => Math.round(paymentsByDay[day] * 100) / 100),
+				activity: (activity?.results || []).map((row) => ({ id: row.id, actor: row.actor, action: row.action, kind: row.entity_type, details: String(row.details || '').slice(0, 140), at: row.created_at }))
 			};
 		} catch (cause) {
-			return { ...base, ok: false, dbMs: null, error: reason(cause), storage: null, sync: null, orders: days.map(() => 0), payments: days.map(() => 0) };
+			return { ...base, ok: false, dbMs: null, error: reason(cause), storage: null, sync: null, orders: days.map(() => 0), payments: days.map(() => 0), activity: [] };
 		}
 	}));
 
+	const [sessions, signins, audit] = control.ok
+		? await Promise.all([listLiveSessions().catch(() => []), listRecentSignins(30).catch(() => []), listOwnerAudit(15).catch(() => [])])
+		: [[], [], []];
+
 	return json({
+		sessions,
+		signins,
+		audit,
 		checkedAt: new Date().toISOString(),
 		app: { commit: (env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local', region: env.VERCEL_REGION || 'local', instanceStartedAt: startedAt },
 		control,

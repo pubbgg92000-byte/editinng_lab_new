@@ -126,7 +126,8 @@ export async function readyControlDatabase() {
 	controlReady = (async () => {
 		const database = databaseFromUrl(controlUrl());
 		await database.batch(controlSchemaStatements.map((statement) => database.prepare(statement)));
-		await database.prepare('DELETE FROM control_sessions WHERE expires_at <= ?').bind(now()).run();
+		await database.prepare('DELETE FROM control_sessions WHERE expires_at <= ? OR signed_out_at < ?').bind(now(), new Date(Date.now() - SIGNED_OUT_KEEP_DAYS * 86_400_000).toISOString()).run();
+		await database.prepare('DELETE FROM control_signins WHERE created_at < ?').bind(new Date(Date.now() - SIGNIN_HISTORY_DAYS * 86_400_000).toISOString()).run();
 		await bootstrap(database);
 		await seedCapabilityControl(database);
 		return database;
@@ -193,13 +194,23 @@ export async function authenticate(email: string, password: string, address: str
 	return { account: { id: String(row.id), email: String(row.email), role: row.role, tenantId: row.tenant_id || undefined } as Account };
 }
 
-export async function createAuthSession(account: Account) {
+const SIGNIN_HISTORY_DAYS = 90;
+const SIGNED_OUT_KEEP_DAYS = 5;
+const LAST_SEEN_EVERY_MS = 5 * 60_000;
+const lastSeenWrites = new Map<string, number>();
+
+export async function createAuthSession(account: Account, client: { device?: string; location?: string } = {}) {
 	const database = await readyControlDatabase();
 	const rawToken = randomToken();
 	const timestamp = now();
 	const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString();
-	await database.prepare('INSERT INTO control_sessions (id, token_hash, account_id, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)')
-		.bind(id('SES'), await digest(rawToken), account.id, expiresAt, timestamp, timestamp).run();
+	const device = client.device || '', location = client.location || '';
+	await database.batch([
+		database.prepare('INSERT INTO control_sessions (id, token_hash, account_id, expires_at, created_at, last_seen_at, device, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+			.bind(id('SES'), await digest(rawToken), account.id, expiresAt, timestamp, timestamp, device, location),
+		database.prepare('INSERT INTO control_signins (id, account_id, tenant_id, email, role, device, location, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+			.bind(id('SIN'), account.id, account.tenantId || null, account.email, account.role, device, location, timestamp)
+	]);
 	return { token: rawToken, maxAge: SESSION_DAYS * 86_400 };
 }
 
@@ -219,17 +230,49 @@ async function loadAuthSession(rawToken: string): Promise<AuthSession | null> {
 		t.connection_status AS tenant_connection_status, t.connection_error AS tenant_connection_error,
 		t.last_validated_at AS tenant_last_validated_at, t.created_at AS tenant_created_at, t.updated_at AS tenant_updated_at
 		FROM control_sessions s JOIN control_accounts a ON a.id = s.account_id LEFT JOIN control_tenants t ON t.id = a.tenant_id
-		WHERE s.token_hash = ? AND s.expires_at > ?`).bind(await digest(rawToken), now()).first<TenantRow>();
+		WHERE s.token_hash = ? AND s.expires_at > ? AND s.signed_out_at IS NULL`).bind(await digest(rawToken), now()).first<TenantRow>();
 	if (!row || (row.account_role !== 'owner' && row.tenant_status !== 'active')) return null;
 	const account: Account = { id: row.account_id, email: row.account_email, role: row.account_role, tenantId: row.account_tenant_id || undefined };
 	return { id: row.session_id, account, tenant: await tenantFromRow(row), expiresAt: row.expires_at };
+}
+
+/** Marks a session as recently used, at most once every 5 minutes per session per server instance. */
+export async function touchAuthSession(sessionId: string) {
+	const last = lastSeenWrites.get(sessionId) || 0;
+	if (Date.now() - last < LAST_SEEN_EVERY_MS) return;
+	lastSeenWrites.set(sessionId, Date.now());
+	if (lastSeenWrites.size > 5000) lastSeenWrites.clear();
+	const database = await readyControlDatabase();
+	await database.prepare('UPDATE control_sessions SET last_seen_at = ? WHERE id = ?').bind(now(), sessionId).run();
+}
+
+/** Owner Health tab: who is signed in now, and recent sign-ins. Read-only. */
+export async function listLiveSessions() {
+	const database = await readyControlDatabase();
+	const result = await database.prepare(`SELECT s.id, s.created_at, s.last_seen_at, s.device, s.location, s.signed_out_at, s.signed_out_reason, a.email, a.role, t.internal_name AS tenant_name
+		FROM control_sessions s JOIN control_accounts a ON a.id = s.account_id LEFT JOIN control_tenants t ON t.id = a.tenant_id
+		WHERE s.expires_at > ? ORDER BY s.last_seen_at DESC LIMIT 200`).bind(now()).all<Record<string, string>>();
+	return (result.results || []).map((row) => ({ id: row.id, email: row.email, role: row.role, workspace: row.tenant_name || 'Platform owner', device: row.device || '', location: row.location || '', signedInAt: row.created_at, lastSeenAt: row.last_seen_at, signedOutAt: row.signed_out_at || '', signedOutReason: row.signed_out_reason || '' }));
+}
+
+export async function listRecentSignins(limit = 30) {
+	const database = await readyControlDatabase();
+	const result = await database.prepare(`SELECT g.id, g.email, g.role, g.device, g.location, g.created_at, t.internal_name AS tenant_name
+		FROM control_signins g LEFT JOIN control_tenants t ON t.id = g.tenant_id ORDER BY g.created_at DESC LIMIT ?`).bind(limit).all<Record<string, string>>();
+	return (result.results || []).map((row) => ({ id: row.id, email: row.email, role: row.role, workspace: row.tenant_name || 'Platform owner', device: row.device || '', location: row.location || '', at: row.created_at }));
+}
+
+export async function listOwnerAudit(limit = 15) {
+	const database = await readyControlDatabase();
+	const result = await database.prepare(`SELECT l.id, l.action, l.details, l.created_at, t.internal_name AS tenant_name FROM control_audit_logs l LEFT JOIN control_tenants t ON t.id = l.tenant_id ORDER BY l.created_at DESC LIMIT ?`).bind(limit).all<Record<string, string>>();
+	return (result.results || []).map((row) => ({ id: row.id, action: row.action, details: (row.details || '').slice(0, 120), workspace: row.tenant_name || '', at: row.created_at }));
 }
 
 export async function destroyAuthSession(rawToken?: string) {
 	if (!rawToken) return;
 	clearCache(`session:${rawToken}`);
 	const database = await readyControlDatabase();
-	await database.prepare('DELETE FROM control_sessions WHERE token_hash = ?').bind(await digest(rawToken)).run();
+	await database.prepare("UPDATE control_sessions SET signed_out_at = ?, signed_out_reason = 'Signed out' WHERE signed_out_at IS NULL AND token_hash = ?").bind(now(), await digest(rawToken)).run();
 }
 
 // ---------- Owner-panel client lifecycle and connection management ----------
@@ -238,7 +281,7 @@ export async function listTenantSummaries() {
 	const database = await readyControlDatabase();
 	// One row per workspace: join only its main admin, and count team members separately.
 	const result = await database.prepare(`SELECT t.*, a.email AS admin_email,
-		(SELECT COUNT(*) FROM control_sessions s WHERE s.account_id = a.id AND s.expires_at > ?) AS active_sessions,
+		(SELECT COUNT(*) FROM control_sessions s WHERE s.account_id = a.id AND s.expires_at > ? AND s.signed_out_at IS NULL) AS active_sessions,
 		(SELECT COUNT(*) FROM control_accounts m WHERE m.tenant_id = t.id) AS member_count
 		FROM control_tenants t LEFT JOIN control_accounts a ON a.tenant_id = t.id AND a.role = 'client_admin' ORDER BY t.created_at`).bind(now()).all<TenantRow>();
 	return Promise.all((result.results || []).map(async (row) => {
@@ -357,7 +400,7 @@ export async function setTenantStatus(tenantId: string, status: TenantStatus, ow
 	const database = await readyControlDatabase();
 	await database.batch([
 		database.prepare('UPDATE control_tenants SET status = ?, updated_at = ? WHERE id = ?').bind(status, now(), tenantId),
-		database.prepare('DELETE FROM control_sessions WHERE account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ?)').bind(tenantId),
+		database.prepare("UPDATE control_sessions SET signed_out_at = ?, signed_out_reason = 'Workspace status changed' WHERE signed_out_at IS NULL AND account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ?)").bind(now(), tenantId),
 		database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id('AUD'), ownerId, 'Tenant status changed', tenantId, status, now())
 	]);
 }
@@ -367,7 +410,7 @@ export async function updateTenantCredentials(tenantId: string, email: string, p
 	// Only the workspace's main admin login; team members keep their own credentials and sessions.
 	const statements = [database.prepare("UPDATE control_accounts SET email = ?, updated_at = ? WHERE tenant_id = ? AND role = 'client_admin'").bind(email.trim().toLowerCase(), now(), tenantId)];
 	if (password) statements.push(database.prepare("UPDATE control_accounts SET password_hash = ?, updated_at = ? WHERE tenant_id = ? AND role = 'client_admin'").bind(await hashPassword(password), now(), tenantId));
-	statements.push(database.prepare("DELETE FROM control_sessions WHERE account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ? AND role = 'client_admin')").bind(tenantId));
+	statements.push(database.prepare("UPDATE control_sessions SET signed_out_at = ?, signed_out_reason = 'Login changed by owner' WHERE signed_out_at IS NULL AND account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ? AND role = 'client_admin')").bind(now(), tenantId));
 	statements.push(database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id('AUD'), ownerId, 'Client credentials changed', tenantId, email.trim().toLowerCase(), now()));
 	await database.batch(statements);
 }
@@ -376,7 +419,7 @@ export async function changeOwnerPassword(ownerId: string, password: string) {
 	const database = await readyControlDatabase();
 	await database.batch([
 		database.prepare('UPDATE control_accounts SET password_hash = ?, updated_at = ? WHERE id = ? AND role = ?').bind(await hashPassword(password), now(), ownerId, 'owner'),
-		database.prepare('DELETE FROM control_sessions WHERE account_id = ?').bind(ownerId)
+		database.prepare("UPDATE control_sessions SET signed_out_at = ?, signed_out_reason = 'Password changed' WHERE signed_out_at IS NULL AND account_id = ?").bind(now(), ownerId)
 	]);
 }
 
@@ -412,7 +455,7 @@ export async function updateTenantConnection(tenantId: string, input: { database
 	await database.batch([
 		database.prepare('UPDATE control_tenants SET database_url_cipher = ?, google_sheet_id = ?, orders_tab = ?, studio_name = ?, logo_url = ?, connection_status = ?, connection_error = ?, updated_at = ? WHERE id = ?')
 			.bind(await encryptSecret(input.databaseUrl), input.googleSheetId, input.ordersTab, input.studioName, input.logoUrl, 'healthy', '', now(), tenantId),
-		database.prepare('DELETE FROM control_sessions WHERE account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ?)').bind(tenantId),
+		database.prepare("UPDATE control_sessions SET signed_out_at = ?, signed_out_reason = 'Workspace connection changed' WHERE signed_out_at IS NULL AND account_id IN (SELECT id FROM control_accounts WHERE tenant_id = ?)").bind(now(), tenantId),
 		database.prepare('INSERT INTO control_audit_logs (id, account_id, action, tenant_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id('AUD'), ownerId, 'Workspace connections updated', tenantId, 'Connections revalidated; workspace sessions revoked', now())
 	]);
 }
