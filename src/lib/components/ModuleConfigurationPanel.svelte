@@ -105,7 +105,7 @@
 		if (!packaged) return;
 		whatsapp.deletedTemplateIds = (whatsapp.deletedTemplateIds || []).filter((id) => id !== item.id);
 		configuration.moduleConfiguration['communications.whatsapp'].templates[item.id] = { ...packaged };
-		onmessage(`Package template restored. ${whatsappOnly ? 'Save WhatsApp templates' : 'Save business setup'} to apply it.`);
+		onmessage(`Package template restored. ${whatsappOnly ? 'Save WhatsApp messages' : 'Save business setup'} to apply it.`);
 	}
 
 	function requestDeleteTemplate(item: WhatsAppTemplate) {
@@ -125,7 +125,7 @@
 		}
 		deleteOpen = false;
 		deleting = null;
-		onmessage(`Template removed. ${whatsappOnly ? 'Save WhatsApp templates' : 'Save business setup'} to apply it.`);
+		onmessage(`Template removed. ${whatsappOnly ? 'Save WhatsApp messages' : 'Save business setup'} to apply it.`);
 	}
 
 	function saveTemplate() {
@@ -154,7 +154,7 @@
 		configuration.moduleConfiguration['communications.whatsapp'].templates[editing.id] = { ...editing };
 		if (!whatsapp.defaultTemplateIds[editing.scenario]) whatsapp.defaultTemplateIds[editing.scenario] = editing.id;
 		editorOpen = false;
-		onmessage(`Template updated. ${whatsappOnly ? 'Save WhatsApp templates' : 'Save business setup'} to apply it.`);
+		onmessage(`Template updated. ${whatsappOnly ? 'Save WhatsApp messages' : 'Save business setup'} to apply it.`);
 	}
 
 	function insertPlaceholder(key: string) {
@@ -269,7 +269,7 @@
 <Modal title={editing?.source === 'custom' && !whatsapp.templates[editing?.id || ''] ? 'Create WhatsApp template' : 'Edit WhatsApp template'} bind:open={editorOpen} wide>
 	{#if editing}<div class="template-editor">
 		<div class="editor-fields">
-			<label>Template name <RequiredMark/><input bind:value={editing.name} maxlength="80" required aria-required="true" placeholder="Example: Appointment reminder"/></label>
+			<label>Template name <RequiredMark/><input bind:value={editing.name} maxlength="80" required aria-required="true" placeholder="Example: Appointment reminder" onkeydown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}/></label>
 			<label>Message purpose <RequiredMark/><select value={editing.scenario} onchange={(event) => updateTemplateScenario(event.currentTarget.value as MessageScenario)} required aria-required="true">{#each Object.entries(messageScenarioLabels) as [value, label]}<option {value}>{label}</option>{/each}</select></label>
 			<label>Audience<select bind:value={editing.audience} disabled aria-label="Audience is selected from message purpose"><option value="customer">Customer</option><option value="staff">Worker / staff</option></select></label>
 			<label>Available from<select value={editing.context} disabled aria-label="Available context is selected from message purpose">{#each Object.entries(messageContextLabels) as [value, label]}<option {value}>{label}</option>{/each}</select></label>

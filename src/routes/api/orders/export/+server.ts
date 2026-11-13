@@ -1,5 +1,7 @@
 // Export orders as a downloadable XLSX file, filtered by date range or month.
 import ExcelJS from 'exceljs';
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
 import { getSettings, listOrdersPage } from '$lib/server/repository';
@@ -7,15 +9,30 @@ import { getTenantConfiguration } from '$lib/server/configuration';
 import { hasCapability } from '$lib/capabilities';
 import { orderCode } from '$lib/identifiers';
 
-export const GET = async ({ cookies, locals, url }) => {
+// Failures come back as JSON `{ error }` (never a blank 500 page) so the caller can show the reason.
+export const GET: RequestHandler = async (event) => {
+	try {
+		return await download(event);
+	} catch (cause) {
+		console.error('Order export failed.', cause);
+		return json({ error: 'Unable to build the Excel file. Please try again.' }, { status: 500 });
+	}
+};
+
+const download: RequestHandler = async ({ cookies, locals, url }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) {
-		return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
 	// Accept either ?month=YYYY-MM  or  ?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD
 	let dateFrom = url.searchParams.get('dateFrom') || '';
 	let dateTo   = url.searchParams.get('dateTo')   || '';
 	const month  = url.searchParams.get('month')    || '';
+
+	// These values filter the export and name the file, so reject anything that isn't a plain date.
+	// (An unreadable value used to be ignored, which exported every order under a misleading name.)
+	if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ error: 'Choose a valid month.' }, { status: 400 });
+	if ([dateFrom, dateTo].some((day) => day && !/^\d{4}-\d{2}-\d{2}$/.test(day))) return json({ error: 'Choose valid export dates.' }, { status: 400 });
 
 	if (month) {
 		// Expand month to full date range
@@ -30,16 +47,18 @@ export const GET = async ({ cookies, locals, url }) => {
 
 	const database = await readyDatabase(locals.tenant);
 
-	const configuration = await getTenantConfiguration(database, locals.tenant!);
+	const [configuration, { orderPrefix }] = await Promise.all([getTenantConfiguration(database, locals.tenant!), getSettings(database)]);
 	const paymentsEnabled = hasCapability(configuration.effectiveCapabilities, 'billing.payments');
-	const { orderPrefix } = await getSettings(database);
 
 	// listOrdersPage caps pageSize at 100, so walk every page to export all matching orders.
 	const filters = { pageSize: 100, status, event, dateFrom, dateTo };
 	const firstPage = await listOrdersPage(database, { ...filters, page: 1 });
 	const orders = [...firstPage.orders];
-	for (let page = 2; page <= firstPage.pagination.totalPages; page++) {
-		orders.push(...(await listOrdersPage(database, { ...filters, page })).orders);
+	// The remaining pages are independent reads: fetch them a few at a time instead of one by one.
+	const remainingPages = Array.from({ length: Math.max(0, firstPage.pagination.totalPages - 1) }, (_, index) => index + 2);
+	for (let start = 0; start < remainingPages.length; start += 4) {
+		const batch = await Promise.all(remainingPages.slice(start, start + 4).map((page) => listOrdersPage(database, { ...filters, page })));
+		for (const result of batch) orders.push(...result.orders);
 	}
 	// Workspaces without payments must not export payment data (matches /api/export masking).
 	if (!paymentsEnabled) for (const order of orders) order.paid = 0;
@@ -172,6 +191,7 @@ export const GET = async ({ cookies, locals, url }) => {
 		headers: {
 			'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 			'Content-Disposition': `attachment; filename="${filename}"`,
+			'Cache-Control': 'no-store',
 		},
 	});
 };

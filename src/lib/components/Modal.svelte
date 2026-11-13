@@ -1,5 +1,8 @@
 <!-- Shared accessible dialog shell with escape, backdrop, focus, and scroll locking. -->
 <script module lang="ts">
+	import { get } from 'svelte/store';
+	import { confirmState } from '$lib/stores/confirm';
+
 	type ModalLayer = {
 		id: number;
 		close: () => void;
@@ -40,6 +43,9 @@
 	function handleKeydown(event: KeyboardEvent) {
 		const top = modalLayers.at(-1);
 		if (!top) return;
+		// A confirmation question sits above every modal and handles its own keys; without this,
+		// Escape would close the modal underneath and leave the question open.
+		if (get(confirmState).open) return;
 		if (event.key === 'Escape') {
 			event.preventDefault();
 			event.stopPropagation();

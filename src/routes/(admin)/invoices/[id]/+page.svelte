@@ -4,6 +4,7 @@
   import Breadcrumbs from "$lib/components/Breadcrumbs.svelte";
   import { safeFetch } from "$lib/http";
   import { untrack } from "svelte";
+  import { invalidateAll } from "$app/navigation";
   import {
     ArrowLeft,
     CalendarClock,
@@ -44,6 +45,14 @@
   let busy = $state(false);
   let sending = $state(false);
   let error = $state("");
+  // Re-sync when the invoice reloads after a save, or another invoice opens in this same page.
+  $effect(() => {
+    const next = data.invoice.status || "draft";
+    untrack(() => {
+      status = next;
+      savedStatus = next;
+    });
+  });
   const invoiceTemplates = $derived(Object.values(data.configuration.moduleConfiguration["communications.whatsapp"].templates).filter((template) => template.enabled && template.context === "invoice" && template.scenario === (data.invoice.kind === "partial" ? "partial-invoice" : "invoice")));
   let selectedTemplateId = $state(untrack(() => data.configuration.moduleConfiguration["communications.whatsapp"].defaultTemplateIds[data.invoice.kind === "partial" ? "partial-invoice" : "invoice"] || invoiceTemplates[0]?.id || ""));
   const hasBillingSnapshot = $derived(
@@ -126,11 +135,14 @@
     if (!response.ok) {
       status = savedStatus;
       error = result.error || "Unable to update invoice status.";
+      notifyAction(error, "error");
       return false;
     }
     status = next;
     savedStatus = next;
     notifyAction(`Invoice marked: ${statusLabels[next]}.`);
+    // Refresh the History list, which records every status change.
+    void invalidateAll();
     return true;
   }
   async function sendWhatsApp() {
@@ -150,10 +162,10 @@
         error = result.error || "Unable to prepare the WhatsApp message.";
         return;
       }
-      status = "sent";
-      savedStatus = "sent";
       if (tab) tab.location.href = result.url;
       else window.open(result.url, "_blank", "noopener,noreferrer");
+      // The WhatsApp endpoint only builds the message, so save "Sent" here or it is lost on reload.
+      if (savedStatus === "draft") void updateStatus("sent");
     } catch {
       tab?.close();
       error = "Unable to prepare the WhatsApp message.";
@@ -169,7 +181,7 @@
   <div class="actions">
     <button class="secondary" onclick={() => window.print()}
       ><Printer size={15} /> Print / save PDF</button
-    >{#if customerMobile}<div class="whatsapp-choice">{#if invoiceTemplates.length > 1}<select bind:value={selectedTemplateId} disabled={sending} aria-label="Which WhatsApp message to send">{#each invoiceTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select>{/if}<button class="primary whatsapp" disabled={sending} aria-busy={sending} onclick={sendWhatsApp}
+    >{#if customerMobile}<div class="whatsapp-choice">{#if invoiceTemplates.length > 1}<select bind:value={selectedTemplateId} disabled={sending} aria-label="Which WhatsApp message to send">{#each invoiceTemplates as template}<option value={template.id}>{template.name}</option>{/each}</select>{/if}<button class="primary whatsapp" disabled={sending || busy || status === "cancelled"} aria-busy={sending} onclick={sendWhatsApp}
         >{#if sending}<LoaderCircle class="button-spinner" size={16}/>{:else}<WhatsAppIcon size={16}/>{/if}{sending ? "Preparing…" : "Open in WhatsApp"}</button
       ></div>{/if}
   </div>
@@ -401,6 +413,8 @@
     color: #ef4444;
   }
   .printable-invoice {
+    --brand: var(--purple, #2f6b3f);
+    --brand-ink: var(--accent-text, #fff);
     padding: 38px;
     margin-bottom: 18px;
     background: #fff !important;
@@ -411,7 +425,7 @@
     justify-content: space-between;
     gap: 30px;
     padding-bottom: 24px;
-    border-bottom: 2px solid #172033;
+    border-bottom: 3px solid var(--brand);
   }
   .printable-invoice header h1 {
     font-size: 24px;
@@ -432,7 +446,8 @@
   .document-title span {
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    color: #64748b;
+    color: color-mix(in srgb, var(--brand) 78%, #000 22%);
+    font-weight: 700;
     font-size:12px;
   }
   .document-title strong {
@@ -467,9 +482,9 @@
     border-collapse: collapse;
   }
   .printable-invoice th {
-    padding: 10px;
-    background: #172033;
-    color: #fff;
+    padding: 11px 10px;
+    background: var(--brand);
+    color: var(--brand-ink);
     text-align: left;
     font-size:11px;
     text-transform: uppercase;
@@ -508,9 +523,10 @@
     font-weight: 600;
   }
   .totals .grand {
-    border-top: 1px solid #172033;
-    border-bottom: 1px solid #172033;
+    border-top: 2px solid var(--brand);
+    border-bottom: 2px solid var(--brand);
     font-size:14px;
+    font-weight: 750;
   }
   .printable-invoice footer {
     display: flex;
@@ -635,6 +651,12 @@
       border: 0 !important;
       margin: 0;
       padding: 0;
+    }
+    /* Keep the brand accent on the table head and totals even with background graphics off. */
+    .printable-invoice th,
+    .printable-invoice .grand {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
     .no-print {
       display: none !important;

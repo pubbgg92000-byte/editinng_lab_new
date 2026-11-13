@@ -4,6 +4,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import WhatsAppIcon from '$lib/components/WhatsAppIcon.svelte';
 	import { whatsappNumber } from '$lib/phone';
+	import { notifyAction } from '$lib/stores/actionFeedback';
 
 	let { open = $bindable(false), name, phone = '', link, business, replaced = false, whatsapp = true }: {
 		open?: boolean;
@@ -21,7 +22,7 @@
 	const whatsappUrl = $derived(number ? `https://wa.me/${number}?text=${encodeURIComponent(message)}` : '');
 
 	const copy = async () => {
-		try { await navigator.clipboard.writeText(link); copied = true; setTimeout(() => (copied = false), 2000); } catch { /* clipboard blocked; the link stays selectable */ }
+		try { await navigator.clipboard.writeText(link); copied = true; setTimeout(() => (copied = false), 2000); } catch { notifyAction("Couldn't copy automatically. Select the link above and copy it.", 'error'); }
 	};
 </script>
 

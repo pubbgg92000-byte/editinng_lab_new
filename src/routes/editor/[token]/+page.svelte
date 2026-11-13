@@ -7,8 +7,9 @@
 	import CustomFieldValues from '$lib/components/CustomFieldValues.svelte';
 	import ProgressDisplay from '$lib/components/ProgressDisplay.svelte';
 	import { formatDate } from '$lib/data';
-	import { formatVideoDuration } from '$lib/duration';
+	import { formatVideoDuration, parseVideoDurationMinutes } from '$lib/duration';
 	import { requestJson } from '$lib/http';
+	import { askConfirm } from '$lib/stores/confirm';
 	import type { Task, TaskStatus } from '$lib/types';
 	import { hasCapability, labelFor, statusFor } from '$lib/capabilities';
 	import { staffPortalSections } from '$lib/moduleConfiguration';
@@ -23,6 +24,8 @@
 	let videoDuration = $state('');
 	let saved = $state(false);
 	let saving = $state(false);
+	let readying = $state(false);
+	let savedTimer: ReturnType<typeof setTimeout> | undefined;
 	let error = $state('');
 	const editorStatuses: TaskStatus[] = ['Not started', 'Files downloaded', 'In progress', 'Waiting for clarification', 'Ready for review'];
 	const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
@@ -40,6 +43,14 @@
 	const assetsEnabled = $derived(portalSections.assets && hasCapability(data.configuration.effectiveCapabilities, 'work.assignedAssets'));
 	const customFieldsEnabled = $derived(portalSections.customFields && hasCapability(data.configuration.effectiveCapabilities, 'customFields'));
 	const socialImage = $derived(`${data.appUrl}/nexadesk-social.png`);
+	// Unsaved edits: a field this portal is allowed to save differs from what the server last returned for the open task.
+	const dirty = $derived(selected !== null && selected.status !== 'Completed' && portalConfiguration.mode !== 'assignments-only' && (
+		(portalConfiguration.allowStatusUpdate && status !== selected.status)
+		|| (portalConfiguration.allowProgressUpdate && portalSections.progress && Number(progress) !== Number(selected.progress))
+		|| (portalSections.output && outputLink.trim() !== (selected.outputLink || '').trim())
+		|| (portalSections.notes && notes.trim() !== (selected.notes || '').trim())
+		|| (durationEnabled && parseVideoDurationMinutes(videoDuration) !== Math.round(Number(selected.videoDurationMinutes) || 0))));
+	const confirmDiscard = () => askConfirm({ title: 'Unsaved changes', message: `You have unsaved changes to this ${taskLabel.toLowerCase()}. Leave without saving?`, confirmLabel: 'Leave without saving', danger: true });
 
 	function openTask(task: (typeof tasks)[number]) {
 		selected = task;
@@ -49,31 +60,47 @@
 		notes = task.notes || '';
 		videoDuration = formatVideoDuration(task.videoDurationMinutes);
 		error = '';
+		saved = false;
 		// Phone back button returns to the list instead of leaving the portal.
 		history.pushState({ editorTask: task.id }, '');
 		window.scrollTo(0, 0);
 	}
-	function closeTask() {
-		if (history.state?.editorTask) history.back();
-		else selected = null;
+	async function closeTask() {
+		if (dirty && !(await confirmDiscard())) return;
+		const viaHistory = Boolean(history.state?.editorTask);
+		selected = null;
+		if (viaHistory) history.back();
+	}
+	async function onPopState() {
+		if (!selected) return;
+		const task = selected;
+		// The phone back button has already left the task entry; put it back if the editor keeps editing.
+		if (dirty && !(await confirmDiscard())) { history.pushState({ editorTask: task.id }, ''); return; }
+		if (selected?.id === task.id) selected = null;
 	}
 	async function markReady() {
+		if (saving) return;
 		status = 'Ready for review';
 		progress = 100;
-		await update();
+		readying = true;
+		try { await update(); } finally { readying = false; }
 	}
 
 	async function update() {
-		if (!selected) return;
+		if (!selected || saving) return;
+		// The editor may go back or open other work while this saves, so pin the task being saved.
+		const target = selected;
+		const sentStatus = status;
 		saving = true;
 		error = '';
+		saved = false;
 		try {
-			const result = await requestJson<{ task: Task }>(`/api/portal/${data.tenantSlug}/tasks/${selected.id}`, {
+			const result = await requestJson<{ task: Task }>(`/api/portal/${data.tenantSlug}/tasks/${target.id}`, {
 				method: 'PATCH',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
 					// Send status only when the editor changed it, so admin-set states like "Revision required" don't block saving notes or links.
-					...(portalConfiguration.allowStatusUpdate && portalConfiguration.mode !== 'assignments-only' && status !== selected.status ? { status } : {}),
+					...(portalConfiguration.allowStatusUpdate && portalConfiguration.mode !== 'assignments-only' && status !== target.status ? { status } : {}),
 					...(portalConfiguration.allowProgressUpdate && portalSections.progress ? { progress } : {}),
 					...(portalSections.output ? { outputLink } : {}),
 					...(portalSections.notes ? { notes } : {}),
@@ -81,12 +108,16 @@
 					token: data.token
 				})
 			}, `Unable to update this ${taskLabel.toLowerCase()}.`);
-			tasks = tasks.map((task) => task.id === selected?.id ? { ...task, ...result.task } : task);
-			selected = tasks.find((task) => task.id === selected?.id) || null;
+			tasks = tasks.map((task) => task.id === target.id ? { ...task, ...result.task } : task);
+			if (selected?.id !== target.id) return;
+			selected = tasks.find((task) => task.id === target.id) || null;
+			// Follow a status the administrator set meanwhile, so the next save does not silently undo it.
+			if (selected && status === sentStatus) status = selected.status;
 			saved = true;
-			setTimeout(() => saved = false, 2500);
+			clearTimeout(savedTimer);
+			savedTimer = setTimeout(() => saved = false, 2500);
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : `Unable to update this ${taskLabel.toLowerCase()}.`;
+			if (selected?.id === target.id) error = cause instanceof Error ? cause.message : `Unable to update this ${taskLabel.toLowerCase()}.`;
 		} finally {
 			saving = false;
 		}
@@ -110,7 +141,7 @@
 	<meta name="twitter:image" content={socialImage} />
 	<meta name="robots" content="noindex,nofollow" />
 </svelte:head>
-<svelte:window onpopstate={() => { if (selected) selected = null; }} />
+<svelte:window onpopstate={onPopState} />
 <PortalHeader label={`${staffLabel} portal`} settings={data.settings} themeScope={data.tenantSlug}/>
 
 <main class="portal-main">
@@ -156,8 +187,8 @@
 				{#if portalSections.notes}<div class="field"><label for="task-notes">Notes for administrator <span>Optional</span></label><textarea id="task-notes" bind:value={notes} placeholder="Add an update, question, or missing-information report..."></textarea></div>{/if}
 				{#if error}<p class="error">{error}</p>{/if}
 				<div class="save-row">
-					{#if portalConfiguration.allowStatusUpdate && selected.status !== 'Ready for review'}<button type="button" class="secondary ready" disabled={saving} onclick={markReady}><Check size={16}/> Mark ready for review</button>{/if}
-					<button type="button" class="primary save" disabled={saving} aria-busy={saving} onclick={update}>{saving ? 'Saving…' : 'Save update'}</button>
+					{#if portalConfiguration.allowStatusUpdate && selected.status !== 'Ready for review'}<button type="button" class="secondary ready" disabled={saving} aria-busy={readying} onclick={markReady}><Check size={16}/> {readying ? 'Saving…' : 'Mark ready for review'}</button>{/if}
+					<button type="button" class="primary save" disabled={saving} aria-busy={saving && !readying} onclick={update}>{saving && !readying ? 'Saving…' : 'Save update'}</button>
 				</div>
 				{#if saved}<div class="saved" role="status" aria-live="polite"><Check size={13}/> Update saved</div>{/if}
 			</section>{/if}

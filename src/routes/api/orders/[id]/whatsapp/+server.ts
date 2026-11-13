@@ -30,10 +30,9 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 	const scenario = selected?.scenario || input.scenario || 'status-update';
 	if (!orderScenarios.has(scenario)) return json({ error: 'Choose a customer order template.' }, { status: 400 });
 	if (!templateForScenario(configuration.moduleConfiguration, scenario, input.templateId)) return json({ error: 'That WhatsApp template is unavailable.' }, { status: 400 });
-	const order = await getOrder(database, params.id);
+	const [order, customers] = await Promise.all([getOrder(database, params.id), listCustomers(database, true)]);
 	if (!order) return json({ error: 'Order not found.' }, { status: 404 });
 	if (scenario === 'payment-received' && !order.payments?.length) return json({ error: 'Record a payment before preparing a payment receipt message.' }, { status: 409 });
-	const customers = await listCustomers(database, true);
 	const customer = customers.find((item) => item.id === order.customerId)
 		|| customers.find((item) => item.business === order.customer && item.phone.replace(/\D/g, '') === order.mobile?.replace(/\D/g, ''));
 	const phone = customer?.phone || order.mobile;

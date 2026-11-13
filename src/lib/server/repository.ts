@@ -214,10 +214,7 @@ export async function listCustomers(database: AppDatabase, includeArchived = fal
 		COALESCE((SELECT SUM(CASE WHEN o.amount - o.discount - o.advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) > 0 THEN o.amount - o.discount - o.advance - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) ELSE 0 END) FROM orders o WHERE o.customer_id = c.id AND o.archived_at IS NULL), 0) AS pending
 		FROM customers c ${includeArchived ? '' : 'WHERE c.archived_at IS NULL'} ORDER BY c.business`);
 	const customers = customerRows.map(customerFrom);
-	for (const customer of customers) {
-		const source = customerRows.find((row) => row.id === customer.id);
-		customer.token = await openPortalToken(source?.portal_token_cipher);
-	}
+	await Promise.all(customers.map(async (customer, index) => { customer.token = await openPortalToken(customerRows[index].portal_token_cipher); }));
 	return customers;
 }
 
@@ -253,7 +250,6 @@ export async function updateCustomer(database: AppDatabase, customerId: string, 
 	if (await database.prepare('SELECT id FROM customers WHERE id != ? AND (phone_normalized = ? OR RIGHT(regexp_replace(phone, ?, ?, ?), 10) = ?) LIMIT 1').bind(customerId, phone, '\\D', '', 'g', phone).first()) throw new Error('Another customer already uses this mobile number.');
 	const timestamp = now();
 	const business = String(input.business ?? existing.business).trim() || String(input.name ?? existing.name).trim();
-	const linkedOrders = await rows(database, 'SELECT id FROM orders WHERE customer_id = ?', [customerId]);
 	await database.batch([
 		database.prepare('UPDATE customers SET name = ?, business = ?, phone = ?, phone_normalized = ?, email = ?, address = ?, location_url = ?, gst = ?, custom_values = ?::jsonb, updated_at = ? WHERE id = ?').bind(input.name ?? existing.name, business, phone, phone, input.email ?? existing.email, input.address ?? existing.address, input.locationUrl ?? existing.location_url ?? '', input.gst ?? existing.gst, JSON.stringify({ ...customValues(existing.custom_values), ...(input.customFields || {}) }), timestamp, customerId),
 		database.prepare('UPDATE orders SET customer_name = ?, mobile = ?, updated_at = ? WHERE customer_id = ?').bind(business, phone, timestamp, customerId)
@@ -261,9 +257,10 @@ export async function updateCustomer(database: AppDatabase, customerId: string, 
 	const customer = (await listCustomers(database)).find((item) => item.id === customerId)!;
 	await activity(database, 'admin', 'Customer updated', 'customer', customerId, customer.business);
 	await queueSheetSync(database, 'Customers', customerId, customer);
-	for (const linked of linkedOrders) {
-		const order = await getOrder(database, String(linked.id));
-		if (order) await queueSheetSync(database, 'Orders', order.id, order);
+	const linkedOrders = await hydrateOrders(database, await rows(database, 'SELECT * FROM orders WHERE customer_id = ?', [customerId]));
+	if (linkedOrders.length) {
+		const queuedAt = now();
+		await database.batch(linkedOrders.map((order) => database.prepare('INSERT INTO sheet_sync_outbox (id, entity_type, entity_id, operation, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id('SYNC'), 'Orders', order.id, 'upsert', JSON.stringify(order), queuedAt, queuedAt)));
 	}
 	return customer;
 }
@@ -298,10 +295,7 @@ export async function restoreCustomer(database: AppDatabase, customerId: string)
 export async function listEditors(database: AppDatabase, includeInactive = false) {
 	const editorRows = await rows(database, `SELECT e.*, COUNT(CASE WHEN t.archived_at IS NULL AND t.status != 'Completed' THEN 1 END) AS active_tasks FROM editors e LEFT JOIN tasks t ON t.editor_id = e.id ${includeInactive ? '' : 'WHERE e.archived_at IS NULL'} GROUP BY e.id ORDER BY e.name`);
 	const editors = editorRows.map(editorFrom);
-	for (const editor of editors) {
-		const source = editorRows.find((row) => row.id === editor.id);
-		editor.token = await openPortalToken(source?.portal_token_cipher);
-	}
+	await Promise.all(editors.map(async (editor, index) => { editor.token = await openPortalToken(editorRows[index].portal_token_cipher); }));
 	return editors;
 }
 
@@ -395,7 +389,17 @@ async function hydrateOrders(database: AppDatabase, orderRows: Row[]) {
 		rows(database, `SELECT t.*, e.name AS editor_name, e.code AS editor_code, COALESCE((SELECT SUM(item.amount) FROM invoice_task_items item JOIN invoices inv ON inv.id = item.invoice_id WHERE item.task_id = t.id AND COALESCE(inv.status, '') <> 'cancelled' AND inv.kind = 'partial'), 0) AS invoiced_amount FROM tasks t LEFT JOIN editors e ON e.id = t.editor_id WHERE t.order_id IN (${placeholders}) ORDER BY t.created_at`, orderIds),
 		rows(database, `SELECT * FROM payments WHERE order_id IN (${placeholders}) ORDER BY paid_at DESC`, orderIds)
 	]);
-	return orderRows.map((row) => orderFrom(row, taskRows.filter((task) => task.order_id === row.id).map(taskFrom), paymentRows.filter((payment) => payment.order_id === row.id).map(paymentFrom)));
+	const byOrder = (items: Row[]) => {
+		const groups = new Map<string, Row[]>();
+		for (const item of items) {
+			const group = groups.get(item.order_id);
+			if (group) group.push(item); else groups.set(item.order_id, [item]);
+		}
+		return groups;
+	};
+	const tasksByOrder = byOrder(taskRows);
+	const paymentsByOrder = byOrder(paymentRows);
+	return orderRows.map((row) => orderFrom(row, (tasksByOrder.get(row.id) || []).map(taskFrom), (paymentsByOrder.get(row.id) || []).map(paymentFrom)));
 }
 
 export async function listOrders(database: AppDatabase, includeHistorical = true, includeArchived = false) {
@@ -513,13 +517,14 @@ export async function listOrderSearchIndex(database: AppDatabase, limit = 100) {
 }
 
 export async function getDashboardData(database: AppDatabase) {
-	const stats = await database.prepare(`SELECT
+	const [stats, orderRows] = await Promise.all([database.prepare(`SELECT
 		COUNT(*) FILTER (WHERE archived_at IS NULL AND historical = 0 AND status NOT IN ('Historical', 'Completed', 'Delivered', 'Stopped')) AS active,
 		COUNT(*) FILTER (WHERE archived_at IS NULL AND historical = 0 AND status = 'Waiting Review') AS waiting_review,
 		COUNT(*) FILTER (WHERE archived_at IS NULL AND historical = 0 AND status = 'Ready Delivery') AS ready_delivery,
 		COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'Delivered') AS delivered
-		FROM orders`).first<{ active: number | string; waiting_review: number | string; ready_delivery: number | string; delivered: number | string }>();
-	const orderRows = await rows(database, "SELECT * FROM orders WHERE archived_at IS NULL AND historical = 0 AND status NOT IN ('Historical', 'Completed', 'Delivered', 'Stopped') ORDER BY important DESC, updated_at DESC LIMIT 20");
+		FROM orders`).first<{ active: number | string; waiting_review: number | string; ready_delivery: number | string; delivered: number | string }>(),
+		rows(database, "SELECT * FROM orders WHERE archived_at IS NULL AND historical = 0 AND status NOT IN ('Historical', 'Completed', 'Delivered', 'Stopped') ORDER BY important DESC, updated_at DESC LIMIT 20")
+	]);
 	return {
 		orders: await hydrateOrders(database, orderRows),
 		stats: { active: Number(stats?.active || 0), waitingReview: Number(stats?.waiting_review || 0), readyDelivery: Number(stats?.ready_delivery || 0), delivered: Number(stats?.delivered || 0) }
@@ -538,7 +543,7 @@ export async function createOrder(database: AppDatabase, input: Partial<Order>) 
 	const serialRow = await database.prepare("INSERT INTO counters (name, value) SELECT 'order_serial', COALESCE(MAX(serial), 0) + 1 FROM orders ON CONFLICT (name) DO UPDATE SET value = GREATEST(counters.value + 1, (SELECT COALESCE(MAX(serial), 0) + 1 FROM orders)) RETURNING value AS serial").first<{ serial: number }>();
 	const orderId = id('ORD');
 	await database.prepare('INSERT INTO orders (id, serial, customer_id, customer_name, mobile, event, project, receiving, duration, amount, discount, advance, amount_set, advance_set, source, remarks, due_date, status, progress, historical, important, custom_values, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?::jsonb, ?, ?)').bind(orderId, Number(serialRow?.serial || 1), input.customerId || null, customerName, mobile, input.workType || '', input.project || '', input.receiving || '', input.duration || '', Number(input.price || 0), Number(input.priceSet !== false), Number(input.advanceSet !== false), input.source || '', input.remarks || '', input.due || '', 'Received', Number(Boolean(input.important)), JSON.stringify(input.customFields || {}), timestamp, timestamp).run();
-	if (Number(input.paid || 0) > 0) await recordPayment(database, orderId, { amount: Number(input.paid), paidAt: timestamp.slice(0, 10), method: 'Advance at booking', note: 'Advance collected when order was created', kind: 'advance' });
+	if (Number(input.paid || 0) > 0) await recordPayment(database, orderId, { amount: Number(input.paid), paidAt: istToday(), method: 'Advance at booking', note: 'Advance collected when order was created', kind: 'advance' });
 	const order = await getOrder(database, orderId);
 	await activity(database, 'admin', 'Order created', 'order', orderId, `${customerName} · ${input.project}`);
 	await queueSheetSync(database, 'Orders', orderId, order);
@@ -738,6 +743,9 @@ export async function recordInvoice(database: AppDatabase, orderId: string, mess
 	if (snapshot.paymentId) {
 		const existing = await database.prepare(`SELECT id FROM invoices WHERE payment_id = ? AND COALESCE(status, '') <> 'cancelled' LIMIT 1`).bind(snapshot.paymentId).first<{ id: string }>();
 		if (existing?.id) return (await getInvoice(database, existing.id))!;
+		// A cancelled receipt still holds the unique payment link (invoices_payment_unique_idx); release it so a
+		// new receipt can be issued instead of the insert failing.
+		await database.prepare("UPDATE invoices SET payment_id = NULL WHERE payment_id = ? AND status = 'cancelled'").bind(snapshot.paymentId).run();
 	}
 	const year = Number(istToday().slice(0, 4)); // invoice year in India time (SC-19)
 	const counter = await database.prepare('INSERT INTO counters (name, value) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET value = counters.value + 1 RETURNING value').bind(`invoice_${year}`).first<{ value: number }>();
@@ -745,17 +753,35 @@ export async function recordInvoice(database: AppDatabase, orderId: string, mess
 	const invoiceId = id('INV');
 	const message = typeof messageInput === 'function' ? messageInput(number, invoiceId) : messageInput;
 	const invoice: Invoice = { id: invoiceId, number, orderId, message, openedAt: now(), kind: snapshot.kind || 'final', paymentId: snapshot.paymentId, amountReceived: Number(snapshot.amountReceived || 0), subtotal: Number(snapshot.subtotal || 0), discount: Number(snapshot.discount || 0), total: Number(snapshot.total || 0), paid: Number(snapshot.paid || 0), balance: Number(snapshot.balance || 0), taskItems: snapshot.taskItems || [], status: snapshot.status || 'draft', sentAt: snapshot.sentAt, billingMode: snapshot.billingMode === 'duration' ? 'duration' : 'manual', discountMode: snapshot.discountMode === 'percent' ? 'percent' : 'amount' };
-	await database.prepare('INSERT INTO invoices (id, number, order_id, message_snapshot, opened_at, kind, payment_id, amount_received, subtotal, discount, total, paid, balance, status, sent_at, billing_mode, discount_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(invoice.id, invoice.number, orderId, invoice.message, invoice.openedAt, invoice.kind, invoice.paymentId || null, invoice.amountReceived, invoice.subtotal, invoice.discount, invoice.total, invoice.paid, invoice.balance, invoice.status, invoice.sentAt || null, invoice.billingMode, invoice.discountMode, invoice.openedAt).run();
+	try {
+		await database.prepare('INSERT INTO invoices (id, number, order_id, message_snapshot, opened_at, kind, payment_id, amount_received, subtotal, discount, total, paid, balance, status, sent_at, billing_mode, discount_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(invoice.id, invoice.number, orderId, invoice.message, invoice.openedAt, invoice.kind, invoice.paymentId || null, invoice.amountReceived, invoice.subtotal, invoice.discount, invoice.total, invoice.paid, invoice.balance, invoice.status, invoice.sentAt || null, invoice.billingMode, invoice.discountMode, invoice.openedAt).run();
+	} catch (cause) {
+		// Two requests for the same payment at once: the second insert hits the unique payment link. Return the first receipt.
+		const duplicate = invoice.paymentId ? await database.prepare(`SELECT id FROM invoices WHERE payment_id = ? AND COALESCE(status, '') <> 'cancelled' LIMIT 1`).bind(invoice.paymentId).first<{ id: string }>() : null;
+		if (duplicate?.id) return (await getInvoice(database, duplicate.id))!;
+		throw cause;
+	}
 	if (invoice.taskItems?.length) await database.batch(invoice.taskItems.map((item) => database.prepare('INSERT INTO invoice_task_items (invoice_id, task_id, task_name, amount) VALUES (?, ?, ?, ?)').bind(invoice.id, item.taskId, item.name, item.amount)));
 	await activity(database, 'admin', invoice.kind === 'advance' ? 'Advance invoice generated' : invoice.kind === 'payment' ? 'Payment invoice generated' : invoice.kind === 'partial' ? 'Partial work invoice generated' : 'Invoice generated', 'invoice', invoice.id, `${number}${invoice.kind === 'partial' ? ` · ${invoice.taskItems?.length || 0} task(s)` : ''}`);
 	await queueSheetSync(database, 'Invoices', invoice.id, invoice);
 	return invoice;
 }
 
+function invoiceFrom(row: Row, itemRows: Row[]): Invoice {
+	return { id: row.id, number: row.number, orderId: row.order_id, message: row.message_snapshot, openedAt: row.opened_at, kind: row.kind === 'advance' ? 'advance' : row.kind === 'payment' ? 'payment' : row.kind === 'partial' ? 'partial' : 'final', paymentId: row.payment_id || undefined, amountReceived: Number(row.amount_received || 0), subtotal: Number(row.subtotal || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), paid: Number(row.paid || 0), balance: Number(row.balance || 0), status: ['sent','paid','cancelled'].includes(row.status) ? row.status : 'draft', sentAt: row.sent_at || undefined, billingMode: row.billing_mode === 'duration' ? 'duration' : 'manual', discountMode: row.discount_mode === 'percent' ? 'percent' : 'amount', taskItems: itemRows.map((item) => ({ taskId: String(item.task_id), name: String(item.task_name), amount: Number(item.amount || 0) })) };
+}
+
 export async function listInvoices(database: AppDatabase) {
-	const invoiceRows = await rows(database, 'SELECT * FROM invoices ORDER BY created_at DESC');
-	const itemRows = await rows(database, 'SELECT * FROM invoice_task_items ORDER BY invoice_id, task_name');
-	return invoiceRows.map((row): Invoice => ({ id: row.id, number: row.number, orderId: row.order_id, message: row.message_snapshot, openedAt: row.opened_at, kind: row.kind === 'advance' ? 'advance' : row.kind === 'payment' ? 'payment' : row.kind === 'partial' ? 'partial' : 'final', paymentId: row.payment_id || undefined, amountReceived: Number(row.amount_received || 0), subtotal: Number(row.subtotal || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), paid: Number(row.paid || 0), balance: Number(row.balance || 0), status: ['sent','paid','cancelled'].includes(row.status) ? row.status : 'draft', sentAt: row.sent_at || undefined, billingMode: row.billing_mode === 'duration' ? 'duration' : 'manual', discountMode: row.discount_mode === 'percent' ? 'percent' : 'amount', taskItems: itemRows.filter((item) => item.invoice_id === row.id).map((item) => ({ taskId: String(item.task_id), name: String(item.task_name), amount: Number(item.amount || 0) })) }));
+	const [invoiceRows, itemRows] = await Promise.all([
+		rows(database, 'SELECT * FROM invoices ORDER BY created_at DESC'),
+		rows(database, 'SELECT * FROM invoice_task_items ORDER BY invoice_id, task_name')
+	]);
+	const itemsByInvoice = new Map<string, Row[]>();
+	for (const item of itemRows) {
+		const group = itemsByInvoice.get(item.invoice_id);
+		if (group) group.push(item); else itemsByInvoice.set(item.invoice_id, [item]);
+	}
+	return invoiceRows.map((row) => invoiceFrom(row, itemsByInvoice.get(row.id) || []));
 }
 
 export async function updateInvoiceStatus(database: AppDatabase, invoiceId: string, status: NonNullable<Invoice['status']>) {
@@ -770,7 +796,12 @@ export async function updateInvoiceStatus(database: AppDatabase, invoiceId: stri
 }
 
 export async function getInvoice(database: AppDatabase, invoiceId: string) {
-	return (await listInvoices(database)).find((invoice) => invoice.id === invoiceId) || null;
+	// Read one invoice directly instead of loading every invoice and line item.
+	const [row, itemRows] = await Promise.all([
+		database.prepare('SELECT * FROM invoices WHERE id = ?').bind(invoiceId).first<Row>(),
+		rows(database, 'SELECT * FROM invoice_task_items WHERE invoice_id = ? ORDER BY task_name', [invoiceId])
+	]);
+	return row ? invoiceFrom(row, itemRows) : null;
 }
 
 // ---------- Audit trail and editor-to-admin notification inbox ----------

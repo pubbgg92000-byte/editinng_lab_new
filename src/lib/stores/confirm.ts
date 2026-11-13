@@ -20,7 +20,11 @@ export const confirmState = writable<ConfirmState>({ open: false });
 export function askConfirm(options: ConfirmOptions | string): Promise<boolean> {
 	const opts = typeof options === 'string' ? { message: options } : options;
 	return new Promise((resolve) => {
-		confirmState.set({ ...opts, open: true, resolve });
+		confirmState.update((previous) => {
+			// A newer question replaces the one on screen; answer the old one "No" so its caller never hangs.
+			if (previous.open) previous.resolve(false);
+			return { ...opts, open: true, resolve };
+		});
 	});
 }
 

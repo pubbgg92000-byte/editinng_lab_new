@@ -218,7 +218,8 @@ export const actions = {
 		const googleSheetId = field(form, 'googleSheetId') || tenant.googleSheetId;
 		const ordersTab = field(form, 'ordersTab') || tenant.ordersTab;
 		const studioName = field(form, 'studioName') || tenant.studioName;
-		const logoUrl = field(form, 'logoUrl') || tenant.logoUrl;
+		// The services form always sends this field, so an emptied box removes the logo.
+		const logoUrl = form.has('logoUrl') ? field(form, 'logoUrl') : tenant.logoUrl;
 		const themePalette = themePalettes.some((item) => item.id === field(form, 'themePalette')) ? field(form, 'themePalette') : undefined;
 		const themeDefaultMode = field(form, 'themeDefaultMode') === 'dark' ? 'dark' : 'light';
 		try {

@@ -339,7 +339,7 @@ export function validateCustomValues(profile: BusinessProfile, entity: CustomFie
 	for (const definition of definitions) {
 		const value = values[definition.key];
 		if (definition.required && (value === undefined || value === null || value === '')) throw new Error(`${definition.label} is required.`);
-		if (value === undefined) continue;
+		if (value === undefined || value === null) continue;
 		if (definition.type === 'number' && value !== '' && !Number.isFinite(Number(value))) throw new Error(`${definition.label} must be a number.`);
 		if (definition.type === 'checkbox' && typeof value !== 'boolean') throw new Error(`${definition.label} must be checked or unchecked.`);
 		if (definition.type === 'select' && value !== '' && !definition.options?.includes(String(value))) throw new Error(`Choose a valid ${definition.label}.`);

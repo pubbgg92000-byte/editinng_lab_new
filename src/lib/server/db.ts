@@ -15,6 +15,9 @@ const databases = new Map<string, AppDatabase>();
 const initialized = new Set<string>();
 const initializing = new Map<string, Promise<void>>();
 const brandInitialized = new Set<string>();
+// The daily retention job only needs its lease checked occasionally, not with a database round trip on every request.
+const MAINTENANCE_CHECK_MS = 10 * 60_000;
+const maintenanceChecked = new Map<string, number>();
 
 const placeholders = (query: string) => {
 	// Repository queries use ? placeholders; Neon/Postgres expects $1, $2, and so on.
@@ -133,6 +136,7 @@ export async function ensureDatabase(database: AppDatabase, cacheKey: string | A
 export function clearDatabaseInitialization(cacheKey: string) {
 	initialized.delete(cacheKey);
 	brandInitialized.delete(cacheKey);
+	maintenanceChecked.delete(cacheKey);
 }
 
 export async function inspectTenantDatabase(databaseUrl: string) {
@@ -167,10 +171,14 @@ export async function readyDatabase(tenant?: Tenant | null) {
 		]);
 		brandInitialized.add(databaseUrl);
 	}
-	try {
-		await runScheduledMaintenance(database);
-	} catch (cause) {
-		console.error('Scheduled data retention failed.', cause);
+	if (Date.now() - (maintenanceChecked.get(databaseUrl) || 0) >= MAINTENANCE_CHECK_MS) {
+		maintenanceChecked.set(databaseUrl, Date.now());
+		try {
+			await runScheduledMaintenance(database);
+		} catch (cause) {
+			maintenanceChecked.delete(databaseUrl);
+			console.error('Scheduled data retention failed.', cause);
+		}
 	}
 	return database;
 }

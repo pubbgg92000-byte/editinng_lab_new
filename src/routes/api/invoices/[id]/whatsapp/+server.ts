@@ -18,9 +18,8 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 	if (!invoice || invoice.status === 'cancelled') return json({ error: invoice ? 'A cancelled invoice cannot be sent.' : 'Invoice not found.' }, { status: invoice ? 409 : 404 });
 	const scenario = invoice.kind === 'partial' ? 'partial-invoice' : 'invoice';
 	if (!templateForScenario(configuration.moduleConfiguration, scenario, input.templateId)) return json({ error: 'That WhatsApp template is unavailable.' }, { status: 400 });
-	const order = await getOrder(database, invoice.orderId);
+	const [order, customers] = await Promise.all([getOrder(database, invoice.orderId), listCustomers(database, true)]);
 	if (!order) return json({ error: 'The order for this invoice was not found.' }, { status: 404 });
-	const customers = await listCustomers(database, true);
 	const customer = customers.find((item) => item.id === order.customerId)
 		|| customers.find((item) => item.business === order.customer && item.phone.replace(/\D/g, '') === order.mobile?.replace(/\D/g, ''));
 	const phone = customer?.phone || order.mobile;

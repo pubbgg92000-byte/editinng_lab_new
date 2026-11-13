@@ -2,7 +2,7 @@
 import { json } from '@sveltejs/kit';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
-import { getBusinessProfile, getOrder, getSettings, listCustomers, recordActivity, regenerateCustomerToken } from '$lib/server/repository';
+import { getBusinessProfile, getOrder, getSettings, listCustomers, markCustomerNotified, recordActivity, regenerateCustomerToken } from '$lib/server/repository';
 import { customerReadyMessage, normalizePhone, whatsappUrl } from '$lib/server/whatsapp';
 import { getTenantConfiguration } from '$lib/server/configuration';
 import { hasCapability } from '$lib/capabilities';
@@ -13,10 +13,9 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 	const database = await readyDatabase(locals.tenant);
 	const configuration = await getTenantConfiguration(database, locals.tenant!);
 	const input = await request.json().catch(() => ({})) as { templateId?: string };
-	const order = await getOrder(database, params.id);
+	const [order, customers] = await Promise.all([getOrder(database, params.id), listCustomers(database, true)]);
 	if (!order) return json({ error: 'Order not found.' }, { status: 404 });
 	if (order.status !== 'Ready Delivery') return json({ error: 'Move this order to Ready Delivery before notifying the customer.' }, { status: 409 });
-	const customers = await listCustomers(database, true);
 	const customer = customers.find((item) => item.id === order.customerId)
 		|| customers.find((item) => item.business === order.customer && item.phone.replace(/\D/g, '') === order.mobile?.replace(/\D/g, ''));
 	const currentCustomerPhone = customer?.phone || order.mobile;
@@ -27,6 +26,7 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 	const [settings, profile] = await Promise.all([getSettings(database), getBusinessProfile(database)]);
 	const customerToken = hasCapability(configuration.effectiveCapabilities, 'portal.customer') ? customer?.token || '' : '';
 	const message = customerReadyMessage(settings, order, customerToken, url.origin, locals.tenant!.slug, customer, profile, configuration.moduleConfiguration, input.templateId);
+	await markCustomerNotified(database, order.id);
 	await recordActivity(database, 'admin', 'Customer delivery message prepared', 'order', order.id, `${order.customer} · ${Math.max(0, order.price - order.discount - order.paid)} balance · review before sending`);
 	return json({ ok: true, message, url: whatsappUrl(currentCustomerPhone, message) });
 };

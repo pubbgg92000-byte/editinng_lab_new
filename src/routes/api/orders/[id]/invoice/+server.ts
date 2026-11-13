@@ -103,7 +103,7 @@ export const POST = async ({ params, request, cookies, locals, url }) => {
 		billingMode,
 		discountMode
 	});
-	await flushSheetSync(database, locals.tenant!);
+	await flushSheetSync(database, locals.tenant!).catch(() => {});
 	const currentCustomerPhone = customer?.phone || order.mobile;
 	return json({ ok: true, invoice, invoiceUrl: `/invoices/${invoice.id}`, url: currentCustomerPhone ? whatsappUrl(currentCustomerPhone, invoice.message) : '' });
 };

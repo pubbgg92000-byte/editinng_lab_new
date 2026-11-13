@@ -42,6 +42,8 @@ import { confirmDanger } from "$lib/stores/confirm";
   let directEditor = $state<Editor | null>(null);
   let menuFor = $state("");
   let busy = $state("");
+  // Which action is running, so the clicked button can say so.
+  let busyKind = $state<"" | "link" | "archive" | "restore" | "delete">("");
 
   // Re-sync after shared data reloads so counts never go stale.
   $effect(() => {
@@ -99,8 +101,9 @@ import { confirmDanger } from "$lib/stores/confirm";
   // Replace a staff member's private link (the old one stops working), then offer copy / WhatsApp.
   async function replacePortal(editor: Editor) {
     menuFor = "";
+    if (busy) return;
     if (!await confirmDanger(`Create a new private link for ${editor.name}?\n\nThe old link will stop working. Their work and history stay the same.`, "Yes, create new link")) return;
-    busy = editor.id;
+    busy = editor.id; busyKind = "link";
     const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "regenerate-token" }) });
     const result = await response.json();
     busy = "";
@@ -115,7 +118,8 @@ import { confirmDanger } from "$lib/stores/confirm";
     menuFor = "";
     let token = editor.token;
     if (!token) {
-      busy = editor.id;
+      if (busy) return;
+      busy = editor.id; busyKind = "link";
       const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "regenerate-token" }) });
       const result = await response.json();
       busy = "";
@@ -135,8 +139,9 @@ import { confirmDanger } from "$lib/stores/confirm";
   const syncNote = (sync: { configured?: boolean; failed?: number } | undefined) => (sync?.configured && !sync?.failed ? "" : " Google Sheets will update shortly.");
   async function archiveEditor(editor: Editor) {
     menuFor = "";
+    if (busy) return;
     if (!await confirmDanger(`Archive ${editor.name}?\n\nTheir past work stays in history and their private link stops working. You can restore them later.`)) return;
-    busy = editor.id;
+    busy = editor.id; busyKind = "archive";
     const response = await safeFetch(`/api/editors/${editor.id}`, { method: "DELETE" });
     const result = await response.json();
     busy = "";
@@ -148,7 +153,8 @@ import { confirmDanger } from "$lib/stores/confirm";
     notifyAction(`${editor.name} archived.${syncNote(result.sync)}`);
   }
   async function restoreEditor(editor: Editor) {
-    busy = editor.id;
+    if (busy) return;
+    busy = editor.id; busyKind = "restore";
     const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "restore" }) });
     const result = await response.json();
     busy = "";
@@ -158,8 +164,9 @@ import { confirmDanger } from "$lib/stores/confirm";
     notifyAction(`${editor.name} restored.${syncNote(result.sync)}`);
   }
   async function permanentlyDelete(editor: Editor) {
+    if (busy) return;
     if (!await confirmDanger(`Delete ${editor.name} permanently?\n\nThis can't be undone. Their past ${taskPlural.toLowerCase()} are kept and marked "Unassigned".`)) return;
-    busy = editor.id;
+    busy = editor.id; busyKind = "delete";
     const response = await safeFetch(`/api/editors/${editor.id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "delete-permanently" }) });
     const result = await response.json();
     busy = "";
@@ -227,8 +234,8 @@ import { confirmDanger } from "$lib/stores/confirm";
         </dl>
         <footer class="actions">
           {#if editor.archived}
-            {#if allowed("staff.manage")}<button type="button" class="small" disabled={busy === editor.id} onclick={() => restoreEditor(editor)}><RotateCcw size={14} aria-hidden="true" />Restore</button>
-            <button type="button" class="small danger" disabled={busy === editor.id} onclick={() => permanentlyDelete(editor)}><Trash2 size={14} aria-hidden="true" />Delete</button>{/if}
+            {#if allowed("staff.manage")}<button type="button" class="small" disabled={Boolean(busy)} aria-busy={busy === editor.id && busyKind === "restore"} onclick={() => restoreEditor(editor)}><RotateCcw size={14} aria-hidden="true" />{busy === editor.id && busyKind === "restore" ? "Restoring…" : "Restore"}</button>
+            <button type="button" class="small danger" disabled={Boolean(busy)} aria-busy={busy === editor.id && busyKind === "delete"} onclick={() => permanentlyDelete(editor)}><Trash2 size={14} aria-hidden="true" />{busy === editor.id && busyKind === "delete" ? "Deleting…" : "Delete"}</button>{/if}
           {:else}
             <button type="button" class="small" onclick={() => openDetails(editor)}>View<ChevronRight size={14} aria-hidden="true" /></button>
             {#if whatsappEnabled && editor.phone}<button type="button" class="icon" title="Message on WhatsApp" aria-label={`Message ${editor.name} on WhatsApp`} onclick={() => openEditorChat(editor)}><WhatsAppIcon size={16} /></button>{/if}
@@ -236,10 +243,10 @@ import { confirmDanger } from "$lib/stores/confirm";
               <button type="button" class="icon" aria-haspopup="menu" aria-expanded={menuFor === editor.id} title="More actions" aria-label={`More actions for ${editor.name}`} onclick={() => (menuFor = menuFor === editor.id ? "" : editor.id)}><MoreHorizontal size={16} /></button>
               {#if menuFor === editor.id}
                 <div class="menu" role="menu">
-                  {#if portalEnabled}<button type="button" role="menuitem" disabled={busy === editor.id} onclick={() => copyPortal(editor)}><Link2 size={15} aria-hidden="true" />Copy private link</button>{/if}
-                  {#if portalEnabled && editor.token && allowed("staff.manage")}<button type="button" role="menuitem" disabled={busy === editor.id} onclick={() => replacePortal(editor)}><RefreshCw size={15} aria-hidden="true" />Create a new link</button>{/if}
+                  {#if portalEnabled}<button type="button" role="menuitem" disabled={Boolean(busy)} onclick={() => copyPortal(editor)}><Link2 size={15} aria-hidden="true" />Copy private link</button>{/if}
+                  {#if portalEnabled && editor.token && allowed("staff.manage")}<button type="button" role="menuitem" disabled={Boolean(busy)} onclick={() => replacePortal(editor)}><RefreshCw size={15} aria-hidden="true" />Create a new link</button>{/if}
                   {#if allowed("staff.manage")}<button type="button" role="menuitem" onclick={() => openEditor(editor)}><Pencil size={15} aria-hidden="true" />Edit details</button>
-                  <button type="button" role="menuitem" class="danger" onclick={() => archiveEditor(editor)}><Archive size={15} aria-hidden="true" />Archive</button>{/if}
+                  <button type="button" role="menuitem" class="danger" disabled={Boolean(busy)} onclick={() => archiveEditor(editor)}><Archive size={15} aria-hidden="true" />Archive</button>{/if}
                 </div>
               {/if}
             </div>
@@ -260,10 +267,10 @@ import { confirmDanger } from "$lib/stores/confirm";
     <div class="detail">
       <div class="detail-actions">
         {#if whatsappEnabled && detailEditor.phone}<button type="button" class="secondary" onclick={() => openEditorChat(detailEditor!)}><WhatsAppIcon size={15} />Message</button>{/if}
-        {#if portalEnabled && !detailEditor.archived}<button type="button" class="secondary" disabled={busy === detailEditor.id} onclick={() => copyPortal(detailEditor!)}><Link2 size={15} aria-hidden="true" />Copy private link</button>{/if}
+        {#if portalEnabled && !detailEditor.archived}<button type="button" class="secondary" disabled={Boolean(busy)} onclick={() => copyPortal(detailEditor!)}><Link2 size={15} aria-hidden="true" />Copy private link</button>{/if}
         {#if portalEnabled && detailEditor.token && !detailEditor.archived}<a class="secondary" href={`/portal/${data.tenantSlug}/editor/${detailEditor.token}`} target="_blank" rel="noreferrer"><ExternalLink size={15} aria-hidden="true" />Open their page</a>{/if}
-        {#if portalEnabled && detailEditor.token && !detailEditor.archived && allowed("staff.manage")}<button type="button" class="secondary" disabled={busy === detailEditor.id} onclick={() => replacePortal(detailEditor!)}><RefreshCw size={15} aria-hidden="true" />New link</button>{/if}
-        {#if allowed("staff.manage")}<button type="button" class="secondary" onclick={() => openEditor(detailEditor)}><Pencil size={15} aria-hidden="true" />Edit</button>{/if}
+        {#if portalEnabled && detailEditor.token && !detailEditor.archived && allowed("staff.manage")}<button type="button" class="secondary" disabled={Boolean(busy)} aria-busy={busy === detailEditor.id && busyKind === "link"} onclick={() => replacePortal(detailEditor!)}><RefreshCw size={15} aria-hidden="true" />{busy === detailEditor.id && busyKind === "link" ? "Creating…" : "New link"}</button>{/if}
+        {#if allowed("staff.manage") && !detailEditor.archived}<button type="button" class="secondary" onclick={() => openEditor(detailEditor)}><Pencil size={15} aria-hidden="true" />Edit</button>{/if}
       </div>
 
       <section class="box">
@@ -297,7 +304,7 @@ import { confirmDanger } from "$lib/stores/confirm";
       </section>
 
       {#if !detailEditor.archived && allowed("staff.manage")}
-        <div class="danger-zone"><button type="button" class="link danger" disabled={busy === detailEditor.id} onclick={() => archiveEditor(detailEditor!)}><Archive size={14} aria-hidden="true" />Archive {detailEditor.name}</button></div>
+        <div class="danger-zone"><button type="button" class="link danger" disabled={Boolean(busy)} aria-busy={busy === detailEditor.id && busyKind === "archive"} onclick={() => archiveEditor(detailEditor!)}><Archive size={14} aria-hidden="true" />{busy === detailEditor.id && busyKind === "archive" ? "Archiving…" : `Archive ${detailEditor.name}`}</button></div>
       {/if}
     </div>
   {/if}

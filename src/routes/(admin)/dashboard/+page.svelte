@@ -17,6 +17,11 @@ import { untrack } from 'svelte';
 	let liveOrders = $state<Order[]>(initialData.orders);
 	let stats = $state(initialData.stats);
 	let showNewOrder = $state(false);
+	// Keep local copies fresh when the page data reloads.
+	$effect(() => {
+		liveOrders = data.orders;
+		stats = data.stats;
+	});
 
 	const currentDate = new Date(initialData.currentDateIso);
 	const dateLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kolkata' }).format(currentDate);

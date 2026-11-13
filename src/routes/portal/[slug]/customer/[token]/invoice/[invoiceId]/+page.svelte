@@ -22,6 +22,17 @@
           : "Invoice",
   );
   const isReceipt = $derived(data.invoice.kind === "advance" || data.invoice.kind === "payment");
+  // Receipts confirm money already in hand; invoices are settled when nothing is left to collect.
+  const paidInFull = $derived(isReceipt || data.invoice.balance <= 0.009);
+  const stampText = $derived(paidInFull ? "PAID" : "BALANCE DUE");
+  const initials = $derived(
+    (data.settings.studioName || "")
+      .split(/\s+/)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "ND",
+  );
   const portalHref = $derived(`/portal/${page.params.slug}/customer/${page.params.token}`);
   // In-app browsers (WhatsApp, Instagram, Facebook) usually ignore window.print(), so explain the workaround.
   let inAppBrowser = $state(false);
@@ -47,86 +58,96 @@
   </div>
   {#if inAppBrowser}<p class="in-app-note no-print">To save this as a PDF, open the page in Chrome or Safari: tap the ⋮ or share menu, then <b>Open in browser</b>.</p>{/if}
   <section class="invoice-paper">
-    <header>
-      <div>
-        <h1>{data.settings.studioName}</h1>
-        <p>{data.settings.address}</p>
-        <p>
-          {data.settings.phone}{data.settings.email
-            ? ` · ${data.settings.email}`
-            : ""}
-        </p>
-        {#if data.settings.gstin}<p>GSTIN: {data.settings.gstin}</p>{/if}
+    <header class="paper-band">
+      <div class="brand">
+        <span class="band-logo" aria-hidden="true"
+          >{#if data.settings.logoUrl}<img src={data.settings.logoUrl} alt="" />{:else}<b>{initials}</b>{/if}</span
+        >
+        <div class="brand-text">
+          <h1>{data.settings.studioName}</h1>
+          {#if data.settings.address}<p>{data.settings.address}</p>{/if}
+          <p>
+            {data.settings.phone}{data.settings.email ? ` · ${data.settings.email}` : ""}
+          </p>
+          {#if data.settings.gstin}<p>GSTIN: {data.settings.gstin}</p>{/if}
+        </div>
       </div>
       <div class="document">
-        <span>{title}</span><strong>{data.invoice.number}</strong><small
-          >{formatDateTime(data.invoice.openedAt)}</small
-        >
+        <span class="doc-kind">{title}</span>
+        <strong>{data.invoice.number}</strong>
+        <small>{formatDateTime(data.invoice.openedAt)}</small>
+        <span class="stamp" class:due={!paidInFull}>{stampText}</span>
       </div>
     </header>
+
     <div class="bill-grid">
       <div>
-        <small>Customer</small><strong
-          >{data.customer.business || data.order.customer}</strong
-        >{#if data.customer.name}<p>
-            Contact: {data.customer.name}
-          </p>{/if}{#if data.customer.address}<p>
-            {data.customer.address}
-          </p>{/if}
+        <small>Billed to</small>
+        <strong>{data.customer.business || data.order.customer}</strong>
+        {#if data.customer.name}<p>Contact: {data.customer.name}</p>{/if}
+        {#if data.customer.address}<p>{data.customer.address}</p>{/if}
         <p>{data.customer.phone || data.order.mobile}</p>
       </div>
       <div>
-        <small>Order details</small><strong>{data.order.project}</strong>
+        <small>Order details</small>
+        <strong>{data.order.project}</strong>
         <p>{data.order.workType}</p>
         <p>Order {orderCode(data.settings, data.order.serial)}</p>
       </div>
     </div>
+
     <table>
       <thead
         ><tr><th>Order / task</th><th>Details</th><th>Amount</th></tr></thead
       ><tbody
         >{#if data.invoice.taskItems?.length}{#each data.invoice.taskItems as item}<tr
-              ><td>{item.name}</td><td
+              ><td class="item-name">{item.name}</td><td class="item-detail"
                 >{data.invoice.billingMode === "duration"
                   ? "Duration billing"
                   : "Completed work"}</td
-              ><td>{money(item.amount)}</td></tr
+              ><td class="item-amount">{money(item.amount)}</td></tr
             >{/each}{:else}<tr
-            ><td>{data.order.project}</td><td
+            ><td class="item-name">{data.order.project}</td><td class="item-detail"
               >{isReceipt ? `Payment towards ${orderCode(data.settings, data.order.serial)}` : data.order.workType || "Work as agreed"}</td
-            ><td>{money(data.invoice.subtotal)}</td></tr
+            ><td class="item-amount">{money(data.invoice.subtotal)}</td></tr
           >{/if}</tbody
       >
     </table>
+
     <div class="totals">
-      <p>{data.settings.paymentNote}</p>
-      <dl>
-        <div>
-          <dt>Subtotal</dt>
-          <dd>{money(data.invoice.subtotal)}</dd>
-        </div>
-        {#if data.invoice.discount}<div>
-            <dt>
-              Discount {data.invoice.discountMode === "percent"
-                ? `(${discountPercent.toFixed(discountPercent % 1 ? 2 : 0)}%)`
-                : "(manual)"}
-            </dt>
-            <dd>−{money(data.invoice.discount)}</dd>
-          </div>{/if}
-        <div class="grand">
-          <dt>Total</dt>
-          <dd>{money(data.invoice.total)}</dd>
-        </div>
-        {#if data.invoice.kind !== "partial"}<div>
-            <dt>Paid</dt>
-            <dd>{money(data.invoice.paid)}</dd>
-          </div>
+      <div class="note">
+        {#if data.settings.paymentNote}<p>{data.settings.paymentNote}</p>{/if}
+      </div>
+      <div class="summary">
+        <dl>
           <div>
-            <dt>Balance</dt>
-            <dd>{money(data.invoice.balance)}</dd>
-          </div>{/if}
-      </dl>
+            <dt>Subtotal</dt>
+            <dd>{money(data.invoice.subtotal)}</dd>
+          </div>
+          {#if data.invoice.discount}<div class="discount">
+              <dt>
+                Discount {data.invoice.discountMode === "percent"
+                  ? `(${discountPercent.toFixed(discountPercent % 1 ? 2 : 0)}%)`
+                  : "(manual)"}
+              </dt>
+              <dd>−{money(data.invoice.discount)}</dd>
+            </div>{/if}
+          <div class="grand">
+            <dt>Total</dt>
+            <dd>{money(data.invoice.total)}</dd>
+          </div>
+          {#if data.invoice.kind !== "partial"}<div>
+              <dt>Paid</dt>
+              <dd>{money(data.invoice.paid)}</dd>
+            </div>{/if}
+        </dl>
+        <div class="balance" class:settled={paidInFull}>
+          <span>{paidInFull ? "Paid in full" : "Balance due"}</span>
+          <strong>{money(data.invoice.kind === "partial" ? data.invoice.total : data.invoice.balance)}</strong>
+        </div>
+      </div>
     </div>
+
     <footer>
       <p>{data.settings.invoiceFooter || "Thank you for choosing us."}</p>
       <span>Generated {formatDate(data.invoice.openedAt)}</span>
@@ -135,155 +156,313 @@
 </main>
 
 <style>
+  /* Branded, print-safe document: white "paper" + the workspace accent (--purple / --accent-text)
+     for the header band, table head and totals, so it stays legible in every palette and on paper. */
   main {
-    max-width: 900px;
+    max-width: 860px;
     margin: 0 auto;
-    padding: 38px 20px 70px;
+    padding: 34px 20px 70px;
   }
   .invoice-paper {
-    border: 1px solid #dbe2ea;
-    border-radius: 15px;
+    --paper-ink: #1b2232;
+    --paper-soft: #5b6676;
+    --paper-line: #e6eaf0;
+    --brand: var(--purple, #2f6b3f);
+    --brand-ink: var(--accent-text, #fff);
+    position: relative;
+    border-radius: 18px;
     background: #fff;
-    color: #172033;
-    padding: 38px;
-    box-shadow: 0 20px 70px #00000015;
+    color: var(--paper-ink);
+    overflow: hidden;
+    box-shadow: 0 24px 70px #0e193312, 0 2px 6px #0e193310;
+    border: 1px solid var(--paper-line);
   }
-  .invoice-paper header {
+
+  .paper-band {
     display: flex;
     justify-content: space-between;
-    gap: 30px;
-    padding-bottom: 24px;
-    border-bottom: 2px solid #172033;
+    gap: 28px;
+    padding: 30px 36px;
+    background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 78%, #000 22%));
+    color: var(--brand-ink);
   }
-  .invoice-paper h1 {
-    margin: 0 0 7px;
-    font-size: 24px;
+  .brand {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
   }
-  .invoice-paper p {
-    margin: 3px 0;
-    color: #526075;
-    font-size:12px;
+  .band-logo {
+    width: 54px;
+    height: 54px;
+    flex: 0 0 54px;
+    border-radius: 13px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, var(--brand-ink) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand-ink) 32%, transparent);
+  }
+  .band-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .band-logo b {
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: var(--brand-ink);
+  }
+  .brand-text h1 {
+    margin: 0 0 6px;
+    font-size: 23px;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+  }
+  .brand-text p {
+    margin: 2px 0;
+    font-size: 12px;
     line-height: 1.5;
+    opacity: 0.88;
   }
   .document {
     display: flex;
-    align-items: flex-end;
     flex-direction: column;
-    gap: 5px;
+    align-items: flex-end;
     text-align: right;
+    gap: 4px;
+    flex: 0 0 auto;
   }
-  .document span,
-  .bill-grid small {
-    color: #64748b;
-    font-size:11px;
+  .doc-kind {
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.16em;
+    opacity: 0.85;
   }
   .document strong {
-    font-size: 19px;
+    font-size: 20px;
+    letter-spacing: 0.01em;
   }
   .document small {
-    color: #64748b;
-    font-size:11px;
+    font-size: 11.5px;
+    opacity: 0.82;
   }
+  .stamp {
+    margin-top: 10px;
+    padding: 5px 12px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    background: #10b981;
+    color: #fff;
+    box-shadow: 0 4px 14px #10b98155;
+  }
+  .stamp.due {
+    background: #f4b740;
+    color: #3a2c05;
+    box-shadow: 0 4px 14px #f4b74044;
+  }
+
   .bill-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 38px;
-    padding: 24px 0;
+    gap: 36px;
+    padding: 28px 36px 10px;
   }
   .bill-grid > div {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
+  }
+  .bill-grid small {
+    color: var(--paper-soft);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 3px;
   }
   .bill-grid strong {
-    font-size:14px;
+    font-size: 15px;
   }
+  .bill-grid p {
+    margin: 1px 0;
+    color: var(--paper-soft);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
+    margin: 14px 0 0;
   }
   th {
-    padding: 10px;
-    background: #172033;
-    color: #fff;
+    padding: 11px 36px;
+    background: color-mix(in srgb, var(--brand) 12%, #fff);
+    color: color-mix(in srgb, var(--brand) 72%, #000 28%);
     text-align: left;
-    font-size:11px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-bottom: 2px solid color-mix(in srgb, var(--brand) 40%, #fff);
   }
   th:last-child,
   td:last-child {
     text-align: right;
   }
   td {
-    padding: 12px 10px;
-    border-bottom: 1px solid #dbe2ea;
-    font-size:12px;
+    padding: 13px 36px;
+    border-bottom: 1px solid var(--paper-line);
+    font-size: 13px;
+    vertical-align: top;
   }
+  .item-name {
+    font-weight: 600;
+  }
+  .item-detail {
+    color: var(--paper-soft);
+  }
+  .item-amount {
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
   .totals {
     display: grid;
-    grid-template-columns: 1fr 250px;
+    grid-template-columns: 1fr 300px;
     gap: 30px;
-    margin-top: 20px;
+    padding: 22px 36px 4px;
   }
-  .totals dl {
+  .note p {
+    margin: 0;
+    color: var(--paper-soft);
+    font-size: 12.5px;
+    line-height: 1.6;
+    max-width: 34ch;
+  }
+  .summary dl {
     margin: 0;
   }
-  .totals dl div {
+  .summary dl div {
     display: flex;
     justify-content: space-between;
+    gap: 16px;
     padding: 7px 0;
-    font-size:12px;
+    font-size: 13px;
   }
-  .totals dd {
+  .summary dt {
+    color: var(--paper-soft);
+  }
+  .summary dd {
     margin: 0;
-    font-weight: 650;
+    font-weight: 600;
   }
-  .totals .grand {
-    border-block: 1px solid #172033;
-    font-size:14px;
+  .summary .discount dd {
+    color: #15803d;
   }
-  .invoice-paper footer {
+  .summary .grand {
+    border-top: 1.5px solid var(--paper-ink);
+    margin-top: 4px;
+    padding-top: 10px;
+    font-size: 15px;
+  }
+  .summary .grand dt,
+  .summary .grand dd {
+    color: var(--paper-ink);
+    font-weight: 750;
+  }
+  .balance {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 12px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 80%, #000 20%));
+    color: var(--brand-ink);
+  }
+  .balance.settled {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #fff;
+  }
+  .balance span {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.9;
+  }
+  .balance strong {
+    font-size: 20px;
+    letter-spacing: 0.01em;
+  }
+
+  footer {
     display: flex;
     justify-content: space-between;
     gap: 20px;
-    margin-top: 34px;
-    padding-top: 15px;
-    border-top: 1px solid #dbe2ea;
+    align-items: flex-end;
+    margin-top: 24px;
+    padding: 18px 36px 30px;
+    border-top: 1px solid var(--paper-line);
   }
-  .invoice-paper footer span {
-    color: #64748b;
-    font-size:11px;
+  footer p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--paper-ink);
+    max-width: 48ch;
   }
+  footer span {
+    color: var(--paper-soft);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
   @media (max-width: 650px) {
     main {
-      padding: 24px 12px 50px;
+      padding: 20px 12px 50px;
     }
-    .invoice-paper {
-      padding: 20px;
-    }
-    .invoice-paper header,
-    .invoice-paper footer {
-      align-items: flex-start;
+    .paper-band {
       flex-direction: column;
+      padding: 22px;
+      gap: 18px;
     }
     .document {
       align-items: flex-start;
       text-align: left;
     }
-    .bill-grid,
+    .bill-grid {
+      grid-template-columns: 1fr;
+      gap: 20px;
+      padding: 22px 22px 6px;
+    }
+    th,
+    td {
+      padding-left: 22px;
+      padding-right: 22px;
+    }
     .totals {
       grid-template-columns: 1fr;
+      gap: 14px;
+      padding: 18px 22px 4px;
+    }
+    footer {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 16px 22px 26px;
     }
   }
+
   @media print {
-    @page { size: A4; margin: 12mm; }
+    @page { size: A4; margin: 11mm; }
     .no-print, :global(.action-feedback) { display: none !important; }
     main { max-width: none; padding: 0; margin: 0; }
-    .invoice-paper { position: static; width: 100%; box-sizing: border-box; border: 0; box-shadow: none; padding: 0; }
-    /* Keep header fills and the grand total visible even when "background graphics" is off. */
-    th, .grand { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    tr, .totals, footer { break-inside: avoid; }
+    .invoice-paper { position: static; width: 100%; box-sizing: border-box; border: 0; box-shadow: none; border-radius: 0; }
+    /* Keep the brand band, table head, totals and stamp coloured even when "background graphics" is off. */
+    .paper-band, th, .balance, .stamp, .grand { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    tr, .totals, footer, .balance { break-inside: avoid; }
   }
 
   .invoice-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }

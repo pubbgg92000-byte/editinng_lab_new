@@ -50,6 +50,7 @@ export const PATCH = async ({ params, request }) => {
 	try { task = await updateTask(database, params.id, input, editor.name, editor.id); }
 	catch (cause) { return json({ error: cause instanceof Error ? cause.message : 'Unable to update task.' }, { status: 400 }); }
 	if (!task) return json({ error: 'Task not found or not assigned to this editor.' }, { status: 404 });
-	await flushSheetSync(database, tenant);
+	// The update is already stored; a sheet-sync hiccup must not report the save as failed (the outbox retries later).
+	await flushSheetSync(database, tenant).catch(() => {});
 	return json({ ok: true, task: toEditorTask(task, configuration) });
 };

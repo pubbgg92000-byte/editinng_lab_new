@@ -3,8 +3,18 @@
 	import { navigating } from '$app/state';
 	import { actionFeedback } from '$lib/stores/actionFeedback';
 
+	// A page change that is dropped mid-way (a data refresh started while it was loading) never
+	// clears `navigating`, so remember it here; otherwise the bar would stay on until the next page change.
+	let dropped = $state.raw<unknown>(null);
+	$effect(() => {
+		const target = navigating.to;
+		if (!target) return;
+		navigating.complete?.catch(() => { if (navigating.to === target) dropped = target; });
+	});
+
 	// Wait a moment before showing, so instant changes don't flash a bar.
-	const busy = $derived(Boolean(navigating.to) || $actionFeedback.loading);
+	const loadingPage = $derived(Boolean(navigating.to) && navigating.to !== dropped);
+	const busy = $derived(loadingPage || $actionFeedback.loading);
 	let visible = $state(false);
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	$effect(() => {
@@ -19,7 +29,7 @@
 </script>
 
 {#if visible}
-	<div class="top-progress" role="progressbar" aria-label={navigating.to ? 'Loading page' : 'Saving'} aria-busy="true"><span></span></div>
+	<div class="top-progress" role="progressbar" aria-label={loadingPage ? 'Loading page' : 'Saving'} aria-busy="true"><span></span></div>
 {/if}
 
 <style>

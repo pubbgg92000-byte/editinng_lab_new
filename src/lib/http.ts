@@ -61,7 +61,12 @@ export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): P
 	const text = await response.text().catch(() => '');
 	if (!text) return jsonResponse({}, status);
 	try {
-		return jsonResponse(JSON.parse(text), status);
+		const parsed = JSON.parse(text);
+		// SvelteKit errors thrown in hooks/handlers carry `{ message }`; UI reads `{ error }`.
+		if (!response.ok && parsed && typeof parsed === 'object' && parsed.error === undefined && typeof parsed.message === 'string') {
+			parsed.error = parsed.message;
+		}
+		return jsonResponse(parsed, status);
 	} catch {
 		return jsonResponse(response.ok ? {} : { error: `Something went wrong (error ${response.status}). Please try again.` }, status);
 	}

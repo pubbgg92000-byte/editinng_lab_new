@@ -6,10 +6,17 @@ const decoder = new TextDecoder();
 const base64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 const fromBase64url = (value: string) => Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), (character) => character.charCodeAt(0));
 
-async function encryptionKey() {
-	if (!env.SESSION_SECRET || env.SESSION_SECRET.length < 24) throw new Error('SESSION_SECRET must be configured with at least 24 characters.');
-	const digest = await crypto.subtle.digest('SHA-256', encoder.encode(env.SESSION_SECRET));
-	return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+// Derive the key once per secret; lists decrypt one token per row.
+let cachedKey: { secret: string; key: Promise<CryptoKey> } | null = null;
+function encryptionKey() {
+	const secret = env.SESSION_SECRET;
+	if (!secret || secret.length < 24) return Promise.reject(new Error('SESSION_SECRET must be configured with at least 24 characters.'));
+	if (cachedKey?.secret !== secret) {
+		const key = crypto.subtle.digest('SHA-256', encoder.encode(secret)).then((digest) => crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']));
+		key.catch(() => { if (cachedKey?.key === key) cachedKey = null; });
+		cachedKey = { secret, key };
+	}
+	return cachedKey.key;
 }
 
 export function createPortalToken() {

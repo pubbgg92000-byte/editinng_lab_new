@@ -1,4 +1,6 @@
 // Generates a styled Excel workbook download from the current tenant database.
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
 import { verifySession } from '$lib/server/auth';
 import { readyDatabase } from '$lib/server/db';
 import { getBusinessProfile, getSettings, listActivity, listCustomers, listEditors, listInvoices, listOrders } from '$lib/server/repository';
@@ -6,8 +8,18 @@ import { buildExportWorkbook } from '$lib/server/exportWorkbook';
 import { getTenantConfiguration } from '$lib/server/configuration';
 import { hasCapability } from '$lib/capabilities';
 
-export const GET = async ({ cookies, locals }) => {
-	if (!await verifySession(cookies.get('studioflow_session'))) return new Response('Unauthorized', { status: 401 });
+// Failures come back as JSON `{ error }` (never a blank 500 page) so the caller can show the reason.
+export const GET: RequestHandler = async (event) => {
+	try {
+		return await download(event);
+	} catch (cause) {
+		console.error('Workbook export failed.', cause);
+		return json({ error: 'Unable to build the Excel file. Please try again.' }, { status: 500 });
+	}
+};
+
+const download: RequestHandler = async ({ cookies, locals }) => {
+	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
 	const [orders, customers, editors, invoices, activity, settings, profile, configuration] = await Promise.all([listOrders(database, true, true), listCustomers(database, true), listEditors(database, true), listInvoices(database), listActivity(database), getSettings(database), getBusinessProfile(database), getTenantConfiguration(database, locals.tenant!)]);
 	const exportProfile = hasCapability(configuration.effectiveCapabilities, 'customFields') ? profile : { ...profile, customFields: [] };
@@ -36,5 +48,5 @@ export const GET = async ({ cookies, locals }) => {
 		activity, settings, profile: exportProfile, capabilities: configuration.effectiveCapabilities
 	});
 	const filename = `${locals.tenant!.slug}-workspace-workbook.xlsx`;
-	return new Response(file, { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${filename}"` } });
+	return new Response(file, { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${filename}"`, 'cache-control': 'no-store' } });
 };

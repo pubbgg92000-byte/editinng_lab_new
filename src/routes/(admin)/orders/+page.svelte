@@ -162,8 +162,10 @@ import { confirmDanger } from "$lib/stores/confirm";
     deliveryOpen = true;
   }
   function delivered(updated: Order) {
-    orders = orders.filter((item) => item.id !== updated.id);
+    // Keep the row (now Delivered) unless this view is filtered to another status, then refresh the list and queue counts.
+    orders = statusFilter && statusFilter !== updated.status ? orders.filter((item) => item.id !== updated.id) : orders.map((item) => (item.id === updated.id ? updated : item));
     deliveryOpen = false;
+    void invalidateAll();
   }
 
   async function changeArchive(order: Order, action: "archive" | "restore" | "delete") {
@@ -184,7 +186,7 @@ import { confirmDanger } from "$lib/stores/confirm";
   }
 
   function saved(order: Order, synced: boolean) {
-    if (pagination.page === 1 && !query && !statusFilter && !eventFilter) {
+    if (pagination.page === 1 && !query && !statusFilter && !eventFilter && !dateFrom && !dateTo) {
       orders = [order, ...orders].slice(0, pagination.pageSize);
       const total = pagination.total + 1;
       pagination = { ...pagination, total, totalPages: Math.max(1, Math.ceil(total / pagination.pageSize)), from: 1, to: Math.min(total, pagination.pageSize) };
@@ -192,7 +194,7 @@ import { confirmDanger } from "$lib/stores/confirm";
     notifyAction(synced ? `${orderLabel} created.` : `${orderLabel} created. Google Sheets will update when the connection is available.`);
   }
   import ListPager from '$lib/components/ListPager.svelte';
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
 </script>
 
 <PageHeader eyebrow={pageHint} title={pageTitle} action={archived || !allowed("orders.edit") ? undefined : `New ${orderLabel.toLowerCase()}`} onclick={() => (showNew = true)} />
@@ -339,7 +341,7 @@ import { confirmDanger } from "$lib/stores/confirm";
                   {#if whatsappEnabled}<button type="button" class="icon" disabled={busy === `notify-${order.id}` || !order.mobile} title={order.mobile ? "Tell the customer it's ready (WhatsApp)" : "No mobile number saved"} aria-label={`Tell ${order.customer} it's ready on WhatsApp`} onclick={() => notifyReady(order)}><WhatsAppIcon size={15} /></button>{/if}
                   <button type="button" class="small" onclick={() => openDelivery(order)}><PackageCheck size={14} aria-hidden="true" />Deliver</button>
                 {/if}
-                <button type="button" class="icon" disabled={busy === order.id} title="Archive" aria-label={`Archive ${order.project}`} onclick={() => changeArchive(order, "archive")}><Archive size={15} /></button>
+                {#if allowed("orders.delete")}<button type="button" class="icon" disabled={busy === order.id} title="Archive" aria-label={`Archive ${order.project}`} onclick={() => changeArchive(order, "archive")}><Archive size={15} /></button>{/if}
               {/if}
               <a class="icon open" href={"/orders/" + order.id} title="Open" aria-label={`Open ${order.project}`}><Open size={16} /></a>
             </div>

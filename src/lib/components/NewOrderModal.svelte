@@ -44,6 +44,7 @@
 	let drafts = $state<Draft[]>([newDraft()]);
 	let eventOptions = $state<EventOption[]>([]);
 	let loadingEvents = $state(false);
+	let addingEvent = $state(false);
 	let saving = $state(false);
 	let error = $state('');
 	let loadedForOpen = $state(false);
@@ -52,9 +53,14 @@
 	$effect(() => {
 		if ((!customerId || !$customerStore.some((item) => item.id === customerId)) && $customerStore.length > 0) customerId = $customerStore[0].id;
 	});
-	// Preselect the customer when opened from a customer record.
+	// Preselect the customer when opened from a customer record: once per open, so a later choice or a newly added customer isn't overwritten.
+	let preselectedForOpen = false;
 	$effect(() => {
-		if (open && initialCustomerId && $customerStore.some((item) => item.id === initialCustomerId)) customerId = initialCustomerId;
+		if (!open) { preselectedForOpen = false; return; }
+		if (!preselectedForOpen && initialCustomerId && $customerStore.some((item) => item.id === initialCustomerId)) {
+			preselectedForOpen = true;
+			customerId = initialCustomerId;
+		}
 	});
 	// Fill the mobile number only when the chosen customer changes, so a typed number isn't wiped by store refreshes.
 	let mobileFilledFor = '';
@@ -68,17 +74,20 @@
 		if (open && !loadedForOpen) {
 			loadedForOpen = true;
 			eventOptions = configuredCategories.map((name: string) => ({ name, custom: false }));
+			error = '';
 			void loadEventOptions();
 		}
 		if (!open) loadedForOpen = false;
 	});
 
+	// The API lists built-in defaults plus saved custom names; this workspace's own categories always come first.
+	const withConfigured = (options: EventOption[]): EventOption[] => [...configuredCategories.map((name: string) => ({ name, custom: false })), ...options.filter((option) => option.custom && !configuredCategories.includes(option.name))];
+
 	async function loadEventOptions() {
 		loadingEvents = true;
 		try {
 			const result = await requestJson<{ options: EventOption[] }>('/api/event-options', {}, 'Unable to load saved event types.');
-			const custom = result.options.filter((option) => option.custom);
-			eventOptions = [...configuredCategories.map((name: string) => ({ name, custom: false })), ...custom.filter((option) => !configuredCategories.includes(option.name))];
+			eventOptions = withConfigured(result.options);
 		} catch (cause) {
 			eventOptions = configuredCategories.map((name: string) => ({ name, custom: false }));
 			error = cause instanceof Error ? cause.message : 'Unable to load saved event types.';
@@ -106,22 +115,24 @@
 	async function addCustomEvent(draft: Draft) {
 		const name = draft.customEvent.trim();
 		if (!name) { error = 'Enter a name for the custom event type.'; return; }
+		if (addingEvent) return;
+		addingEvent = true;
 		try {
 			const result = await requestJson<{ options: EventOption[] }>('/api/event-options', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }, 'Unable to add event type.');
-			eventOptions = result.options;
-			draft.event = result.options.find((item) => item.name.toLowerCase() === name.toLowerCase())?.name || name;
+			eventOptions = withConfigured(result.options);
+			draft.event = eventOptions.find((item) => item.name.toLowerCase() === name.toLowerCase())?.name || name;
 			draft.customEvent = '';
 			error = '';
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Unable to add event type.';
-		}
+		} finally { addingEvent = false; }
 	}
 
 	async function deleteCustomEvent(name: string) {
 		if (!await confirmDanger(`Remove “${name}” from future event choices? Existing orders will not change.`)) return;
 		try {
 			const result = await requestJson<{ options: EventOption[] }>('/api/event-options', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }, 'Unable to remove event type.');
-			eventOptions = result.options;
+			eventOptions = withConfigured(result.options);
 			for (const draft of drafts) if (draft.event === name) draft.event = configuredCategories[0] || 'General';
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Unable to remove event type.';
@@ -135,7 +146,7 @@
 		mobile = normalizeIndianMobile(mobile);
 		for (const [index, draft] of drafts.entries()) {
 			if (!draft.event.trim() || draft.event === 'Other' || !draft.project.trim()) { error = `Add the ${categoryLabel.toLowerCase()} and ${projectLabel.toLowerCase()} for ${orderLabel.toLowerCase()} ${index + 1}.`; return; }
-			if (draft.amount !== undefined && draft.advance !== undefined && draft.advance > draft.amount) { error = `Advance cannot be greater than the total for order ${index + 1}.`; return; }
+			if (draft.amount != null && draft.advance != null && draft.advance > draft.amount) { error = `Advance cannot be greater than the total for order ${index + 1}.`; return; }
 		}
 		saving = true;
 		error = '';
@@ -171,7 +182,7 @@
 				<div class="form-grid">
 					<div class="field"><label for={`order-event-${draft.key}`}>{categoryLabel} <RequiredMark/></label><div class="select-control"><select id={`order-event-${draft.key}`} bind:value={draft.event} disabled={loadingEvents} required aria-required="true">{#each eventOptions as option}<option value={option.name}>{option.name}</option>{/each}<option value="Other">+ Other / create new</option></select><span class="select-chevron" aria-hidden="true"><ChevronDown size={15}/></span></div></div>
 					<div class="field"><label for={`order-name-${draft.key}`}>{projectLabel} <RequiredMark/></label><input id={`order-name-${draft.key}`} bind:value={draft.project} required aria-required="true" /></div>
-					{#if draft.event === 'Other'}<div class="field custom-event"><label for={`custom-event-${draft.key}`}>New event type</label><div><input id={`custom-event-${draft.key}`} bind:value={draft.customEvent} placeholder="e.g. Corporate film" /><button type="button" class="secondary" onclick={() => addCustomEvent(draft)}>Add</button></div></div>{/if}
+					{#if draft.event === 'Other'}<div class="field custom-event"><label for={`custom-event-${draft.key}`}>New event type</label><div><input id={`custom-event-${draft.key}`} bind:value={draft.customEvent} placeholder="e.g. Corporate film" /><button type="button" class="secondary" disabled={addingEvent} aria-busy={addingEvent} onclick={() => addCustomEvent(draft)}>{addingEvent ? 'Adding…' : 'Add'}</button></div></div>{/if}
 					<div class="field"><label for={`order-due-${draft.key}`}>{dueLabel}</label><input id={`order-due-${draft.key}`} bind:value={draft.due} type="date" /></div>
 					<div class="field"><label for={`order-amount-${draft.key}`}>Order total (₹) <span>Optional</span></label><input id={`order-amount-${draft.key}`} bind:value={draft.amount} type="number" min="0" step="1" placeholder="Can be set later" /></div>
 					{#if paymentsEnabled}<div class="field"><label for={`order-advance-${draft.key}`}>Advance collected (₹) <span>Optional</span></label><input id={`order-advance-${draft.key}`} bind:value={draft.advance} type="number" min="0" step="1" placeholder="0" /></div>{/if}

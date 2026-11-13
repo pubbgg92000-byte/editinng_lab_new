@@ -121,6 +121,8 @@ import { confirmDanger } from "$lib/stores/confirm";
   }
   function orderSaved(order: Order) {
     orders = [order, ...orders];
+    // Order counts and balance due on the customer rows come from the server.
+    void invalidateAll();
     notifyAction(`${orderLabel} created.`);
   }
   function customerPortalUrl(token: string) {
@@ -145,10 +147,13 @@ import { confirmDanger } from "$lib/stores/confirm";
     directWhatsAppOpen = true;
   }
   async function sendInvoiceInWhatsApp(customer: Customer | null, invoice: Invoice) {
-    if (!customer?.phone) return;
+    if (!customer?.phone || busy === `invoice-${invoice.id}`) return;
     const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    busy = `invoice-${invoice.id}`;
     const response = await safeFetch(`/api/invoices/${invoice.id}/whatsapp`, { method: "POST" });
     const result = await response.json();
+    busy = "";
     if (!response.ok) {
       tab?.close();
       notifyAction(result.error || "Couldn't prepare the WhatsApp message.", "error");
@@ -267,7 +272,7 @@ import { confirmDanger } from "$lib/stores/confirm";
                 {#if whatsappEnabled && customer.phone}<button type="button" class="icon" title="Message on WhatsApp" aria-label={`Message ${customer.business} on WhatsApp`} onclick={() => openCustomerChat(customer)}><WhatsAppIcon size={16} /></button>{/if}
                 <button type="button" class="small" onclick={() => openCustomer(customer)}>View<ChevronRight size={14} aria-hidden="true" /></button>
                 <div class="row-menu">
-                  <button type="button" class="icon" aria-haspopup="menu" aria-expanded={menuFor === customer.id} title="More actions" aria-label={`More actions for ${customer.business}`} onclick={() => (menuFor = menuFor === customer.id ? "" : customer.id)}><MoreHorizontal size={16} /></button>
+                  <button type="button" class="icon" disabled={busy === customer.id} aria-haspopup="menu" aria-expanded={menuFor === customer.id} title="More actions" aria-label={`More actions for ${customer.business}`} onclick={() => (menuFor = menuFor === customer.id ? "" : customer.id)}><MoreHorizontal size={16} /></button>
                   {#if menuFor === customer.id}
                     <div class="menu" class:up={shown.length > 3 && index >= shown.length - 2} role="menu">
                       {#if allowed("orders.edit")}<button type="button" role="menuitem" onclick={() => startOrder(customer)}><Plus size={15} aria-hidden="true" />New {orderLabel.toLowerCase()}</button>{/if}
@@ -291,7 +296,7 @@ import { confirmDanger } from "$lib/stores/confirm";
   {#if !filtered.length}
     <div class="empty">
       <p><strong>{query.trim() ? `No ${customerPlural.toLowerCase()} match “${query.trim()}”.` : showArchived ? `No archived ${customerPlural.toLowerCase()}.` : `No ${customerPlural.toLowerCase()} yet.`}</strong></p>
-      {#if query.trim()}<button type="button" class="secondary" onclick={() => (query = "")}>Clear search</button>{:else if !showArchived}<button type="button" class="secondary" onclick={() => { editingCustomer = null; showNewCustomer = true; }}>New {customerLabel.toLowerCase()}</button>{/if}
+      {#if query.trim()}<button type="button" class="secondary" onclick={() => (query = "")}>Clear search</button>{:else if !showArchived && allowed("customers.edit")}<button type="button" class="secondary" onclick={() => { editingCustomer = null; showNewCustomer = true; }}>New {customerLabel.toLowerCase()}</button>{/if}
     </div>
   {/if}
 </div>
@@ -315,7 +320,7 @@ import { confirmDanger } from "$lib/stores/confirm";
               {#each selectedInvoiceRows as row}
                 <li>
                   <span><strong>{row.invoice.number}</strong><small>{row.order?.project} · {formatDateTime(row.invoice.openedAt)} · {row.invoice.balance > 0 ? `${money(row.invoice.balance)} due` : "Paid"}</small></span>
-                  <button type="button" class="small" disabled={!selectedCustomer.token} onclick={() => sendInvoiceInWhatsApp(selectedCustomer, row.invoice)}><WhatsAppIcon size={14} />Send</button>
+                  <button type="button" class="small" disabled={!selectedCustomer.token || busy === `invoice-${row.invoice.id}`} aria-busy={busy === `invoice-${row.invoice.id}`} onclick={() => sendInvoiceInWhatsApp(selectedCustomer, row.invoice)}><WhatsAppIcon size={14} />{busy === `invoice-${row.invoice.id}` ? "Preparing…" : "Send"}</button>
                 </li>
               {/each}
             </ul>

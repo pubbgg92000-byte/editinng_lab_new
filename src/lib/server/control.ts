@@ -366,10 +366,13 @@ export async function getTenantEntitlements(tenantId: string): Promise<TenantEnt
 
 export async function getTenantPackage(tenantId: string): Promise<{ package: NichePackage; allowed: TenantEntitlements; updateAvailable: boolean }> {
 	const database = await readyControlDatabase();
-	const row = await database.prepare('SELECT package_id, package_version, snapshot FROM control_tenant_packages WHERE tenant_id = ?').bind(tenantId).first<{ package_id: string; package_version: number; snapshot: string }>();
+	const [row, allowed] = await Promise.all([
+		database.prepare('SELECT package_id, package_version, snapshot FROM control_tenant_packages WHERE tenant_id = ?').bind(tenantId).first<{ package_id: string; package_version: number; snapshot: string }>(),
+		getTenantEntitlements(tenantId)
+	]);
 	const snapshot = row ? parseJsonSetting<NichePackage>(row.snapshot, defaultPackage) : defaultPackage;
 	const current = await getPackage(row?.package_id || snapshot.id);
-	return { package: snapshot, allowed: await getTenantEntitlements(tenantId), updateAvailable: current.version > Number(row?.package_version || snapshot.version) };
+	return { package: snapshot, allowed, updateAvailable: current.version > Number(row?.package_version || snapshot.version) };
 }
 
 export async function assignTenantPackage(tenantId: string, packageId: string, allowed: TenantEntitlements, ownerId: string) {

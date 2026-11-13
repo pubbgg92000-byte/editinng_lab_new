@@ -133,6 +133,8 @@
 	$effect(() => { active; rows; page = 1; });
 	const offset = $derived((Math.min(page, Math.max(1, Math.ceil(rows.length / sheetPageSize))) - 1) * sheetPageSize);
 	const pageRows = $derived(rows.slice(offset, offset + sheetPageSize));
+	// Links are stored per original row, so filtered rows must look up their own position (not their place in the filtered list).
+	const linkRowIndex = $derived(new Map(selected.rows.map((row: string[], index: number) => [row, index])));
 
 	function downloadExcel() {
 		downloadBusy = true;
@@ -201,7 +203,7 @@
 <div class="card table-wrap sheet-table">
 	<table class="data-table">
 		<thead><tr>{#each selected.columns as column}<th class:phone-cell={isPhoneColumn(column)}>{column}</th>{/each}</tr></thead>
-		<tbody>{#each pageRows as row, pageIndex}{@const rowIndex = offset + pageIndex}<tr>{#each selected.columns as column, index}<td class:phone-cell={isPhoneColumn(column)}>{#if selected.links?.[rowIndex]?.[index]}<a class="cell-link" href={selected.links[rowIndex][index]} title={`Open related ${column.toLowerCase()}`}><span>{row[index] || '—'}</span><ArrowUpRight size={12}/></a>{:else}<span class:empty-value={!row[index]}>{row[index] || '—'}</span>{/if}</td>{/each}</tr>{:else}<tr><td class="empty-table" colspan={selected.columns.length}>No records match these filters.</td></tr>{/each}</tbody>
+		<tbody>{#each pageRows as row, pageIndex}{@const rowIndex = linkRowIndex.get(row) ?? offset + pageIndex}<tr>{#each selected.columns as column, index}<td class:phone-cell={isPhoneColumn(column)}>{#if selected.links?.[rowIndex]?.[index]}<a class="cell-link" href={selected.links[rowIndex][index]} title={`Open related ${column.toLowerCase()}`}><span>{row[index] || '—'}</span><ArrowUpRight size={12}/></a>{:else}<span class:empty-value={!row[index]}>{row[index] || '—'}</span>{/if}</td>{/each}</tr>{:else}<tr><td class="empty-table" colspan={selected.columns.length}>No records match these filters.</td></tr>{/each}</tbody>
 	</table>
 </div>
 <ListPager total={rows.length} bind:page bind:pageSize={sheetPageSize} />

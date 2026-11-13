@@ -7,7 +7,7 @@ import { safeFetch } from "$lib/http";
   import { sidebarOpen } from "$lib/stores/app";
   import ActionFeedback from "$lib/components/ActionFeedback.svelte";
   import { beginAction, consumeActionFlash, notifyAction } from "$lib/stores/actionFeedback";
-  import { goto } from "$app/navigation";
+  import { afterNavigate, goto } from "$app/navigation";
   import { askConfirm } from "$lib/stores/confirm";
   import type {
     ActivityLog,
@@ -210,6 +210,8 @@ import { safeFetch } from "$lib/http";
   function keyboard(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
+      // Not while a dialog is open: both lock page scrolling, and closing them out of order left the page unable to scroll.
+      if (document.querySelector(".modal-layer, .confirm-backdrop")) return;
       openSearch();
     }
     if (event.key === "Escape") {
@@ -251,8 +253,23 @@ import { safeFetch } from "$lib/http";
       body: JSON.stringify({ editorId: group.editorId }),
     });
     if (response.ok) notificationItems = notificationItems.filter((item) => item.editorId !== group.editorId);
+    notificationsOpen = false;
     await goto(group.path);
   }
+  // Enter in the search box opens the first result.
+  function openFirstResult(event: KeyboardEvent) {
+    if (event.key !== "Enter" || event.isComposing || !searchResults.length) return;
+    event.preventDefault();
+    searchOpen = false;
+    goto(searchResults[0].href);
+  }
+  // Any page change (links, Back/Forward, redirects) closes the mobile menu, search and popovers.
+  afterNavigate(() => {
+    $sidebarOpen = false;
+    searchOpen = false;
+    notificationsOpen = false;
+    profileOpen = false;
+  });
   async function markAllNotificationsRead() {
     const response = await safeFetch("/api/notifications", {
       method: "POST",
@@ -529,6 +546,7 @@ import { safeFetch } from "$lib/http";
         <Search size={18} /><input
           bind:this={searchInput}
           bind:value={query}
+          onkeydown={openFirstResult}
           placeholder={`Search ${labelFor(configuration.profile, "order", true).toLowerCase()}, ${labelFor(configuration.profile, "customer", true).toLowerCase()} and pages`}
         /><button onclick={() => (searchOpen = false)}><X size={16} /></button>
       </div>

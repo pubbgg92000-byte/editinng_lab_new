@@ -55,6 +55,7 @@ import { confirmDanger } from "$lib/stores/confirm";
   let editingTask = $state<Task | null>(null);
   let error = $state("");
   let busy = $state("");
+  let busyStatus = $state("");
   let showArchivedTasks = $state(false);
   // SvelteKit reuses this component when only the order id changes (e.g. clicking another order
   // in the customer card or Cmd-K). Re-sync local copies from fresh route data so actions never
@@ -67,6 +68,7 @@ import { confirmDanger } from "$lib/stores/confirm";
         editingTask = null;
         error = "";
         busy = "";
+        showArchivedTasks = false;
       }
       order = next.order;
       editors = next.editors;
@@ -95,6 +97,18 @@ import { confirmDanger } from "$lib/stores/confirm";
   const staffAssignmentTemplates = $derived(Object.values(messageCatalog?.templates || {}).filter((template) =>
     template.enabled && template.audience === "staff" && template.scenario === "work-assignment"
   ));
+
+  // A hidden or removed default template must not leave the message buttons pointing at an unusable one.
+  $effect(() => {
+    if (customerOrderTemplates.length && !customerOrderTemplates.some((template) => template.id === customerTemplateId)) customerTemplateId = customerOrderTemplates[0].id;
+  });
+  $effect(() => {
+    if (staffAssignmentTemplates.length && !staffAssignmentTemplates.some((template) => template.id === staffTemplateId)) staffTemplateId = staffAssignmentTemplates[0].id;
+  });
+  // The error banner sits at the top of a long page; also raise a notice so a failure is never off-screen.
+  $effect(() => {
+    if (error) notifyAction(error, "error");
+  });
 
   const activeTasks = $derived(order.tasks.filter((task) => !task.archived));
   const approvedTasks = $derived(
@@ -159,9 +173,17 @@ import { confirmDanger } from "$lib/stores/confirm";
     else window.open(url, "_blank", "noopener,noreferrer");
   };
 
+  let refreshRun = 0;
   async function refresh() {
-    const response = await safeFetch(`/api/orders/${order.id}`);
-    if (!response.ok) return;
+    const run = ++refreshRun;
+    const orderId = order.id;
+    const response = await safeFetch(`/api/orders/${orderId}`);
+    // Ignore a slower, older reload or one that belongs to a previously viewed order.
+    if (run !== refreshRun || orderId !== order.id) return;
+    if (!response.ok) {
+      error = "The latest details could not be loaded. Reload the page.";
+      return;
+    }
     const result = await response.json();
     order = result.order;
     activities = result.activity ?? activities;
@@ -196,19 +218,25 @@ import { confirmDanger } from "$lib/stores/confirm";
   ) {
     error = "";
     busy = task.id;
-    const response = await safeFetch(`/api/tasks/${task.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status, progress }),
-    });
-    const result = await response.json();
-    busy = "";
-    if (!response.ok) {
-      error = result.error || "Unable to update task.";
-      return;
+    busyStatus = status;
+    try {
+      const response = await safeFetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status, progress }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        error = result.error || "Unable to update task.";
+        return;
+      }
+      // Stay busy until the reloaded task replaces this row, so it can't be submitted twice.
+      await refresh();
+      notifyAction("Work item updated.");
+    } finally {
+      if (busy === task.id) busy = "";
+      busyStatus = "";
     }
-    await refresh();
-    notifyAction("Work item updated.");
   }
 
   async function archiveTask(task: Task) {
@@ -216,31 +244,41 @@ import { confirmDanger } from "$lib/stores/confirm";
       !await confirmDanger(`Archive “${task.name}”? It will remain in Sheets and exports.`)
     )
       return;
+    error = "";
     busy = task.id;
-    const response = await safeFetch(`/api/tasks/${task.id}`, { method: "DELETE" });
-    busy = "";
-    if (!response.ok) {
-      error = "Unable to archive task.";
-      return;
+    try {
+      const response = await safeFetch(`/api/tasks/${task.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        error = "Unable to archive task.";
+        return;
+      }
+      await refresh();
+      notifyAction("Work item archived.");
+    } finally {
+      if (busy === task.id) busy = "";
     }
-    await refresh();
-    notifyAction("Work item archived.");
   }
 
   async function restoreTask(task: Task) {
+    error = "";
     busy = task.id;
-    const response = await safeFetch(`/api/tasks/${task.id}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "restore" }),
-    });
-    busy = "";
-    if (!response.ok) {
-      error = "Unable to restore task.";
-      return;
+    try {
+      const response = await safeFetch(`/api/tasks/${task.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "restore" }),
+      });
+      if (!response.ok) {
+        error = "Unable to restore task.";
+        return;
+      }
+      await refresh();
+      // The archived view has no way back once its last task is restored.
+      if (!order.tasks.some((item) => item.archived)) showArchivedTasks = false;
+      notifyAction("Work item restored.");
+    } finally {
+      if (busy === task.id) busy = "";
     }
-    await refresh();
-    notifyAction("Work item restored.");
   }
 
   async function openEditorWhatsApp(editor: Editor) {
@@ -373,6 +411,7 @@ import { confirmDanger } from "$lib/stores/confirm";
       }, "Unable to update status.");
       order = result.order;
       notifyAction(`Order status changed to ${statusFor(data.configuration?.profile, status).label}.`);
+      void refresh();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : "Unable to update status.";
       // Keep the select showing the saved status when the update fails.
@@ -389,6 +428,7 @@ import { confirmDanger } from "$lib/stores/confirm";
       )
     )
       return;
+    error = "";
     busy = "archive";
     const response = await safeFetch(`/api/orders/${order.id}`, {
       method: "DELETE",
@@ -626,7 +666,7 @@ import { confirmDanger } from "$lib/stores/confirm";
           </p>
         </div>
         <div class="section-actions">
-          {#if archivedTasks.length}<button
+          {#if archivedTasks.length || showArchivedTasks}<button
               class:active={showArchivedTasks}
               class="secondary"
               onclick={() => (showArchivedTasks = !showArchivedTasks)}
@@ -716,13 +756,13 @@ import { confirmDanger } from "$lib/stores/confirm";
                       class="approve labelled"
                       disabled={busy === task.id}
                       onclick={() => updateTask(task, "Completed", 100)}
-                      ><Check size={14} aria-hidden="true" /> Approve</button
+                      ><Check size={14} aria-hidden="true" /> {busy === task.id && busyStatus === "Completed" ? "Approving…" : "Approve"}</button
                     >
                     <button
                       class="revision labelled"
                       disabled={busy === task.id}
                       onclick={() => updateTask(task, "Revision required")}
-                      ><RotateCcw size={14} aria-hidden="true" /> Request changes</button
+                      ><RotateCcw size={14} aria-hidden="true" /> {busy === task.id && busyStatus === "Revision required" ? "Requesting…" : "Request changes"}</button
                     >
                   {/if}
                   <button
@@ -1000,7 +1040,10 @@ import { confirmDanger } from "$lib/stores/confirm";
 {#if paymentsEnabled || invoicesEnabled}<BillingModal
   bind:open={billingModalOpen}
   {order}
-  onsaved={(savedOrder) => (order = savedOrder)}
+  onsaved={(savedOrder) => {
+    order = savedOrder;
+    refresh();
+  }}
 />{/if}
 {#if invoicesEnabled}<InvoiceModal bind:open={invoiceModalOpen} {order} />{/if}
 {#if deliveryEnabled}<DeliveryModal

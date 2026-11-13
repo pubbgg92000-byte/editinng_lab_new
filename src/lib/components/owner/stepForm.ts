@@ -11,20 +11,22 @@ const messageFor = (input: HTMLInputElement | HTMLSelectElement) => {
 	return input.validationMessage || 'Please check this.';
 };
 
-const errorFor = (input: HTMLElement) => document.getElementById(`${input.getAttribute('name')}-error`.replace(/[^a-zA-Z0-9_-]/g, '_'));
+// Each field points at its own note. Field names can change (custom field rows renumber when one is removed), so notes are not looked up by name.
+let noteCount = 0;
+const errorFor = (input: HTMLElement) => { const id = input.getAttribute('aria-describedby'); return id ? document.getElementById(id) : null; };
 
 export const clearError = (input: HTMLElement) => {
 	input.removeAttribute('aria-invalid');
 	errorFor(input)?.remove();
+	input.removeAttribute('aria-describedby');
 };
 
 const showError = (input: HTMLInputElement | HTMLSelectElement, text: string) => {
 	input.setAttribute('aria-invalid', 'true');
-	const id = `${input.name}-error`.replace(/[^a-zA-Z0-9_-]/g, '_');
-	let note = document.getElementById(id);
+	let note = errorFor(input);
 	if (!note) {
 		note = document.createElement('small');
-		note.id = id;
+		note.id = `step-field-error-${++noteCount}`;
 		note.className = 'step-field-error';
 		note.setAttribute('role', 'alert');
 		const parent = input.parentElement;
@@ -32,7 +34,7 @@ const showError = (input: HTMLInputElement | HTMLSelectElement, text: string) =>
 		anchor.after(note);
 	}
 	note.textContent = text;
-	input.setAttribute('aria-describedby', id);
+	input.setAttribute('aria-describedby', note.id);
 };
 
 /** Validates every field in a step. Marks missed ones; focuses the first when `report` is true. */

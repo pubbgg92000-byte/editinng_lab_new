@@ -1,6 +1,9 @@
 <!-- Chooses final/partial invoice billing mode, discount type, and billable tasks. -->
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import Modal from './Modal.svelte';
+	import { hasCapability } from '$lib/capabilities';
 	import { durationBillableAmount, formatVideoDuration } from '$lib/duration';
 	import { money } from '$lib/data';
 	import { requestJson } from '$lib/http';
@@ -14,21 +17,26 @@
 	let discountValue = $state(0);
 	let saving = $state(false);
 	let error = $state('');
+	// The invoice API rejects duration billing when the workspace doesn't have it, so don't offer the choice.
+	const durationEnabled = $derived(hasCapability(page.data.configuration?.effectiveCapabilities, 'billing.duration'));
 	const durationItems = $derived(order.tasks.filter((task) => !task.archived && Number(task.videoDurationMinutes || 0) > 0 && Number(task.hourlyRate || 0) > 0).map((task) => ({ ...task, amount: durationBillableAmount(task.hourlyRate, task.videoDurationMinutes) })));
 	const durationSubtotal = $derived(durationItems.reduce((sum, task) => sum + task.amount, 0));
 	const subtotal = $derived(billingMode === 'duration' ? durationSubtotal : Number(manualSubtotal || 0));
 	const discountAmount = $derived(discountMode === 'percent' ? Math.round(subtotal * Number(discountValue || 0) / 100 * 100) / 100 : Math.max(0, Number(discountValue || 0)));
 	const total = $derived(Math.max(0, subtotal - discountAmount));
 
+	// Reset only when the dialog opens, so a background reload of the order can't clear what is being typed.
 	$effect(() => {
 		if (!open) return;
-		billingMode = 'manual';
-		manualSubtotal = order.priceSet === false ? undefined : order.price;
-		// Start from the order's exact discount amount; converting it to a 2-decimal % can shift the total by
-		// a few paise and block the final invoice on a fully paid order.
-		discountMode = order.discount > 0 ? 'amount' : 'percent';
-		discountValue = order.discount > 0 ? order.discount : 0;
-		error = '';
+		untrack(() => {
+			billingMode = 'manual';
+			manualSubtotal = order.priceSet === false ? undefined : order.price;
+			// Start from the order's exact discount amount; converting it to a 2-decimal % can shift the total by
+			// a few paise and block the final invoice on a fully paid order.
+			discountMode = order.discount > 0 ? 'amount' : 'percent';
+			discountValue = order.discount > 0 ? order.discount : 0;
+			error = '';
+		});
 	});
 
 	async function createInvoice() {
@@ -40,6 +48,8 @@
 		saving = true; error = '';
 		try {
 			const result = await requestJson<{ invoiceUrl: string }>(`/api/orders/${order.id}/invoice`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'final', billingMode, manualSubtotal: subtotal, discountMode, discountValue }) }, 'Unable to create invoice.');
+			// Close before leaving so the button can't create a second invoice while the invoice page loads.
+			open = false;
 			flashAction('Invoice created successfully.');
 			location.href = result.invoiceUrl;
 		} catch (cause) {
@@ -51,10 +61,10 @@
 </script>
 
 <Modal title="Create final invoice" bind:open wide>
-	<div class="choice-grid">
+	{#if durationEnabled}<div class="choice-grid">
 		<label class:active={billingMode === 'manual'}><input type="radio" bind:group={billingMode} value="manual"/><span><strong>Manual total</strong><small>Use an amount decided by the admin.</small></span></label>
 		<label class:active={billingMode === 'duration'}><input type="radio" bind:group={billingMode} value="duration"/><span><strong>Bill by duration</strong><small>Hourly rate × duration recorded on tasks.</small></span></label>
-	</div>
+	</div>{/if}
 	{#if billingMode === 'manual'}
 		<div class="field section"><label for="invoice-subtotal">Invoice subtotal (₹)</label><input id="invoice-subtotal" type="number" min="0" step="1" bind:value={manualSubtotal} placeholder="Enter the amount to bill"/></div>
 	{:else}

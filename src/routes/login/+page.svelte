@@ -12,6 +12,8 @@
 	import { applyTheme, getLastWorkspaceTheme } from '$lib/theme';
 	let { form } = $props();
 	let loading = $state(false);
+	// Connection or server trouble: keep the form on screen with a message instead of a bare error page.
+	let failed = $state(false);
 	let visible = $state(false);
 	let email = $state(untrack(() => form?.email || ''));
 	let password = $state('');
@@ -26,7 +28,7 @@
 		<h1 id="login-title">Sign in</h1>
 		<p class="lede">Use the email and password your administrator gave you.</p>
 
-		<form method="POST" use:enhance={() => { loading = true; return async ({ update }) => { try { await update(); } finally { loading = false; } }; }}>
+		<form method="POST" use:enhance={() => { loading = true; failed = false; return async ({ result, update }) => { try { if (result.type === 'error') failed = true; else await update(); } finally { loading = false; } }; }}>
 			<div class="login-field">
 				<label for="login-email">Email <RequiredMark /></label>
 				<div class="input-box"><AtSign size={16} aria-hidden="true" /><input id="login-email" name="email" type="email" bind:value={email} autocomplete="username" placeholder="name@example.com" required aria-required="true" aria-describedby="email-hint" /></div>
@@ -40,7 +42,7 @@
 					<button type="button" class="toggle" onclick={() => (visible = !visible)} aria-pressed={visible} title={visible ? 'Hide password' : 'Show password'}>{#if visible}<EyeOff size={17} />{:else}<Eye size={17} />{/if}<span class="sr-only">{visible ? 'Hide password' : 'Show password'}</span></button>
 				</div>
 			</div>
-			{#if form?.rateLimited}<p class="error" role="alert">Too many attempts. Please wait 15 minutes and try again.</p>{:else if form?.invalid}<p class="error" role="alert">That email and password don't match an active account. Check for typos and try again.</p>{/if}
+			{#if failed}<p class="error" role="alert">We couldn't sign you in right now. Check your connection and try again.</p>{:else if form?.rateLimited}<p class="error" role="alert">Too many attempts. Please wait 15 minutes and try again.</p>{:else if form?.invalid}<p class="error" role="alert">That email and password don't match an active account. Check for typos and try again.</p>{/if}
 			<button class="submit" disabled={loading} aria-busy={loading}>{#if loading}<LoaderCircle class="spinner" size={17} />Signing in…{:else}Sign in<ArrowRight size={16} aria-hidden="true" />{/if}</button>
 		</form>
 		<p class="support">Forgot your password? Ask your administrator to reset it.</p>

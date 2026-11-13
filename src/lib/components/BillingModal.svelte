@@ -1,5 +1,6 @@
 <!-- Sets or adjusts an order subtotal and discount before invoice generation. -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Modal from './Modal.svelte';
 	import { money } from '$lib/data';
 	import { requestJson } from '$lib/http';
@@ -18,13 +19,14 @@
 	const finalTotal = $derived(Math.max(0, Number(total || 0) - discountAmount));
 	const balance = $derived(Math.max(0, finalTotal - order.paid));
 
+	// Reset only when the dialog opens, so a background reload of the order can't clear what is being typed.
 	$effect(() => {
-		if (open) {
+		if (open) untrack(() => {
 			total = order.priceSet === false ? undefined : order.price;
 			discountPercent = order.price > 0 ? Number(((order.discount || 0) / order.price * 100).toFixed(2)) : 0;
 			initialPercent = discountPercent;
 			error = '';
-		}
+		});
 	});
 
 	async function save() {

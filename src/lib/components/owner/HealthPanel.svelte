@@ -133,8 +133,8 @@
 		<div class="verdict" style:--status={STATUS[overall]}>
 			{#if overall === 'good'}<CheckCircle2 size={22} />{:else if overall === 'critical'}<CircleAlert size={22} />{:else if overall === 'warning'}<TriangleAlert size={22} />{:else}<CirclePause size={22} />{/if}
 			<div>
-				<h2>{!snapshot ? 'Checking…' : overall === 'good' ? 'All systems working' : `${problems} thing${problems === 1 ? '' : 's'} need${problems === 1 ? 's' : ''} attention`}</h2>
-				<p>{snapshot ? `Last check ${new Date(snapshot.checkedAt).toLocaleTimeString()} · updates every 15 seconds` : 'Running the first check'}</p>
+				<h2>{!snapshot ? (failed && !loading ? 'Check failed' : 'Checking…') : overall === 'good' ? 'All systems working' : `${problems} thing${problems === 1 ? '' : 's'} need${problems === 1 ? 's' : ''} attention`}</h2>
+				<p>{snapshot ? `Last check ${new Date(snapshot.checkedAt).toLocaleTimeString()} · updates every 15 seconds` : failed && !loading ? 'Trying again every 15 seconds' : 'Running the first check'}</p>
 			</div>
 		</div>
 		<div class="head-actions">
@@ -142,7 +142,7 @@
 			<a class="ghost" href="https://vercel.com/dashboard" target="_blank" rel="noopener noreferrer"><ExternalLink size={15} />Visitors (Vercel Analytics)</a>
 		</div>
 	</header>
-	{#if failed}<p class="banner" role="alert"><TriangleAlert size={16} />{failed} Showing the last good result.</p>{/if}
+	{#if failed}<p class="banner" role="alert"><TriangleAlert size={16} />{failed}{snapshot ? ' Showing the last good result.' : ''}</p>{/if}
 
 	{#if snapshot}
 		<div class="views" role="tablist" aria-label="Health views">

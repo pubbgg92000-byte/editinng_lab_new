@@ -53,7 +53,7 @@ export const PATCH = async ({ params, request, cookies, locals }) => {
 		return json({ error: cause instanceof Error ? cause.message : 'Unable to update task.' }, { status: 400 });
 	}
 	if (!task) return json({ error: 'Task not found or not assigned to this editor.' }, { status: 404 });
-	await flushSheetSync(database, locals.tenant!);
+	await flushSheetSync(database, locals.tenant!).catch(() => {});
 	return json({ ok: true, task });
 };
 
@@ -61,7 +61,7 @@ export const DELETE = async ({ params, cookies, locals }) => {
 	if (!await verifySession(cookies.get('studioflow_session'))) return json({ error: 'Unauthorized' }, { status: 401 });
 	const database = await readyDatabase(locals.tenant);
 	if (!await archiveTask(database, params.id)) return json({ error: 'Task not found' }, { status: 404 });
-	await flushSheetSync(database, locals.tenant!);
+	await flushSheetSync(database, locals.tenant!).catch(() => {});
 	return json({ ok: true });
 };
 
@@ -72,6 +72,6 @@ export const POST = async ({ params, request, cookies, locals }) => {
 	const database = await readyDatabase(locals.tenant);
 	const task = await restoreTask(database, params.id);
 	if (!task) return json({ error: 'Archived task not found' }, { status: 404 });
-	await flushSheetSync(database, locals.tenant!);
+	await flushSheetSync(database, locals.tenant!).catch(() => {});
 	return json({ ok: true, task });
 };

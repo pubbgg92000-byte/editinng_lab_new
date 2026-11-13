@@ -2,7 +2,8 @@
 <script lang="ts">
   import { safeFetch } from "$lib/http";
   import { untrack } from "svelte";
-  import { beforeNavigate, goto } from "$app/navigation";
+  import { beforeNavigate, goto, invalidateAll } from "$app/navigation";
+  import { navigating } from "$app/state";
   import { askConfirm, confirmDanger } from "$lib/stores/confirm";
   import { notifyAction } from "$lib/stores/actionFeedback";
   import PageHeader from "$lib/components/PageHeader.svelte";
@@ -35,10 +36,13 @@
   // Unsaved-change tracking: the save bar appears only when something changed, and leaving warns first.
   let savedSnapshot = $state(untrack(() => JSON.stringify(data.settings)));
   const dirty = $derived(JSON.stringify(settings) !== savedSnapshot);
+  // WhatsApp messages have their own Save button; leaving with unsaved edits there warns too.
+  let whatsappSnapshot = $state(untrack(() => JSON.stringify(data.configuration.moduleConfiguration["communications.whatsapp"])));
+  const whatsappDirty = $derived(whatsappEnabled && JSON.stringify(configuration.moduleConfiguration["communications.whatsapp"]) !== whatsappSnapshot);
   // Ask before leaving with unsaved changes (in-app dialog; navigation resumes only if confirmed).
   let leaveConfirmed = false;
   beforeNavigate((navigation) => {
-    if (!dirty || leaveConfirmed || navigation.type === "leave") return;
+    if ((!dirty && !whatsappDirty) || leaveConfirmed || navigation.type === "leave") return;
     navigation.cancel();
     const target = navigation.to?.url;
     askConfirm({ title: "Unsaved changes", message: "You have unsaved settings. Leave without saving?", confirmLabel: "Leave without saving", danger: true }).then((leave) => {
@@ -79,9 +83,14 @@
       });
       const result = await response.json();
       if (!response.ok) { notifyAction(result.error || "Couldn't save settings.", "error"); return; }
+      // Show what the server stored (it tidies prefixes and phone numbers).
+      if (result.settings) settings = { ...result.settings };
       savedSnapshot = JSON.stringify(settings);
       applyTheme({ palette: settings.themePalette, mode: settings.themeDefaultMode }, true, data.themeScope);
       notifyAction("Settings saved.");
+      // Refresh the sidebar, page title and profile menu, which show the business name and logo.
+      // (Skipped while another page is loading: a refresh at that moment would cancel the page change.)
+      if (!navigating.to) await invalidateAll();
     } finally {
       saving = false;
     }
@@ -100,7 +109,8 @@
         notifyAction(result.error || "Couldn't save the WhatsApp messages.", "error");
         return;
       }
-      configuration.moduleConfiguration["communications.whatsapp"] = result.catalog;
+      if (result.catalog) configuration.moduleConfiguration["communications.whatsapp"] = result.catalog;
+      whatsappSnapshot = JSON.stringify(configuration.moduleConfiguration["communications.whatsapp"]);
       notifyAction("WhatsApp messages saved.");
     } finally {
       whatsappSaving = false;
@@ -124,6 +134,8 @@
       const status = await safeFetch("/api/sheets/sync").then((statusResponse) => statusResponse.json());
       syncPending = status.pending || 0;
       syncError = status.lastError || result.error || "";
+      // Refresh the sidebar's Google Sheets status and the search list (an import adds orders).
+      if (!navigating.to) await invalidateAll();
     } finally {
       runningAction = null;
     }
@@ -156,7 +168,7 @@
     <ChevronDown size={17}/>
   </summary>
   <div class="whatsapp-settings-body">
-    <ModuleConfigurationPanel {configuration} whatsappOnly onmessage={(value) => notifyAction(value, /fail|unable|couldn|error|remove|required/i.test(value) ? "error" : "success")}/>
+    <ModuleConfigurationPanel {configuration} whatsappOnly onmessage={(value) => notifyAction(value, /fail|unable|couldn|error|required/i.test(value) ? "error" : "success")}/>
     <button class="primary whatsapp-save" disabled={whatsappSaving} aria-busy={whatsappSaving} onclick={saveWhatsappTemplates}>{whatsappSaving ? "Saving…" : "Save WhatsApp messages"}</button>
   </div>
 </details>{/if}
@@ -277,7 +289,7 @@
         : "Import past orders from the Sheet"}</button
     >
     {/if}
-    {#if exportEnabled}<a class="secondary export" href="/api/export" data-sveltekit-reload
+    {#if exportEnabled}<a class="secondary export" href="/api/export" download data-sveltekit-reload
       ><Download size={13} /> Download Excel file</a
     >{/if}
   </section>{/if}
@@ -375,7 +387,7 @@
     </div>
   </div>
 {/if}
-<svelte:window onbeforeunload={(event) => { if (dirty) event.preventDefault(); }} />
+<svelte:window onbeforeunload={(event) => { if (dirty || whatsappDirty) event.preventDefault(); }} />
 
 <style>
   @keyframes notice-in{from{opacity:0;transform:translateY(-7px) scale(.98)}}

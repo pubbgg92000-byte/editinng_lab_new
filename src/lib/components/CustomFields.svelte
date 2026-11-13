@@ -29,7 +29,7 @@
 				{:else if field.type === 'checkbox'}
 					<label class="check"><input id={`custom-${entity}-${field.key}`} type="checkbox" checked={values[field.key] === true} onchange={(event) => values[field.key] = event.currentTarget.checked}/><span>Yes</span></label>
 				{:else}
-					<input id={`custom-${entity}-${field.key}`} type={field.type === 'datetime' ? 'datetime-local' : field.type} bind:value={values[field.key]} required={field.required} aria-required={field.required}/>
+					<input id={`custom-${entity}-${field.key}`} type={field.type === 'datetime' ? 'datetime-local' : field.type} bind:value={() => values[field.key] as string | number | null | undefined, (value) => (values[field.key] = value ?? '')} required={field.required} aria-required={field.required}/>
 				{/if}
 			</div>
 		{/each}

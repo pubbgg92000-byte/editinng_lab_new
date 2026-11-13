@@ -39,6 +39,12 @@ export const POST = async ({ params, request, cookies, locals }) => {
 			task.videoDurationMinutes = minutes;
 		}
 	}
+	// A missing order or team member would otherwise fail on the foreign key as an unexplained 500.
+	if (!await database.prepare('SELECT id FROM orders WHERE id = ?').bind(params.id).first()) return json({ error: 'Order not found.' }, { status: 404 });
+	const editorIds = [...new Set(tasks.map((task) => String(task.editorId || '')).filter(Boolean))];
+	for (const editorId of editorIds) {
+		if (!await database.prepare('SELECT id FROM editors WHERE id = ?').bind(editorId).first()) return json({ error: 'That team member no longer exists. Choose another.' }, { status: 400 });
+	}
 	const created = [];
 	for (const task of tasks) created.push(await createTask(database, params.id, task));
 	await flushSheetSync(database, locals.tenant!);

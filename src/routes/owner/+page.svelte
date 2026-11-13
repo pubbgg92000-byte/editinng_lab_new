@@ -1,6 +1,6 @@
 <!-- Master owner panel: onboard clients, protect credentials, test connections, and reset demos. -->
 <script lang="ts">
-		import { enhance } from '$app/forms';
+		import { applyAction, enhance } from '$app/forms';
 		import { askConfirm, type ConfirmOptions } from '$lib/stores/confirm';
 		import { untrack } from 'svelte';
 		import type { SubmitFunction } from '@sveltejs/kit';
@@ -46,19 +46,22 @@
 		const connectionLabel = (status: string) => status === 'healthy' ? 'Services online' : status === 'error' ? 'Connection issue' : 'Not checked';
 		const snapshotDate = (value: string) => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(value));
 		// confirmFor returns confirmation options (or null) for the submitted form; declining cancels the request.
-		const track = (key: string, close?: () => void, confirmFor?: (form: FormData) => ConfirmOptions | string | null): SubmitFunction => async ({ formData, cancel }) => {
+		// resetForm stays off for forms filled from saved data: a native reset blanks those fields and they are not refilled.
+		const track = (key: string, close?: () => void, confirmFor?: (form: FormData) => ConfirmOptions | string | null, resetForm = false): SubmitFunction => async ({ formData, cancel }) => {
 			const question = confirmFor?.(formData);
 			if (question && !(await askConfirm(typeof question === 'string' ? { message: question, confirmLabel: 'Yes, continue', danger: true } : question))) { cancel(); return; }
 			pendingAction = key;
 			return async ({ result, update }) => {
 				try {
-					await update();
+					// A dropped connection or server crash would replace the whole page with the error page; show a notice instead.
+					if (result.type === 'error') await applyAction({ type: 'failure', status: 500, data: { action: key, error: 'Could not finish the request. Check your connection and try again.' } });
+					else await update({ reset: resetForm });
 					noticeVisible = true;
 					if (noticeTimer) clearTimeout(noticeTimer);
 					noticeTimer = setTimeout(() => noticeVisible = false, result.type === 'success' ? 4500 : 9000);
 					if (result.type === 'success') close?.();
 				}
-				finally { pendingAction = ''; }
+				finally { if (pendingAction === key) pendingAction = ''; }
 			};
 		};
 		const closeCredentials = () => { credentialTenant = ''; showClientPassword = false; };
@@ -118,7 +121,7 @@
 					<button disabled={pendingAction !== ''}>{pendingAction === `capabilities:${tenant.id}` ? 'Applying…' : 'Apply package and allowances'}</button>
 				</form>
 			</details>
-			<details class="modules-editor">
+			{#if tenantConfigurations[tenant.id]}<details class="modules-editor">
 				<summary>Customer portal, worker portal and WhatsApp templates</summary>
 				<form method="POST" action="?/modules" use:enhance={track(`modules:${tenant.id}`)}>
 					<input type="hidden" name="tenantId" value={tenant.id}/>
@@ -126,7 +129,7 @@
 					<input type="hidden" name="moduleConfiguration" value={JSON.stringify(tenantConfigurations[tenant.id].moduleConfiguration)}/>
 					<button class="module-save" disabled={pendingAction !== ''} aria-busy={pendingAction === `modules:${tenant.id}`}>{#if pendingAction === `modules:${tenant.id}`}<RefreshCw class="loading-icon" size={13}/>Saving…{:else}<ShieldCheck size={13}/>Save portal and messaging setup{/if}</button>
 				</form>
-			</details>
+			</details>{/if}
 			{#if tenant.snapshots?.length}<details class="rollback-editor">
 				<summary>Configuration history and rollback</summary>
 				<div class="snapshot-list">
@@ -181,7 +184,7 @@
 					</div>
 				</div>
 			{/if}
-			{#if tenant.isDemo}<details class="danger"><summary>Reset demo data</summary><form method="POST" action="?/reset" class="inline-form" use:enhance={track(`reset:${tenant.id}`, undefined, () => ({ title: 'Reset demo data?', message: `This deletes ALL data in ${tenant.studioName} and reloads sample data. This can't be undone.`, confirmLabel: 'Reset demo data', danger: true, requireText: tenant.slug }))}><input type="hidden" name="tenantId" value={tenant.id}/><label>Confirmation <RequiredMark/><input name="confirmation" placeholder="Type RESET" required aria-required="true"/></label><button disabled={pendingAction !== ''} aria-busy={pendingAction === `reset:${tenant.id}`}>{#if pendingAction === `reset:${tenant.id}`}<RefreshCw class="loading-icon" size={13}/>{/if}{pendingAction === `reset:${tenant.id}` ? 'Resetting…' : 'Reset database and Sheet'}</button></form></details>{/if}
+			{#if tenant.isDemo}<details class="danger"><summary>Reset demo data</summary><form method="POST" action="?/reset" class="inline-form" use:enhance={track(`reset:${tenant.id}`, undefined, () => ({ title: 'Reset demo data?', message: `This deletes ALL data in ${tenant.studioName} and reloads sample data. This can't be undone.`, confirmLabel: 'Reset demo data', danger: true, requireText: tenant.slug }), true)}><input type="hidden" name="tenantId" value={tenant.id}/><label>Confirmation <RequiredMark/><input name="confirmation" placeholder="Type RESET" required aria-required="true"/></label><button disabled={pendingAction !== ''} aria-busy={pendingAction === `reset:${tenant.id}`}>{#if pendingAction === `reset:${tenant.id}`}<RefreshCw class="loading-icon" size={13}/>{/if}{pendingAction === `reset:${tenant.id}` ? 'Resetting…' : 'Reset database and Sheet'}</button></form></details>{/if}
 			</div>
 		</details>
 		{/each}

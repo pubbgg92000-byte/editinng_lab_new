@@ -1,7 +1,10 @@
 <!-- Records an advance/payment and optionally opens its generated receipt. -->
 <script lang="ts">
 	import { CheckCircle2, IndianRupee } from '@lucide/svelte';
+	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import Modal from './Modal.svelte';
+	import { hasCapability } from '$lib/capabilities';
 	import { money } from '$lib/data';
 	import { requestJson } from '$lib/http';
 	import { flashAction, notifyAction } from '$lib/stores/actionFeedback';
@@ -11,7 +14,11 @@
 	let { open = $bindable(), orderId, balance = 0, orderStatus = 'Received', onsaved = () => {} }: { open: boolean; orderId: string; balance?: number; orderStatus?: OrderStatus; onsaved?: () => void } = $props();
 	let amount = $state(0); const todayIst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()); let paidAt = $state(todayIst()); let method = $state('UPI'); let note = $state('');
 	let kind = $state<'advance' | 'payment'>('advance'); let generateInvoice = $state(allowed('invoices.manage')); let error = $state(''); let saving = $state(false); let saved = $state(false);
-	$effect(() => { if (open) { kind = orderStatus === 'Received' ? 'advance' : 'payment'; amount = 0; note = ''; error = ''; saved = false; paidAt = todayIst(); } });
+	// Receipts need the invoices module as well as the role permission; without it the receipt request always fails.
+	const canInvoice = $derived(hasCapability(page.data.configuration?.effectiveCapabilities, 'billing.invoices') && allowed('invoices.manage'));
+	// Reset only when the dialog opens. The order reloads right after a payment is saved, and tracking
+	// its status here would wipe the "saved" state and the receipt error while the dialog is still open.
+	$effect(() => { if (open) untrack(() => { kind = orderStatus === 'Received' ? 'advance' : 'payment'; amount = 0; note = ''; error = ''; saved = false; paidAt = todayIst(); }); });
 
 	async function save() {
 		if (!(amount > 0)) { error = 'Enter a payment amount.'; return; }
@@ -21,7 +28,7 @@
 			const result = await requestJson<{ payment: Payment }>(`/api/orders/${orderId}/payments`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ amount, paidAt, method, note, kind }) }, 'Unable to record payment.');
 			saved = true;
 			onsaved();
-			if (generateInvoice) {
+			if (generateInvoice && canInvoice) {
 				try {
 					const invoiceResult = await requestJson<{ invoice: Invoice }>(`/api/orders/${orderId}/invoice`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, paymentId: result.payment.id }) }, 'The payment was saved, but the receipt could not be generated.');
 					open = false;
@@ -51,7 +58,7 @@
 		<div class="field"><label for="payment-method">Method</label><select id="payment-method" bind:value={method}><option>UPI</option><option>Cash</option><option>Bank transfer</option><option>Card</option><option>Other</option></select></div>
 		<div class="field full"><label for="payment-note">Reference / note</label><input id="payment-note" bind:value={note} placeholder="Transaction ID or optional note"/></div>
 	</div>
-	{#if allowed('invoices.manage')}<label class="invoice-option"><input type="checkbox" bind:checked={generateInvoice}/> Generate a professional receipt after saving</label>{/if}
+	{#if canInvoice}<label class="invoice-option"><input type="checkbox" bind:checked={generateInvoice}/> Generate a professional receipt after saving</label>{/if}
 	{#if saved}<p class="saved"><CheckCircle2 size={15}/> Payment is safely recorded.</p>{/if}{#if error}<p class="error">{error}</p>{/if}
 	{#snippet footer()}<button type="button" class="secondary" disabled={saving} onclick={() => open = false}>{saved ? 'Close' : 'Cancel'}</button>{#if !saved}<button type="button" class="primary" disabled={saving} aria-busy={saving} onclick={save}>{saving ? 'Saving…' : 'Record payment'}</button>{/if}{/snippet}
 </Modal>

@@ -1,6 +1,7 @@
 <!-- Global confirmation dialog driven by askConfirm() in $lib/stores/confirm. -->
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { afterNavigate } from '$app/navigation';
 	import { confirmState } from '$lib/stores/confirm';
 
 	let typed = $state('');
@@ -13,7 +14,7 @@
 	$effect(() => {
 		if (current.open) {
 			typed = '';
-			previousFocus = document.activeElement;
+			if (!dialog?.contains(document.activeElement)) previousFocus = document.activeElement;
 			tick().then(() => (dialog?.querySelector<HTMLElement>('input, .confirm-btn') ?? dialog)?.focus());
 		}
 	});
@@ -26,6 +27,10 @@
 		resolve(result);
 		if (previousFocus instanceof HTMLElement) previousFocus.focus();
 	}
+
+	// The page that asked is gone after a page change (e.g. browser Back): answer "No" instead of
+	// leaving the question on top of a different page with its caller waiting forever.
+	afterNavigate((navigation) => { if (navigation.type !== 'enter') close(false); });
 
 	function onKeydown(event: KeyboardEvent) {
 		if (!current.open) return;
